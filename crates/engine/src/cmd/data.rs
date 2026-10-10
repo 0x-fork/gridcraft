@@ -691,8 +691,11 @@ fn remove_duplicates(s: &mut Session, p: &Json) -> Result<Json> {
         let Some(sh) = cx.wb.sheet(sheet) else { return Ok(()) };
         let mut seen = std::collections::HashSet::new();
         let mut keep: Vec<u32> = Vec::new();
+        // Cells are compared by the text they show, as in Excel: the same date in two formats
+        // isn't a duplicate, while 1.01 and 1.02 shown as 1.0 are.
+        let shown = |c: CellRef| crate::display::format(&sh.value(c), cx.wb.styles.get(sh.style_id(c)).num_fmt.as_str(), &cx.wb).text;
         for row in start..=r.end.row {
-            let key: Vec<String> = cols.iter().map(|c| sh.value(CellRef::new(row, *c)).display().to_lowercase()).collect();
+            let key: Vec<String> = cols.iter().map(|c| shown(CellRef::new(row, *c)).to_lowercase()).collect();
             if seen.insert(key) {
                 keep.push(row);
             } else {

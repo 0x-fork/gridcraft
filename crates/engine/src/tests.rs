@@ -616,6 +616,18 @@ fn case_sensitive_sort_puts_lowercase_first() {
 }
 
 #[test]
+fn remove_duplicates_compares_shown_text() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Date", "Price"], ["2006-03-08", 1.01], ["2006-03-08", 1.02]]})).unwrap();
+    s.execute("home.numberFormat", json!({"range": "A3", "code": "mmm d, yyyy"})).unwrap();
+    s.execute("home.numberFormat", json!({"range": "B2:B3", "code": "0.0"})).unwrap();
+    let r = s.execute("data.removeDuplicates", json!({"range": "A1:A3", "header": true})).unwrap();
+    assert_eq!(r["removed"], 0);
+    let r = s.execute("data.removeDuplicates", json!({"range": "B1:B3", "header": true})).unwrap();
+    assert_eq!(r["removed"], 1);
+}
+
+#[test]
 fn formatting_and_styles() {
     let mut s = s();
     s.execute("selection.set", json!({"range": "A1:B2"})).unwrap();
