@@ -502,6 +502,27 @@ fn let_lambda() {
 }
 
 #[test]
+fn functions_given_by_name() {
+    let mut t = T::new();
+    for (i, (k, v)) in [("a", 1), ("b", -2), ("a", 3)].iter().enumerate() {
+        t.set(&format!("A{}", i + 1), k);
+        t.set(&format!("B{}", i + 1), &v.to_string());
+    }
+    t.set("D1", "=BYROW(B1:B3,SUM)");
+    assert_eq!(t.num("D2"), -2.0);
+    t.set("E1", "=MAP(B1:B3,ABS)");
+    assert_eq!(t.num("E2"), 2.0);
+    t.set("F1", "=REDUCE(0,B1:B3,SUM)");
+    assert_eq!(t.num("F1"), 2.0);
+    t.set("G1", "=GROUPBY(A1:A3,B1:B3,SUM,0,0)");
+    assert_eq!(t.get("G1"), Value::from("a"));
+    assert_eq!(t.num("H1"), 4.0);
+    // A LET variable of that name is still the variable.
+    t.set("J1", "=LET(ABS,LAMBDA(x,x*10),SUM(MAP(B1:B3,ABS)))");
+    assert_eq!(t.num("J1"), 20.0);
+}
+
+#[test]
 fn names_and_sheets() {
     let mut t = T::new();
     t.wb.names.push(gridcraft_model::DefinedName { name: "Rate".into(), scope: None, formula: "0.5".into(), comment: String::new(), hidden: false });
