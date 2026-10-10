@@ -1153,6 +1153,19 @@ fn ods_import_never_reuses_source_as_save_target() {
 }
 
 #[test]
+fn validation_formulas_are_relative_and_see_the_new_value() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "B1", "values": [[1], [100]]})).unwrap();
+    s.execute("data.validation", json!({"range": "A1:A2", "type": "custom", "formula1": "=A1>10"})).unwrap();
+    s.execute("data.validation", json!({"range": "C1:C2", "type": "whole", "operator": "lessOrEqual", "formula1": "=B1"})).unwrap();
+    let ok = |s: &mut Session, cell: &str, input: &str| s.execute("data.validate", json!({"cell": cell, "input": input})).unwrap()["ok"] == true;
+    assert!(ok(&mut s, "A1", "20"));
+    assert!(!ok(&mut s, "A2", "5"));
+    assert!(ok(&mut s, "C2", "50"));
+    assert!(!ok(&mut s, "C1", "50"));
+}
+
+#[test]
 fn samples_build() {
     for (name, _) in crate::sample::SAMPLES {
         let wb = crate::sample::build(name).unwrap_or_else(|| panic!("sample {name}"));
