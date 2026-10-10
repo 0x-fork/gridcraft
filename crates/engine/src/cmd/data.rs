@@ -248,7 +248,7 @@ fn do_sort(s: &mut Session, r: RangeRef, header: bool, keys: Vec<SortKey>, by_co
                     let pos = |v: &Value| v.as_text().and_then(|t| list.iter().position(|x| x.eq_ignore_ascii_case(t))).unwrap_or(usize::MAX);
                     pos(va).cmp(&pos(vb))
                 } else if case && va.is_text() && vb.is_text() {
-                    va.as_text().unwrap_or("").cmp(vb.as_text().unwrap_or(""))
+                    sort_compare(va, vb).then_with(|| case_order(va.as_text().unwrap_or(""), vb.as_text().unwrap_or("")))
                 } else {
                     sort_compare(va, vb)
                 };
@@ -651,6 +651,12 @@ pub fn filter_values(wb: &Workbook, sheet: usize, col: u32) -> Vec<(String, bool
         seen.entry((sort_key(&v), t)).or_insert(on);
     }
     seen.into_iter().map(|((_, t), on)| (t, on)).collect()
+}
+
+/// Case-sensitive tie-break for text that is equal ignoring case: as in Excel, lowercase sorts
+/// before uppercase at the first letter that differs in case.
+fn case_order(a: &str, b: &str) -> Ordering {
+    a.chars().zip(b.chars()).find(|(x, y)| x != y).map_or(Ordering::Equal, |(x, y)| y.is_lowercase().cmp(&x.is_lowercase()))
 }
 
 fn sort_key(v: &Value) -> (u8, i64, String) {
