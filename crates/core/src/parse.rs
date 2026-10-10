@@ -291,6 +291,8 @@ pub fn current_year() -> i64 {
 fn parse_datetime(t: &str, sys: DateSystem) -> Option<(f64, Option<&'static str>)> {
     if let Some((tf, secs, ampm)) = parse_time(t) {
         let f = match (secs, ampm) {
+            // 24 hours or more: elapsed hours, so 25:00 shows as 25:00:00, not 1:00.
+            _ if tf >= 1.0 => "[h]:mm:ss",
             (false, false) => "h:mm",
             (true, false) => "h:mm:ss",
             (false, true) => "h:mm AM/PM",
@@ -363,6 +365,8 @@ mod tests {
         assert_eq!(p("12:00 AM").value, Value::Number(0.0));
         assert_eq!(p("10/7/2026 18:00").value, Value::Number(46302.75));
         assert_eq!(p("25:00").value, Value::Number(25.0 / 24.0));
+        assert_eq!(p("25:00").format, Some("[h]:mm:ss"));
+        assert_eq!(p("23:59").format, Some("h:mm"));
     }
 
     #[test]
