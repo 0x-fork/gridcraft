@@ -144,7 +144,8 @@ impl CfCache {
                         CfOperator::GreaterOrEqual => compare(&v, &av) != std::cmp::Ordering::Less,
                         CfOperator::LessOrEqual => compare(&v, &av) != std::cmp::Ordering::Greater,
                     };
-                    (ok && !v.is_empty()).then_some(style.as_ref())
+                    // As in Excel, a blank cell compares as 0 (or ""), and an error never matches.
+                    (ok && !v.is_error()).then_some(style.as_ref())
                 }
                 CfRule::Expression { formula, style } => {
                     gridcraft_calc::evaluate(wb, sheet, c, &relative(formula, first, c)).to_bool().unwrap_or(false).then_some(style.as_ref())
@@ -154,7 +155,7 @@ impl CfCache {
                 CfRule::BeginsWith { text: t, style } => text.to_lowercase().starts_with(&t.to_lowercase()).then_some(style.as_ref()),
                 CfRule::EndsWith { text: t, style } => text.to_lowercase().ends_with(&t.to_lowercase()).then_some(style.as_ref()),
                 CfRule::Blanks { style } => (v.is_empty() || text.trim().is_empty()).then_some(style.as_ref()),
-                CfRule::NoBlanks { style } => (!v.is_empty()).then_some(style.as_ref()),
+                CfRule::NoBlanks { style } => (!v.is_empty() && !text.trim().is_empty()).then_some(style.as_ref()),
                 CfRule::Errors { style } => v.is_error().then_some(style.as_ref()),
                 CfRule::NoErrors { style } => (!v.is_error()).then_some(style.as_ref()),
                 CfRule::Duplicate { style } => {
@@ -366,5 +367,29 @@ mod tests {
         let both = look("A3").unwrap();
         assert_eq!(both.fill, only_fill.fill);
         assert!(!both.borders.top.is_none());
+    }
+
+    #[test]
+    fn cell_value_rules_on_blanks_and_errors() {
+        let mut s = crate::Session::new();
+        s.new_workbook();
+        s.execute("range.setValues", json!({"range": "A1", "values": [[3, "=NA()"], [null, 7], ["=NA()", null], [" ", null], [7, null]]})).unwrap();
+        let rule = |range: &str, r: serde_json::Value| json!({"range": range, "rule": r});
+        s.execute("home.conditionalFormat", rule("A1:A5", json!({"type": "cellIs", "operator": "less", "value": "5", "preset": "lightRedFill"})))
+            .unwrap();
+        s.execute("home.conditionalFormat", rule("A1:A5", json!({"type": "noBlanks", "preset": "redBorder"}))).unwrap();
+        s.execute("home.conditionalFormat", rule("B1:B2", json!({"type": "cellIs", "operator": "greater", "value": "5", "preset": "lightRedFill"})))
+            .unwrap();
+        let d = s.doc().unwrap();
+        let mut cache = CfCache::new();
+        let mut look = |a: &str| cache.look(&d.wb, 0, CellRef::parse(a).unwrap()).and_then(|l| l.style);
+        let fill = |st: Option<Style>| st.is_some_and(|st| st.fill.pattern == PatternType::Solid);
+        let border = |st: Option<Style>| st.is_some_and(|st| !st.borders.top.is_none());
+        // Less than 5: 3 and the blank cell (as 0), not #N/A.
+        assert_eq!([look("A1"), look("A2"), look("A3"), look("A5")].map(fill), [true, true, false, false]);
+        // Greater than 5: 7, not #N/A.
+        assert_eq!([look("B1"), look("B2")].map(fill), [false, true]);
+        // No blanks: neither the empty cell nor the one holding a space.
+        assert_eq!([look("A1"), look("A2"), look("A4")].map(border), [true, false, false]);
     }
 }
