@@ -281,16 +281,51 @@ impl CfCache {
             };
             if let Some(st) = matched_style {
                 any = true;
-                out.style = Some(match out.style.take() {
-                    None => st.clone(),
-                    Some(prev) => prev,
-                });
+                // Every matching rule applies; where two set the same part, the rule with the
+                // higher priority (seen first) wins.
+                match &mut out.style {
+                    None => out.style = Some(st.clone()),
+                    Some(prev) => layer_under(prev, st),
+                }
                 if cf.stop_if_true {
                     break;
                 }
             }
         }
         any.then_some(out)
+    }
+}
+
+/// Adds the parts `lower` sets that `style` leaves unset (differential styles: default parts
+/// are unset).
+fn layer_under(style: &mut Style, lower: &Style) {
+    if style.fill.pattern == PatternType::None {
+        style.fill = lower.fill;
+    }
+    if style.font.color == Color::Auto {
+        style.font.color = lower.font.color;
+    }
+    style.font.bold |= lower.font.bold;
+    style.font.italic |= lower.font.italic;
+    style.font.strike |= lower.font.strike;
+    if style.font.underline == Underline::None {
+        style.font.underline = lower.font.underline;
+    }
+    let b = &mut style.borders;
+    for (dst, src) in [
+        (&mut b.left, lower.borders.left),
+        (&mut b.right, lower.borders.right),
+        (&mut b.top, lower.borders.top),
+        (&mut b.bottom, lower.borders.bottom),
+        (&mut b.diag_down, lower.borders.diag_down),
+        (&mut b.diag_up, lower.borders.diag_up),
+    ] {
+        if dst.is_none() {
+            *dst = src;
+        }
+    }
+    if style.num_fmt.as_str() == "General" {
+        style.num_fmt = lower.num_fmt.clone();
     }
 }
 
@@ -304,5 +339,32 @@ fn relative(f: &str, first: CellRef, c: CellRef) -> String {
             gridcraft_formula::print(&gridcraft_formula::adjust::shift_relative(e, c.row as i64 - first.row as i64, c.col as i64 - first.col as i64))
         }
         Err(_) => f.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn every_matching_rule_applies() {
+        let mut s = crate::Session::new();
+        s.new_workbook();
+        s.execute("range.setValues", json!({"range": "A1", "values": [[200], [400], [510]]})).unwrap();
+        let rule = |op: &str, value: &str, preset: &str| json!({"range": "A1:A3", "rule": {"type": "cellIs", "operator": op, "value": value, "preset": preset}});
+        s.execute("home.conditionalFormat", rule("greaterThan", "300", "lightRedFill")).unwrap();
+        s.execute("home.conditionalFormat", rule("greaterThan", "500", "redBorder")).unwrap();
+        let d = s.doc().unwrap();
+        let mut cache = CfCache::new();
+        let mut look = |a: &str| cache.look(&d.wb, 0, CellRef::parse(a).unwrap()).and_then(|l| l.style);
+        assert!(look("A1").is_none());
+        let only_fill = look("A2").unwrap();
+        assert_eq!(only_fill.fill.pattern, PatternType::Solid);
+        assert!(only_fill.borders.top.is_none());
+        let both = look("A3").unwrap();
+        assert_eq!(both.fill, only_fill.fill);
+        assert!(!both.borders.top.is_none());
     }
 }
