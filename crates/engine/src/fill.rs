@@ -373,6 +373,7 @@ pub fn series(cx: &mut Ctx, sheet: usize, r: RangeRef, rows: bool, kind: &str, s
         let style = sh.style_id(first_cell);
         let mut v = start;
         for i in 1..len {
+            let prev = v;
             v = match kind {
                 "growth" => v * step,
                 "date" => {
@@ -396,8 +397,9 @@ pub fn series(cx: &mut Ctx, sheet: usize, r: RangeRef, rows: bool, kind: &str, s
                 }
                 _ => v + step,
             };
+            // The stop value bounds the series in the direction it runs (a growth by 0.5 falls).
             if let Some(s) = stop
-                && ((step >= 0.0 && v > s) || (step < 0.0 && v < s))
+                && ((v >= prev && v > s) || (v < prev && v < s))
             {
                 break;
             }
@@ -634,5 +636,17 @@ mod tests {
             fill(serde_json::json!([["Product 1"], ["On backorder"]]), "E1:E2", "E1:E6"),
             ["Product 1", "On backorder", "Product 2", "On backorder", "Product 3", "On backorder"]
         );
+    }
+
+    #[test]
+    fn falling_growth_series_stops_at_its_stop_value() {
+        let mut s = crate::Session::new();
+        s.new_workbook();
+        s.execute("cell.set", serde_json::json!({"cell": "A1", "input": "5"})).unwrap();
+        s.execute("edit.fillSeries", serde_json::json!({"range": "A1:A6", "type": "growth", "step": 0.5, "stop": 1})).unwrap();
+        let d = s.doc().unwrap();
+        let sh = d.wb.active().unwrap();
+        let growth: Vec<String> = (1..6).map(|r| crate::display::cell_text(&d.wb, sh, CellRef::new(r, 0))).collect();
+        assert_eq!(growth, ["2.5", "1.25", "", "", ""]);
     }
 }
