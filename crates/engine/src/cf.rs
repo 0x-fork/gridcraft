@@ -392,4 +392,18 @@ mod tests {
         // No blanks: neither the empty cell nor the one holding a space.
         assert_eq!([look("A1"), look("A2"), look("A4")].map(border), [true, false, false]);
     }
+
+    #[test]
+    fn cell_value_operator_names() {
+        let mut s = crate::Session::new();
+        s.new_workbook();
+        s.execute("range.setValues", json!({"range": "A1", "values": [[3], [7]]})).unwrap();
+        let rule = |op: &str| json!({"range": "A1:A2", "rule": {"type": "cellIs", "operator": op, "value": "5", "preset": "lightRedFill"}});
+        s.execute("home.conditionalFormat", rule("lessThan")).unwrap();
+        assert!(s.execute("home.conditionalFormat", rule("smaller")).is_err());
+        let d = s.doc().unwrap();
+        let mut cache = CfCache::new();
+        let mut look = |a: &str| cache.look(&d.wb, 0, CellRef::parse(a).unwrap()).and_then(|l| l.style).is_some();
+        assert_eq!([look("A1"), look("A2")], [true, false]);
+    }
 }
