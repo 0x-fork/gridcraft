@@ -550,6 +550,17 @@ fn text_function() {
 }
 
 #[test]
+fn long_operator_chains() {
+    let mut t = T::new();
+    t.set("A1", "1");
+    // 1,000 additions: a formula of 3,000 characters, well within Excel's 8,192.
+    t.set("B1", &format!("={}", vec!["A1"; 1000].join("+")));
+    assert_eq!(t.num("B1"), 1000.0);
+    t.set("B2", &format!("=5{}", "+1-1".repeat(600)));
+    assert_eq!(t.num("B2"), 5.0);
+}
+
+#[test]
 fn subtotal_skips_hidden() {
     let mut t = T::new();
     t.set("A1", "1");
