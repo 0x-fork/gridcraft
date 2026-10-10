@@ -262,6 +262,32 @@ fn references_functions() {
 }
 
 #[test]
+fn relative_names() {
+    let mut t = T::new();
+    // As files store them: relative to A1. `Left` is the cell to the left, `Above3` the three
+    // cells above, `Mixed` column A of the same row.
+    for (name, formula) in [("Left", "Sheet1!XFD1"), ("Above3", "Sheet1!A1048574:A1048576"), ("Mixed", "Sheet1!$A1")] {
+        t.wb.names.push(gridcraft_model::DefinedName {
+            name: name.into(),
+            scope: None,
+            formula: formula.into(),
+            comment: String::new(),
+            hidden: false,
+        });
+    }
+    t.calc.rebuild(&t.wb);
+    for r in 1..=5 {
+        t.set(&format!("A{r}"), &(r * 10).to_string());
+    }
+    t.set("B2", "=Left");
+    assert_eq!(t.num("B2"), 20.0);
+    t.set("B4", "=Left+Mixed");
+    assert_eq!(t.num("B4"), 80.0);
+    t.set("A6", "=SUM(Above3)");
+    assert_eq!(t.num("A6"), 120.0);
+}
+
+#[test]
 fn spills() {
     let mut t = T::new();
     t.set("A1", "=SEQUENCE(3)");

@@ -249,6 +249,13 @@ impl<'h> Evaluator<'h> {
             let scope = def.scope.unwrap_or(self.sheet);
             return match gridcraft_formula::parse(&text) {
                 Ok(expr) => {
+                    // Relative references in a name are relative to A1: used here, they move by
+                    // this cell's offset from it.
+                    let expr = if gridcraft_formula::adjust::has_relative_refs(&expr) {
+                        gridcraft_formula::adjust::shift_relative_wrapping(expr, self.at.row as i64, self.at.col as i64)
+                    } else {
+                        expr
+                    };
                     let saved = self.sheet;
                     // Unqualified references in a name refer to the scope sheet.
                     self.sheet = scope;
