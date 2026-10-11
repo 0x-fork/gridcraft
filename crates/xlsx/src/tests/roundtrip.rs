@@ -976,6 +976,7 @@ fn table_newline_column_and_backslash_name_survive() {
         first_col: false,
         last_col: false,
         filter_button: true,
+        filter: vec![],
     });
     s.cells.set(at("D1"), Cell::formula(Formula::new("COUNTA(\\_Prime.1[Name])")));
     let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
