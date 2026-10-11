@@ -184,6 +184,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Gridlines" => "Gitternetzlinien",
         "Headings" => "Überschriften",
         "Zoom" => "Zoom",
+        "Forecast\nSheet" => "Prognose-\nblatt",
         "Add footer" => "Fußzeile hinzufügen",
         "Add header" => "Kopfzeile hinzufügen",
         "Click to add data" => "Klicken, um Daten hinzuzufügen",
