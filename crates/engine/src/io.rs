@@ -339,8 +339,12 @@ pub fn read_file(path: &str) -> Result<Vec<u8>> {
 pub fn write_file(path: &str, bytes: &[u8]) -> Result<()> {
     // Write to a temporary file, then rename: a crash never leaves a half-written workbook.
     let tmp = format!("{path}.sctmp");
-    std::fs::write(&tmp, bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    std::fs::rename(&tmp, path).map_err(|e| EngineError::Other(format!("{path}: {e}")))
+    std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path)).map_err(|e| {
+        // A write or rename that fails (full disk, the workbook locked by another app) leaves
+        // no temporary file beside the user's workbook.
+        let _ = std::fs::remove_file(&tmp);
+        EngineError::Other(format!("{path}: {e}"))
+    })
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -432,6 +436,26 @@ mod tests {
         assert!(has_macros("book.xltm"), "a macro-enabled template keeps the VBA project");
         assert!(!has_macros("book.xltx"), "a macro-free template never carries a VBA project");
         assert!(wb.vba_project.is_some(), "the open workbook keeps its macros");
+    }
+
+    /// A save that can't be put in place (here a folder already has the workbook's name, as
+    /// with a file another app holds locked) fails without leaving `<name>.sctmp` behind.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn failed_save_leaves_no_temporary_file() {
+        let dir = std::env::temp_dir().join(format!("gridcraft-write-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let blocked = dir.join("Book1.xlsx");
+        std::fs::create_dir(&blocked).unwrap();
+        assert!(write_file(blocked.to_str().unwrap(), b"workbook").is_err());
+        assert!(!dir.join("Book1.xlsx.sctmp").exists(), "the temporary file is removed");
+        // An ordinary save still works and leaves only the workbook.
+        let ok = dir.join("Book2.xlsx");
+        write_file(ok.to_str().unwrap(), b"workbook").unwrap();
+        assert_eq!(std::fs::read(&ok).unwrap(), b"workbook");
+        assert!(!dir.join("Book2.xlsx.sctmp").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A minimal compound (CFB/OLE2) file — FAT in sector 0, directory in sector 1 — holding a
