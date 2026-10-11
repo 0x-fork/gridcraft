@@ -114,3 +114,41 @@ fn dragging_a_header_boundary_still_resizes_normally() {
         assert!(!h.state().session.journal.iter().any(|(id, _)| id.starts_with("home.autofit")));
     }
 }
+
+#[test]
+fn dragging_a_boundary_inside_a_multi_area_selection_resizes_every_selected_line() {
+    // Issue #341: Ctrl-selected rows/columns resize together; unselected lines keep their size.
+    for (rows, selection, dragged, changed) in [
+        (false, "A:A,C:C", 2, [true, false, true, false]),
+        (false, "A:A,C:C", 0, [true, false, true, false]),
+        (false, "A:A,C:D", 3, [true, false, true, true]),
+        (false, "A:A,C:C", 1, [false, true, false, false]),
+        (false, "A:A,C3", 0, [true, false, false, false]),
+        (true, "1:1,3:3", 2, [true, false, true, false]),
+        (true, "1:1,3:3", 0, [true, false, true, false]),
+        (true, "1:1,3:4", 3, [true, false, true, true]),
+        (true, "1:1,3:3", 1, [false, true, false, false]),
+        (true, "1:1,C3", 0, [true, false, false, false]),
+    ] {
+        let mut h = harness(selection);
+        let before = sizes(&h, rows);
+        let (start, zoom) = edge(&h, rows, dragged);
+        let delta = if rows { vec2(0.0, 30.0) } else { vec2(30.0, 0.0) };
+        button(&mut h, start, true);
+        h.input_mut().events.push(Event::PointerMoved(start + delta / 2.0));
+        h.step();
+        h.input_mut().events.push(Event::PointerMoved(start + delta));
+        h.step();
+        button(&mut h, start + delta, false);
+        h.run_steps(2);
+        let after = sizes(&h, rows);
+        let expected = (before[dragged as usize] + 30.0 / zoom).round();
+        for (index, changed) in changed.iter().enumerate() {
+            let want = if *changed { expected } else { before[index] };
+            assert_eq!(after[index], want, "selection {selection}, dragged {dragged}, line {index}");
+        }
+        assert_eq!(h.state().session.active().unwrap().undo.len(), 1, "selection {selection}: one undo step");
+        h.state_mut().session.execute("edit.undo", json!({})).unwrap();
+        assert_eq!(sizes(&h, rows), before, "selection {selection}: undo restores every line");
+    }
+}

@@ -1359,8 +1359,10 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                 let w = (orig + (p.x - start) / geo.z).max(0.0);
                 app.toast =
                     Some((format!("Width: {:.2} ({} pixels)", gridcraft_engine::cmd::format::points_to_chars(w as f64), w.round()), crate::now_ms()));
+                // Inside a selection of whole columns, every selected column takes the new width
+                // (Ctrl-selected areas included); otherwise only the dragged one.
                 let cols = if sel.ranges.iter().any(|r| r.is_full_cols() && col >= r.start.col && col <= r.end.col) {
-                    sel.current().a1()
+                    sel.ranges.iter().filter(|r| r.is_full_cols()).map(|r| r.a1()).collect::<Vec<_>>().join(",")
                 } else {
                     RangeRef::cols(col, col).a1()
                 };
@@ -1371,7 +1373,12 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                 let h = (orig + (p.y - start) / geo.z).max(0.0);
                 app.toast = Some((format!("Height: {:.2} ({} pixels)", h * 0.75, h.round()), crate::now_ms()));
                 let rows = if sel.ranges.iter().any(|r| r.is_full_rows() && row >= r.start.row && row <= r.end.row) {
-                    format!("{}:{}", sel.current().start.row + 1, sel.current().end.row + 1)
+                    sel.ranges
+                        .iter()
+                        .filter(|r| r.is_full_rows())
+                        .map(|r| format!("{}:{}", r.start.row + 1, r.end.row + 1))
+                        .collect::<Vec<_>>()
+                        .join(",")
                 } else {
                     format!("{}:{}", row + 1, row + 1)
                 };

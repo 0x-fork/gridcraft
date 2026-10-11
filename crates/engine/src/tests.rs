@@ -1633,3 +1633,27 @@ fn notes_comments_and_links_survive_a_json_save() {
     assert_eq!(after.hyperlinks, before.hyperlinks);
     assert_eq!(after.cells, before.cells);
 }
+
+#[test]
+fn row_height_and_column_width_take_a_list_of_areas() {
+    // Issue #341: header drags on a multi-area selection size every selected line in one step.
+    let mut s = s();
+    s.execute("home.columnWidth", json!({"cols": "B:B,D:E", "width": 120})).unwrap();
+    s.execute("home.rowHeight", json!({"rows": "2:2,4:5", "height": 40})).unwrap();
+    let widths: Vec<f32> = (0..6).map(|c| s.doc().unwrap().wb.active().unwrap().col_width(c)).collect();
+    let heights: Vec<f32> = (0..6).map(|r| s.doc().unwrap().wb.active().unwrap().row_height(r)).collect();
+    for c in [1, 3, 4] {
+        assert_eq!(widths[c], 120.0, "column {c}");
+    }
+    for c in [0, 2, 5] {
+        assert_ne!(widths[c], 120.0, "column {c}");
+    }
+    for r in [1, 3, 4] {
+        assert_eq!(heights[r], 40.0, "row {r}");
+    }
+    for r in [0, 2, 5] {
+        assert_ne!(heights[r], 40.0, "row {r}");
+    }
+    assert!(s.execute("home.columnWidth", json!({"cols": "B:B,nope", "width": 50})).is_err());
+    assert_eq!(s.doc().unwrap().wb.active().unwrap().col_width(1), 120.0, "a bad list changes nothing");
+}
