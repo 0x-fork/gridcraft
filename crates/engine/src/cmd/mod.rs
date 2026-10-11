@@ -149,7 +149,42 @@ pub fn command_specs() -> &'static [CommandSpec] {
 }
 
 pub fn find_command(id: &str) -> Option<&'static CommandSpec> {
-    command_specs().iter().find(|c| c.id == id)
+    if let Some(spec) = command_specs().iter().find(|c| c.id == id) {
+        return Some(spec);
+    }
+    // Commands registered by UI integration tests (pending keytips go live
+    // the moment their command lands, with no table edit).
+    test_commands().iter().find(|c| c.id == id).copied()
+}
+
+static TEST_COMMANDS: std::sync::Mutex<Vec<&'static CommandSpec>> = std::sync::Mutex::new(Vec::new());
+
+/// Test-only: register an extra command so UI integration tests can prove a pending
+/// keytip becomes live the moment its command lands (see crates/ui-egui/tests/keytips.rs).
+/// Not part of the public API; harmless no-op for production callers who never call it.
+#[doc(hidden)]
+pub fn register_test_command(id: &'static str, run: Run) {
+    // Leaked intentionally: test commands live for the whole process.
+    let spec: &'static CommandSpec = Box::leak(Box::new(CommandSpec {
+        id,
+        label: id,
+        menu: &[],
+        shortcut: None,
+        params: "",
+        enabled: |_| Ok(()),
+        run,
+        journal: true,
+        undoable: false,
+    }));
+    test_commands().push(spec);
+}
+
+fn test_commands() -> std::sync::MutexGuard<'static, Vec<&'static CommandSpec>> {
+    #[allow(clippy::unwrap_used)] // a poisoned test registry has no meaningful recovery
+    match TEST_COMMANDS.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
 }
 
 // ---------------------------------------------------------------- param helpers
