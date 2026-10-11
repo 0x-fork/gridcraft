@@ -125,6 +125,21 @@ impl Tokens {
     }
 }
 
+/// Resolves an [`egui::ThemePreference`] against the context's system theme.
+pub fn resolve_theme(pref: egui::ThemePreference, ctx: &egui::Context) -> egui::Theme {
+    match pref {
+        egui::ThemePreference::System => {
+            if ctx.input(|i| i.raw.system_theme == Some(egui::Theme::Dark)) {
+                egui::Theme::Dark
+            } else {
+                egui::Theme::Light
+            }
+        }
+        egui::ThemePreference::Light => egui::Theme::Light,
+        egui::ThemePreference::Dark => egui::Theme::Dark,
+    }
+}
+
 pub const UI: &str = "ui";
 pub const UI_BOLD: &str = "ui-bold";
 pub const CELL: &str = "cell";

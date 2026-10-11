@@ -38,6 +38,7 @@ pub fn start() {
                         let _ = session.execute("file.new", serde_json::json!({"sample": "sales"}));
                     }
                     let mut app = SheetApp::new(session, services(inbox.clone(), cc.egui_ctx.clone()));
+                    app.ui.system_theme = true;
                     // Follow the browser's language, except a CJK one: the web build has no system
                     // CJK fonts (none are bundled), so that interface would render as tofu.
                     let browser = gridcraft_ui_egui::i18n::Language::system();
