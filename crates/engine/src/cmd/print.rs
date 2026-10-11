@@ -58,7 +58,7 @@ pub fn specs() -> Vec<CommandSpec> {
 }
 
 /// Sheet geometry is in pixels at 96 dpi; PDF units are points.
-const PX_TO_PT: f32 = 0.75;
+pub(crate) const PX_TO_PT: f32 = 0.75;
 /// Most pages one export produces.
 pub const MAX_PAGES: usize = 2000;
 /// Cells in a page block above which only stored cells are visited (not every grid position).
@@ -110,13 +110,15 @@ pub struct SheetLayout {
     /// Heading sizes in sheet pixels (0 when headings are off).
     pub heading_w: f32,
     pub heading_h: f32,
+    /// Manual page breaks apply (they don't when the sheet is fitted to pages).
+    pub manual_breaks: bool,
 }
 
 impl SheetLayout {
     fn k(&self) -> f32 {
         PX_TO_PT * self.scale
     }
-    fn avail(&self) -> (f32, f32) {
+    pub(crate) fn avail(&self) -> (f32, f32) {
         let [l, r, t, b, ..] = self.margins;
         ((self.page_w - l - r).max(36.0), (self.page_h - t - b).max(36.0))
     }
@@ -271,30 +273,11 @@ pub fn layout_sheet(wb: &Workbook, si: usize, opts: &PrintOptions, range_overrid
         title_cols,
         heading_w,
         heading_h,
+        manual_breaks: fit.is_none(),
     };
     let paginate = |lay: &mut SheetLayout, manual: bool| {
-        let k = lay.k();
-        let (aw, ah) = lay.avail();
-        let (aw, ah) = (aw / k, ah / k);
-        let rb: Vec<u32> = if manual { st.row_breaks.clone() } else { vec![] };
-        let cb: Vec<u32> = if manual { st.col_breaks.clone() } else { vec![] };
-        let (mut rb, mut cb) = (rb, cb);
-        rb.sort_unstable();
-        cb.sort_unstable();
-        let title_h = |start: u32| -> f32 {
-            match title_rows {
-                Some((a, b)) if a < start => (a..=b.min(start - 1)).map(|r| sh.row_height(r)).sum(),
-                _ => 0.0,
-            }
-        };
-        let title_w = |start: u32| -> f32 {
-            match title_cols {
-                Some((a, b)) if a < start => (a..=b.min(start - 1)).map(|c| sh.col_width(c)).sum(),
-                _ => 0.0,
-            }
-        };
-        lay.row_bands = bands(area.start.row, area.end.row, |r| sh.row_height(r), |start| (ah - heading_h - title_h(start)).max(1.0), &rb, MAX_PAGES);
-        lay.col_bands = bands(area.start.col, area.end.col, |c| sh.col_width(c), |start| (aw - heading_w - title_w(start)).max(1.0), &cb, MAX_PAGES);
+        lay.manual_breaks = manual;
+        (lay.row_bands, lay.col_bands) = split_bands(sh, lay, MAX_PAGES);
         lay.pages.clear();
         'outer: for ci in 0..lay.col_bands.len() {
             for ri in 0..lay.row_bands.len() {
@@ -330,6 +313,37 @@ pub fn layout_sheet(wb: &Workbook, si: usize, opts: &PrintOptions, range_overrid
         None => paginate(&mut lay, true),
     }
     Some(lay)
+}
+
+/// Splits a layout's area into row and column bands that fit its pages (at most `cap` of each),
+/// honouring manual breaks (when `lay.manual_breaks`), print headings and repeated titles. The
+/// one pagination rule shared by printing, PDF export, Page Break Preview and Page Layout view.
+pub(crate) fn split_bands(sh: &Sheet, lay: &SheetLayout, cap: usize) -> (Vec<(u32, u32)>, Vec<(u32, u32)>) {
+    let k = lay.k();
+    let (aw, ah) = lay.avail();
+    let (aw, ah) = (aw / k, ah / k);
+    let st = &lay.settings;
+    let mut rb: Vec<u32> = if lay.manual_breaks { st.row_breaks.clone() } else { vec![] };
+    let mut cb: Vec<u32> = if lay.manual_breaks { st.col_breaks.clone() } else { vec![] };
+    rb.sort_unstable();
+    cb.sort_unstable();
+    let (title_rows, title_cols) = (lay.title_rows, lay.title_cols);
+    let title_h = |start: u32| -> f32 {
+        match title_rows {
+            Some((a, b)) if a < start => (a..=b.min(start - 1)).map(|r| sh.row_height(r)).sum(),
+            _ => 0.0,
+        }
+    };
+    let title_w = |start: u32| -> f32 {
+        match title_cols {
+            Some((a, b)) if a < start => (a..=b.min(start - 1)).map(|c| sh.col_width(c)).sum(),
+            _ => 0.0,
+        }
+    };
+    let area = lay.area;
+    let rows = bands(area.start.row, area.end.row, |r| sh.row_height(r), |start| (ah - lay.heading_h - title_h(start)).max(1.0), &rb, cap);
+    let cols = bands(area.start.col, area.end.col, |c| sh.col_width(c), |start| (aw - lay.heading_w - title_w(start)).max(1.0), &cb, cap);
+    (rows, cols)
 }
 
 /// Lays out every sheet a print command covers.
@@ -373,6 +387,132 @@ pub struct HfContext {
     pub path: String,
     pub date: String,
     pub time: String,
+}
+
+/// Today's date and the current time as headers and footers show them (`&D`, `&T`).
+pub fn hf_date_time(wb: &Workbook) -> (String, String) {
+    let now = gridcraft_calc::now_serial();
+    let date = crate::display::format(&Value::Number(now.floor()), "m/d/yyyy", wb).text;
+    let time = crate::display::format(&Value::Number(now), "h:mm AM/PM", wb).text;
+    (date, time)
+}
+
+/// Header/footer codes and the field names the Page Layout view shows for them while editing.
+pub const HF_FIELDS: [(char, &str); 8] = [
+    ('P', "&[Page]"),
+    ('N', "&[Pages]"),
+    ('D', "&[Date]"),
+    ('T', "&[Time]"),
+    ('Z', "&[Path]"),
+    ('F', "&[File]"),
+    ('A', "&[Tab]"),
+    ('G', "&[Picture]"),
+];
+
+/// Splits a header/footer string into its raw left, centre and right sections (codes kept).
+/// Text before the first `&L`/`&C`/`&R` belongs to the centre, as when printing.
+pub fn split_header_footer(spec: &str) -> [String; 3] {
+    let mut out: [String; 3] = Default::default();
+    let mut cur = 1usize;
+    let chars: Vec<char> = spec.chars().take(10_000).collect();
+    let mut i = 0;
+    while let Some(&c) = chars.get(i) {
+        let next = chars.get(i + 1).copied();
+        let sec = cur.min(2);
+        match (c, next) {
+            ('&', Some('L' | 'l')) => cur = 0,
+            ('&', Some('C' | 'c')) => cur = 1,
+            ('&', Some('R' | 'r')) => cur = 2,
+            ('&', Some('"')) => {
+                // &"Font,Style" is kept whole.
+                let end = chars[i + 2..].iter().position(|ch| *ch == '"').map_or(chars.len(), |p| i + 3 + p);
+                out[sec].extend(&chars[i..end.min(chars.len())]);
+                i = end;
+                continue;
+            }
+            ('&', Some(n)) => {
+                out[sec].push('&');
+                out[sec].push(n);
+            }
+            ('&', None) => {}
+            (ch, _) => {
+                out[sec].push(ch);
+                i += 1;
+                continue;
+            }
+        }
+        i += 2;
+    }
+    out
+}
+
+/// Joins raw left, centre and right sections into one header/footer string.
+pub fn join_header_footer(sections: &[String; 3]) -> String {
+    let mut s = String::new();
+    for (code, text) in ["&L", "&C", "&R"].iter().zip(sections) {
+        if !text.is_empty() {
+            s.push_str(code);
+            s.push_str(text);
+        }
+    }
+    s
+}
+
+/// A raw section as the user edits it: `&P` shows as `&[Page]`, `&N` as `&[Pages]`, and so on.
+pub fn codes_to_fields(raw: &str) -> String {
+    let mut out = String::new();
+    let mut it = raw.chars().peekable();
+    while let Some(c) = it.next() {
+        if c != '&' {
+            out.push(c);
+            continue;
+        }
+        // A dangling `&` at the end is dropped (printing ignores it too).
+        if let Some(n) = it.next() {
+            match HF_FIELDS.iter().find(|(code, _)| *code == n.to_ascii_uppercase()) {
+                Some((_, field)) => out.push_str(field),
+                None => {
+                    out.push('&');
+                    out.push(n);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The inverse of [`codes_to_fields`]: field names become codes again; a dangling `&` at the end
+/// becomes a literal ampersand so it can't swallow the next section's code.
+pub fn fields_to_codes(text: &str) -> String {
+    let chars: Vec<char> = text.chars().take(10_000).collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while let Some(&c) = chars.get(i) {
+        if c != '&' {
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if chars.get(i + 1) == Some(&'&') {
+            out.push_str("&&");
+            i += 2;
+            continue;
+        }
+        let rest: String = chars[i..].iter().take(12).collect();
+        if let Some((code, field)) = HF_FIELDS.iter().find(|(_, f)| rest.starts_with(f)) {
+            out.push('&');
+            out.push(*code);
+            i += field.chars().count();
+            continue;
+        }
+        if i + 1 == chars.len() {
+            out.push_str("&&");
+        } else {
+            out.push('&');
+        }
+        i += 1;
+    }
+    out
 }
 
 /// One header/footer section: its text and whether `&B` made it bold.
@@ -1286,9 +1426,7 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
     doc.info.title = if wb.props.title.is_empty() { file.to_string() } else { wb.props.title.clone() };
     doc.info.author = wb.props.author.clone();
     let total: usize = layouts.iter().map(|l| l.pages.len()).sum();
-    let now = gridcraft_calc::now_serial();
-    let date = crate::display::format(&Value::Number(now.floor()), "m/d/yyyy", wb).text;
-    let time = crate::display::format(&Value::Number(now), "h:mm AM/PM", wb).text;
+    let (date, time) = hf_date_time(wb);
     let mut page_no = 0usize;
     for lay in layouts {
         let Some(sh) = wb.sheet(lay.sheet) else { continue };
@@ -1585,6 +1723,63 @@ mod tests {
     }
     fn contains(hay: &[u8], needle: &str) -> bool {
         hay.windows(needle.len()).any(|w| w == needle.as_bytes())
+    }
+
+    #[test]
+    fn header_sections_split_join_and_field_names() {
+        let spec = "&L&\"Arial,Bold\"Sales &&Co&CPage &P of &N&R&D";
+        let parts = split_header_footer(spec);
+        assert_eq!(parts, ["&\"Arial,Bold\"Sales &&Co".to_string(), "Page &P of &N".into(), "&D".into()]);
+        assert_eq!(join_header_footer(&parts), spec);
+        // Text before any section code is the centre section, as when printing.
+        assert_eq!(split_header_footer("Report"), [String::new(), "Report".into(), String::new()]);
+        assert_eq!(codes_to_fields("Page &P of &N, &A (&F) &&"), "Page &[Page] of &[Pages], &[Tab] (&[File]) &&");
+        assert_eq!(fields_to_codes("Page &[Page] of &[Pages], &[Tab] (&[File]) &&"), "Page &P of &N, &A (&F) &&");
+        // A dangling ampersand stays literal instead of eating the next section's code.
+        assert_eq!(fields_to_codes("R&"), "R&&");
+        let joined = join_header_footer(&[fields_to_codes("R&"), "x".into(), String::new()]);
+        assert_eq!(split_header_footer(&joined)[0], "R&&");
+        let cx = HfContext { page: 2, pages: 5, sheet: "Data".into(), ..Default::default() };
+        let out = expand_header_footer(&join_header_footer(&[String::new(), fields_to_codes("&[Page] / &[Pages]"), fields_to_codes("&[Tab]")]), &cx);
+        assert_eq!((out[1].text.as_str(), out[2].text.as_str()), ("2 / 5", "Data"));
+        // Hostile input never panics.
+        for t in ["&", "&\"", "&\"unterminated", "&&&", "&[Pag", "\u{1F600}&[Page]"] {
+            let _ = join_header_footer(&split_header_footer(t));
+            let _ = fields_to_codes(&codes_to_fields(t));
+        }
+    }
+
+    #[test]
+    fn header_footer_section_edits_are_undoable_and_views_are_per_sheet() {
+        let mut s = s();
+        s.execute("pageLayout.headerFooter", json!({"header": "&LLeft&RRight"})).unwrap();
+        let r = s.execute("pageLayout.headerFooter", json!({"part": "header", "section": "center", "text": "Page &[Page] of &[Pages]"})).unwrap();
+        assert_eq!(r["header"], "&LLeft&CPage &P of &N&RRight");
+        s.execute("pageLayout.headerFooter", json!({"part": "footer", "section": "right", "text": "&[Date]"})).unwrap();
+        assert_eq!(s.doc().unwrap().wb.sheet(0).unwrap().print.footer, "&R&D");
+        s.execute("edit.undo", json!({})).unwrap();
+        s.execute("edit.undo", json!({})).unwrap();
+        assert_eq!(s.doc().unwrap().wb.sheet(0).unwrap().print.header, "&LLeft&RRight");
+        assert!(s.execute("pageLayout.headerFooter", json!({"part": "middle", "text": "x"})).is_err());
+        assert!(s.execute("pageLayout.headerFooter", json!({"section": "top"})).is_err());
+        let long = "x".repeat(1000);
+        s.execute("pageLayout.headerFooter", json!({"part": "header", "section": "left", "text": long})).unwrap();
+        assert!(s.doc().unwrap().wb.sheet(0).unwrap().print.header.chars().count() <= 255);
+        // The view is per sheet and doesn't dirty a clean workbook.
+        let mut fresh = Session::new();
+        fresh.new_workbook();
+        fresh.execute("home.insertSheet", json!({})).unwrap();
+        fresh.doc_mut().unwrap().saved = fresh.doc().unwrap().wb.clone();
+        fresh.execute("view.pageLayout", json!({"sheet": 0})).unwrap();
+        let wb = &fresh.doc().unwrap().wb;
+        assert_eq!((wb.sheet(0).unwrap().view, wb.sheet(1).unwrap().view), (SheetViewMode::PageLayout, SheetViewMode::Normal));
+        assert!(!fresh.doc().unwrap().is_dirty(), "switching views is not an edit");
+        s.execute("view.pageLayout", json!({"sheet": 0})).unwrap();
+        s.execute("view.normal", json!({"sheet": 0})).unwrap();
+        assert_eq!(s.doc().unwrap().wb.sheet(0).unwrap().view, SheetViewMode::Normal);
+        assert_eq!(s.execute("view.ruler", json!({"on": false})).unwrap()["on"], false);
+        assert!(s.hide_ruler);
+        assert_eq!(s.execute("view.ruler", json!({})).unwrap()["on"], true);
     }
 
     #[test]
