@@ -119,7 +119,8 @@ fn insert_slicer(s: &mut Session, p: &Json) -> Result<Json> {
         }
     };
     let table = t.name.clone();
-    let at = cell_param(p, "at").unwrap_or_else(|| CellRef::new(t.range.start.row, t.range.end.col.saturating_add(2)));
+    let at = cell_param(s, p, "at")?
+        .unwrap_or_else(|| CellRef::new(t.range.start.row, t.range.end.col.saturating_add(2).min(gridcraft_core::MAX_COLS - 1)));
     let columns = u32_param(p, "columns").unwrap_or(1).clamp(1, 10);
     let width = f64_param(p, "width").unwrap_or(168.0).clamp(60.0, 10000.0) as f32;
     let height = f64_param(p, "height").unwrap_or(200.0).clamp(60.0, 10000.0) as f32;
