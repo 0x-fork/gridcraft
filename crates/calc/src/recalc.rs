@@ -598,6 +598,30 @@ impl Host for PassHost<'_> {
         }
         out
     }
+    fn visit_range(&mut self, sheet: usize, range: RangeRef, f: &mut dyn FnMut(&Value) -> bool) -> bool {
+        let wb = self.wb;
+        let Some(sh) = wb.sheet(sheet) else { return false };
+        // Formula cells first, in row-major order like `range_values`: reading one calculates it
+        // and the pass remembers the value, so the walk below gets the same value again without
+        // this method holding any.
+        for (c, cell) in sh.cells.iter_range(range) {
+            if cell.formula.is_some() {
+                let _ = self.cell_value(sheet, c);
+            }
+        }
+        // Spilled values sit between the stored cells (and the formulas just calculated may have
+        // produced some): leave such blocks to `range_values`.
+        if self.spills.keys().any(|a| a.0 == sheet) || sh.spill.range(range.start..=range.end).any(|(c, _)| range.contains(*c)) {
+            return false;
+        }
+        for (c, cell) in sh.cells.iter_range(range) {
+            let go = if cell.formula.is_some() { f(&self.cell_value(sheet, c)) } else { f(&cell.value) };
+            if !go {
+                break;
+            }
+        }
+        true
+    }
     fn used_range(&mut self, sheet: usize) -> Option<RangeRef> {
         let wb = self.wb;
         *self.used.entry(sheet).or_insert_with(|| wb.sheet(sheet).and_then(|s| s.used_range()))
@@ -974,13 +998,13 @@ fn prof_now() -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::time::{Duration, Instant};
 
     use gridcraft_core::{CellRef, RangeRef, Value};
     use gridcraft_model::{Cell, Formula, Workbook};
 
-    use super::{Calc, Intervals, Key};
+    use super::{Calc, HashMap, HashSet, Host, Intervals, Key, PassHost};
 
     /// xorshift64 for repeatable pseudo-random cases.
     fn rng(state: &mut u64) -> u64 {
@@ -1180,5 +1204,42 @@ mod tests {
         deps.clear();
         calc.graph.dependents(1, CellRef::parse("A2").unwrap(), &mut deps);
         assert_eq!(deps, vec![at("DA9"), at("DA9")]);
+    }
+
+    /// For tests of `PassHost::visit_range`, which can't be reached from outside this module: the
+    /// values it hands over for `range` while the formulas in `pending` (cell, formula) have not been
+    /// calculated yet, or `None` when it declines the block.
+    pub(crate) fn probe_visit_range(wb: &Workbook, pending: &[(&str, &str)], range: RangeRef) -> Option<Vec<Value>> {
+        let mut exprs = HashMap::default();
+        for (at, formula) in pending {
+            let expr = gridcraft_formula::parse(formula.strip_prefix('=').unwrap_or(formula)).ok()?;
+            exprs.insert((0, CellRef::parse(at)?), std::sync::Arc::new(expr));
+        }
+
+        // A cell in `pending` is calculated the first time something reads it, which is the state
+        // of a real pass partway through; `visit_range` has to cope with the formulas it reads
+        // being calculated under it.
+        let mut rng = 1u64;
+        let mut host = PassHost {
+            wb,
+            pending: exprs.keys().copied().collect(),
+            exprs: &exprs,
+            results: HashMap::default(),
+            in_progress: HashSet::default(),
+            spills: HashMap::default(),
+            used: HashMap::default(),
+            rng: &mut rng,
+            now: 0.0,
+            cycle: false,
+            cycles: vec![],
+            depth: 0,
+        };
+
+        let mut seen = Vec::new();
+        host.visit_range(0, range, &mut |v| {
+            seen.push(v.clone());
+            true
+        })
+        .then_some(seen)
     }
 }
