@@ -45,6 +45,9 @@ rfd = "0.17"
 arboard = { version = "3.6", default-features = false }
 # The desktop's preferred language, for the first-run interface language (native only).
 sys-locale = "0.3"
+# Font parser egui's epaint uses; the UI validates system font files with it before handing them
+# to egui, which panics on a file it can't parse. Same version as epaint's, so no second copy.
+skrifa = { version = "0.44", default-features = false, features = ["std"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

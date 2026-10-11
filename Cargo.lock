@@ -1555,6 +1555,7 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "skrifa",
  "sys-locale",
  "toml",
  "web-sys",
