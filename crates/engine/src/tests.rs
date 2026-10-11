@@ -219,6 +219,12 @@ fn formulas_with_the_wrong_argument_count_are_refused_on_entry() {
         assert!(e.contains(&format!("too {word} arguments")), "{input}: {e}");
         assert_eq!(v(&s, "A1"), Value::text("kept"), "{input} must not replace the cell");
     }
+    // Excel's 255-argument limit applies to variadic functions too.
+    let many = format!("=SUM({})", vec!["1"; 256].join(","));
+    let e = s.execute("cell.set", json!({"cell": "A1", "input": many})).unwrap_err().to_string();
+    assert!(e.contains("too many arguments"), "{e}");
+    s.execute("cell.set", json!({"cell": "A2", "input": format!("=SUM({})", vec!["1"; 255].join(","))})).unwrap();
+    assert_eq!(v(&s, "A2"), Value::Number(255.0));
     let e = s.execute("cell.set", json!({"cell": "A1", "input": "=DATEDIF(1,2)"})).unwrap_err().to_string();
     assert!(e.contains("DATEDIF(start_date, end_date, unit)"), "{e}");
     // Correct counts, optional arguments left empty, special forms, LAMBDA names and unknown

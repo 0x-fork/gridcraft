@@ -200,7 +200,7 @@ fn check_arg_counts(expr: &gridcraft_formula::Expr) -> Result<()> {
         if bad.is_none()
             && let gridcraft_formula::Expr::Call(name, args) = e
             && let Some(spec) = gridcraft_functions::lookup(name)
-            && (args.len() < spec.min_args || args.len() > spec.max_args)
+            && !spec.accepts(args.len())
         {
             let few = args.len() < spec.min_args;
             bad = Some(format!("{} has too {} arguments. Use {}", spec.name, if few { "few" } else { "many" }, spec.signature));
