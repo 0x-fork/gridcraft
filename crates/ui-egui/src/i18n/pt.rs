@@ -358,9 +358,16 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Keywords" => "Palavras-chave",
         "Description" => "Descrição",
         "No workbook is open." => "Nenhuma pasta de trabalho está aberta.",
+        "Save as type" => "Tipo",
+        "Excel Workbook (*.xlsx)" => "Pasta de Trabalho do Excel (*.xlsx)",
+        "CSV UTF-8 (Comma delimited) (*.csv)" => "CSV UTF-8 (Delimitado por vírgulas) (*.csv)",
+        "Web Page (*.html)" => "Página da Web (*.html)",
+        "PDF (*.pdf)" => "Arquivo PDF (*.pdf)",
+        "Download" => "Baixar",
+        "A CSV file, web page or PDF is a copy: the workbook keeps its own file." => {
+            "Um arquivo CSV, página da Web ou PDF é uma cópia: a pasta de trabalho mantém o próprio arquivo."
+        }
         "Save the workbook under another name or in another folder." => "Salve a pasta de trabalho com outro nome ou em outra pasta.",
-        "Download (.xlsx)" => "Baixar (.xlsx)",
-        "PDF, CSV and web pages are on the Export page." => "PDF, CSV e páginas da Web estão na página Exportar.",
         "Print Active Sheets" => "Imprimir planilhas ativas",
         "Print Entire Workbook" => "Imprimir toda a pasta de trabalho",
         "Fit Sheet on One Page" => "Ajustar planilha em uma página",

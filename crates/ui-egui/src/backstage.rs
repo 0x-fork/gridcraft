@@ -107,11 +107,18 @@ pub struct Backstage {
     preview_page: usize,
     /// Print: the preview for (document, revision, whole workbook, fit to page).
     preview: Option<((u64, u64, bool, bool), Json)>,
+    /// Save As: the chosen file type (an extension from [`SAVE_TYPES`]).
+    pub save_format: &'static str,
 }
+
+/// Save As file types: (extension, label). The first is the workbook itself; the others are
+/// exports that leave the workbook's own file and unsaved state alone.
+pub const SAVE_TYPES: [(&str, &str); 4] =
+    [("xlsx", "Excel Workbook (*.xlsx)"), ("csv", "CSV UTF-8 (Comma delimited) (*.csv)"), ("html", "Web Page (*.html)"), ("pdf", "PDF (*.pdf)")];
 
 impl Backstage {
     pub fn new(page: Page) -> Backstage {
-        Backstage { page, props: Default::default(), print_all: false, fit_to_page: false, preview_page: 0, preview: None }
+        Backstage { page, props: Default::default(), print_all: false, fit_to_page: false, preview_page: 0, preview: None, save_format: "xlsx" }
     }
 }
 
@@ -184,7 +191,7 @@ pub fn show(app: &mut SheetApp, ui: &mut Ui) {
                     Page::New => new_page(app, ui, &mut out),
                     Page::Open => open_page(app, ui, &mut out),
                     Page::Info => info(app, ui, &mut bs),
-                    Page::SaveAs => save_as(app, ui, &mut out),
+                    Page::SaveAs => save_as(app, ui, &mut bs, &mut out),
                     Page::Print => print(app, ui, &mut bs, &mut out),
                     Page::Export => export(app, ui, &mut out),
                     Page::Options => options(app, ui),
@@ -507,22 +514,40 @@ fn info(app: &mut SheetApp, ui: &mut Ui, bs: &mut Backstage) {
     });
 }
 
-fn save_as(app: &mut SheetApp, ui: &mut Ui, out: &mut Outcome) {
+fn save_as(app: &mut SheetApp, ui: &mut Ui, bs: &mut Backstage, out: &mut Outcome) {
     let lang = app.ui.language;
     dim(ui, lang.tr("Save the workbook under another name or in another folder."));
     ui.add_space(14.0);
-    // Desktop: the system Save dialog. Web: the workbook downloads as .xlsx.
-    let label = if app.services.pick_save.is_some() || app.services.download.is_none() { "Browse…" } else { "Download (.xlsx)" };
-    if square_button(ui, Icon::OpenFolder, lang.tr(label)).clicked() && app.commit_edit(0, 0, false, false) {
-        let before = app.session.active().map(|d| (d.path.clone(), d.is_dirty()));
-        app.open_dialog("saveAs", json!({}));
-        let after = app.session.active().map(|d| (d.path.clone(), d.is_dirty()));
-        if after != before || app.services.pick_save.is_none() {
+    let fmt = bs.save_format;
+    let current = SAVE_TYPES.iter().find(|(ext, _)| *ext == fmt).map_or("Excel Workbook (*.xlsx)", |(_, label)| *label);
+    ui.horizontal(|ui| {
+        ui.label(lang.tr("Save as type"));
+        egui::ComboBox::from_id_salt("backstage_save_type").width(280.0).selected_text(lang.tr(current)).show_ui(ui, |ui| {
+            for (ext, label) in SAVE_TYPES {
+                if ui.selectable_label(fmt == ext, lang.tr(label)).clicked() {
+                    bs.save_format = ext;
+                }
+            }
+        });
+    });
+    ui.add_space(14.0);
+    // Desktop: the system Save dialog. Web: the file downloads.
+    let web = app.services.pick_save.is_none() && app.services.download.is_some();
+    let label = if web { format!("{} (.{fmt})", lang.tr("Download")) } else { lang.tr("Browse…").to_string() };
+    if square_button(ui, Icon::OpenFolder, &label).clicked() && app.commit_edit(0, 0, false, false) {
+        if fmt == "xlsx" {
+            let before = app.session.active().map(|d| (d.path.clone(), d.is_dirty()));
+            app.open_dialog("saveAs", json!({}));
+            let after = app.session.active().map(|d| (d.path.clone(), d.is_dirty()));
+            if after != before || app.services.pick_save.is_none() {
+                out.close = true;
+            }
+        } else if export_as(app, fmt) {
             out.close = true;
         }
     }
     ui.add_space(18.0);
-    dim(ui, lang.tr("PDF, CSV and web pages are on the Export page."));
+    dim(ui, lang.tr("A CSV file, web page or PDF is a copy: the workbook keeps its own file."));
 }
 
 fn print(app: &mut SheetApp, ui: &mut Ui, bs: &mut Backstage, out: &mut Outcome) {

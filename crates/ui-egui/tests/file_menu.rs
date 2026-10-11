@@ -146,3 +146,28 @@ fn export_as_pdf_is_delivered_as_a_download() {
     assert!(got[0].0.ends_with(".pdf"));
     assert!(got[0].1.starts_with(b"%PDF-"));
 }
+
+#[test]
+fn save_as_offers_pdf_and_leaves_the_workbook_file_alone() {
+    let dir = std::env::temp_dir().join(format!("gridcraft-save-as-type-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let asked = Arc::new(Mutex::new(Vec::<String>::new()));
+    let (capture, target) = (asked.clone(), dir.clone());
+    let mut h = harness(Services {
+        pick_save: Some(Box::new(move |suggested| {
+            capture.lock().unwrap().push(suggested.to_string());
+            Some(target.join("Report").to_string_lossy().into_owned())
+        })),
+        ..Default::default()
+    });
+    h.state_mut().run("cell.set", serde_json::json!({"cell": "A1", "input": "42"})).unwrap();
+    choose(&mut h, "Save As");
+    h.state_mut().backstage.as_mut().unwrap().save_format = "pdf";
+    h.run_steps(2);
+    click(&mut h, "Browse…");
+    assert!(asked.lock().unwrap().first().is_some_and(|s| s.ends_with(".pdf")), "the picker is offered a .pdf name");
+    assert!(std::fs::read(dir.join("Report.pdf")).unwrap().starts_with(b"%PDF-"));
+    let d = h.state().session.active().unwrap();
+    assert!(d.path.is_none() && d.is_dirty(), "a PDF is a copy, not the workbook's file");
+    let _ = std::fs::remove_dir_all(&dir);
+}
