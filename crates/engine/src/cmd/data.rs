@@ -980,10 +980,26 @@ pub fn check_validation(wb: &Workbook, sheet: usize, at: CellRef, input: &str) -
         return None;
     }
     let v = gridcraft_core::parse::parse_input(input, wb.date_system).value;
-    let num = |f: &str| gridcraft_calc::evaluate(wb, sheet, at, f).to_number().ok();
+    // The formulas are written for the first cell of the range and see the value being entered,
+    // as in Excel (a custom `=A1>10` on A1:A9 checks A5's new value at A5).
+    let first = dv.ranges.first().map(|r| r.start).unwrap_or(at);
+    let entered;
+    let wb = if sh.value(at) == v {
+        wb
+    } else {
+        let mut w = wb.clone();
+        if let Some(sh) = w.sheet_mut(sheet) {
+            let style = sh.style_id(at);
+            sh.cells.set(at, Cell { value: v.clone(), style, ..Default::default() });
+        }
+        entered = w;
+        &entered
+    };
+    let eval = |f: &str| gridcraft_calc::evaluate(wb, sheet, at, &formula_at(f, first, at));
+    let num = |f: &str| eval(f).to_number().ok();
     let ok = match dv.kind {
         ValidationKind::List => list_items(wb, sheet, dv).iter().any(|x| x.eq_ignore_ascii_case(input)),
-        ValidationKind::Custom => gridcraft_calc::evaluate(wb, sheet, at, &dv.f1).to_bool().unwrap_or(false),
+        ValidationKind::Custom => eval(&dv.f1).to_bool().unwrap_or(false),
         ValidationKind::TextLength => {
             let n = input.chars().count() as f64;
             compare_op(dv.op, n, num(&dv.f1), dv.f2.as_deref().and_then(num))
@@ -1008,6 +1024,21 @@ pub fn check_validation(wb: &Workbook, sheet: usize, at: CellRef, input: &str) -
         dv.error_message.clone()
     };
     Some((dv.clone(), msg))
+}
+
+/// A formula written for `first`, as seen from `at` (relative references shifted).
+fn formula_at(f: &str, first: CellRef, at: CellRef) -> String {
+    if first == at {
+        return f.to_string();
+    }
+    match gridcraft_formula::parse(f.trim_start_matches('=')) {
+        Ok(e) => gridcraft_formula::print(&gridcraft_formula::adjust::shift_relative(
+            e,
+            at.row as i64 - first.row as i64,
+            at.col as i64 - first.col as i64,
+        )),
+        Err(_) => f.to_string(),
+    }
 }
 
 fn compare_op(op: CfOperator, n: f64, a: Option<f64>, b: Option<f64>) -> bool {

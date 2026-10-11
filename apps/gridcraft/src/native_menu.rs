@@ -30,7 +30,7 @@ fn tree() -> Vec<(&'static str, Vec<Entry>)> {
                 ("Page Setup…", "dialog:pageSetup", None),
                 ("Print…", "file.print", Some("CMD+P")),
                 ("-", "", None),
-                ("Properties…", "file.properties", None),
+                ("Properties…", "dialog:backstage:info", None),
             ],
         ),
         (
@@ -291,6 +291,7 @@ impl NativeMenu {
                     ("note", _) => json!({"threaded": false}),
                     ("comment", _) => json!({"threaded": true}),
                     ("about", tab) => json!({"tab": tab}),
+                    ("backstage", page) => json!({"page": page}),
                     _ => json!({}),
                 };
                 let name = if name == "note" { "comment" } else { name };

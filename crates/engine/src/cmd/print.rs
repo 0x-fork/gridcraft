@@ -1494,7 +1494,7 @@ fn build_pdf(s: &Session, p: &Json, cmd: &str) -> Result<(Vec<u8>, usize)> {
     Ok(render_pdf(&d.wb, &lays, &d.display_title(), &path))
 }
 
-fn export_pdf(s: &mut Session, p: &Json) -> Result<Json> {
+pub(crate) fn export_pdf(s: &mut Session, p: &Json) -> Result<Json> {
     let (bytes, pages) = build_pdf(s, p, "file.exportPdf")?;
     match str_param(p, "path").filter(|x| !x.is_empty()) {
         Some(path) => {
@@ -1879,6 +1879,24 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let r = s.execute("file.print", json!({})).unwrap();
         assert!(r["base64"].as_str().unwrap().len() > 100);
+    }
+
+    #[test]
+    fn save_as_pdf_writes_a_pdf_and_keeps_the_workbook_file() {
+        let mut s = s();
+        s.execute("cell.set", json!({"cell": "B2", "input": "hello"})).unwrap();
+        let dir = std::env::temp_dir().join(format!("gridcraft-save-pdf-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Out.PDF");
+        let r = s.execute("file.saveAs", json!({"path": path.to_str().unwrap()})).unwrap();
+        assert_eq!(r["pages"], 1);
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(bytes.starts_with(b"%PDF-"));
+        assert!(contains(&bytes, "(hello) Tj"));
+        // The PDF is a print, not the workbook's file: Save still asks where to put the workbook.
+        let d = s.doc().unwrap();
+        assert!(d.path.is_none() && d.is_dirty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

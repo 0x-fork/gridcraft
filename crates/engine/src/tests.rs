@@ -816,7 +816,7 @@ fn protection_passwords_stay_out_of_the_journal_and_recorded_scripts() {
         r.execute(id, p.clone()).unwrap_or_else(|e| panic!("{id}: {e}"));
         let prot = r.doc().unwrap().wb.active().unwrap().protection.clone();
         if id == "review.protectSheet" {
-            assert!(prot.as_ref().is_some_and(|p| p.format_cells && p.password_hash.is_none()), "{prot:?}");
+            assert!(prot.as_ref().is_some_and(|p| p.format_cells && p.password.is_none()), "{prot:?}");
         }
     }
     assert!(r.doc().unwrap().wb.active().unwrap().protection.is_none());
@@ -1255,6 +1255,19 @@ fn ods_import_never_reuses_source_as_save_target() {
         assert_eq!(v(&s, "A1"), Value::Number(43.0));
     }
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn validation_formulas_are_relative_and_see_the_new_value() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "B1", "values": [[1], [100]]})).unwrap();
+    s.execute("data.validation", json!({"range": "A1:A2", "type": "custom", "formula1": "=A1>10"})).unwrap();
+    s.execute("data.validation", json!({"range": "C1:C2", "type": "whole", "operator": "lessOrEqual", "formula1": "=B1"})).unwrap();
+    let ok = |s: &mut Session, cell: &str, input: &str| s.execute("data.validate", json!({"cell": cell, "input": input})).unwrap()["ok"] == true;
+    assert!(ok(&mut s, "A1", "20"));
+    assert!(!ok(&mut s, "A2", "5"));
+    assert!(ok(&mut s, "C2", "50"));
+    assert!(!ok(&mut s, "C1", "50"));
 }
 
 #[test]

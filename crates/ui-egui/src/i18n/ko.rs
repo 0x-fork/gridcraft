@@ -359,9 +359,16 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Keywords" => "키워드",
         "Description" => "설명",
         "No workbook is open." => "열려 있는 통합 문서가 없습니다.",
+        "Save as type" => "파일 형식",
+        "Excel Workbook (*.xlsx)" => "Excel 통합 문서 (*.xlsx)",
+        "CSV UTF-8 (Comma delimited) (*.csv)" => "CSV UTF-8(쉼표로 분리) (*.csv)",
+        "Web Page (*.html)" => "웹 페이지 (*.html)",
+        "PDF (*.pdf)" => "PDF 파일 (*.pdf)",
+        "Download" => "다운로드",
+        "A CSV file, web page or PDF is a copy: the workbook keeps its own file." => {
+            "CSV 파일, 웹 페이지 또는 PDF는 사본이며 통합 문서는 원래 파일을 유지합니다."
+        }
         "Save the workbook under another name or in another folder." => "통합 문서를 다른 이름 또는 다른 폴더에 저장합니다.",
-        "Download (.xlsx)" => "다운로드(.xlsx)",
-        "PDF, CSV and web pages are on the Export page." => "PDF, CSV 및 웹 페이지는 내보내기 페이지에 있습니다.",
         "Print Active Sheets" => "활성 시트 인쇄",
         "Print Entire Workbook" => "전체 통합 문서 인쇄",
         "Fit Sheet on One Page" => "한 페이지에 시트 맞추기",
