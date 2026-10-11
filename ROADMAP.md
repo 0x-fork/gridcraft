@@ -62,7 +62,7 @@ collaboration, mobile, AI).
 | File formats | ~50% | 80–120 | [file-format-parity.md](docs/file-format-parity.md) |
 | Performance | ~35% | 35–55 | [target-app-parity.md](docs/target-app-parity.md#performance) |
 | Stability | ~60% | 15–25 | [gaps.md](docs/gaps.md) |
-| Localization | ~10% (ribbon in 5 languages) | 100–165 | [localization-parity.md](docs/localization-parity.md) |
+| Localization | ~10% (ribbon in 6 languages) | 100–165 | [localization-parity.md](docs/localization-parity.md) |
 | Hardware (multi-core calc, GPU, pen, multi-window) | ~40% | 25–40 | [hardware-parity.md](docs/hardware-parity.md) |
 | Platforms | ~80% (no iOS/Android; ahead on Linux, BSD, RISC-V) | 30–60 | [target-app-parity.md](docs/target-app-parity.md#platforms) |
 | Ecosystem / add-ins | ~10% (VBA out of scope; own scripts, MCP, CLI) | 25–40 | [target-app-parity.md](docs/target-app-parity.md#ecosystem-and-ai) |
@@ -89,11 +89,12 @@ collaboration, mobile, AI).
 
 ## Languages
 
-The ribbon is translated into Japanese, Simplified Chinese, Korean, Brazilian Portuguese and
-Russian (266–268 labels each, ~12% of ~2,200 strings; merged 10-10 in #31, #104, #82), the
+The ribbon is translated into Japanese, Simplified Chinese, Korean, Brazilian Portuguese, Russian
+and German (266–268 labels each, ~12% of ~2,200 strings; merged 10-10 in #31, #104, #82, German
+added 10-11), the
 interface follows the system language, and CJK, Thai and Hebrew text falls back to system fonts
-(#38). Dialogs, menus and messages are English; formulas and number formats are en-US only. German
-is in PR #163. Detail: [localization-parity.md](docs/localization-parity.md).
+(#38). Dialogs, menus and messages are English; formulas and number formats are en-US only.
+Localized German formulas and numbers are in PR #163. Detail: [localization-parity.md](docs/localization-parity.md).
 
 | Language | Code | Status | UI strings |
 |---|---|---|---|
@@ -106,11 +107,11 @@ is in PR #163. Detail: [localization-parity.md](docs/localization-parity.md).
 | Portuguese | pt-BR | menus only | ~12% |
 | Indonesian | id | none | 0% |
 | Japanese | ja | menus only | ~12% |
-| German | de | none (PR #163 open) | 0% |
+| German | de | menus only | ~12% |
 | Korean | ko | menus only | ~12% |
 | Vietnamese | vi | none | 0% |
 
-Other shipped languages: 1 (Russian, menus only, ~12%).
+Other shipped languages: 2 (Russian and German, menus only, ~12%).
 
 ## Upcoming
 
@@ -131,6 +132,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-10-11 | Ribbon translated into German (266 labels; `de`, `de-DE`, `de-AT`, `de-CH` locale tags resolve to German) |
 | 2026-10-10 | Ribbon translated into Japanese, Chinese, Korean, Brazilian Portuguese and Russian with system-language default (#31, #104, #82); CJK/Thai/Hebrew font fallback (#38); clear messages for encrypted and `.xls` files (#17); smooth line charts (#62). Progress docs restructured to the craftrules standard; full re-measure (this page). Initial ribbon key tips (#43), in-place text box editing (#84), copy as HTML table (#36). ODS and XLSB data import (#100, #101); recalc linear in the number of range formulas (#66); RISC-V Linux build; Flatpak repository on Pages; web cell-commit trap fixed |
 | 2026-10-09 | Community fixes: spill range operator `A1#`, sheet-scoped names, protection refuses locked-cell edits, Insert/Delete Cells adjust references, `DATE(1900,2,29)`, SUMIF sizing, `ROUND` at 15 digits, `_xlpm.` LAMBDA parameters in XLSX, vertical scrollbar, system appearance, border previews; v0.4.0 |
 | 2026-10-08 | v0.2.0 and v0.3.0 releases; Flatpak, AppImage zsync, branded DMG; desktop log file; DirectX 12 default on Windows |
