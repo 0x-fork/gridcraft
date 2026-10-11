@@ -45,7 +45,6 @@ pub struct UiState {
     pub system_theme: bool,
     pub ribbon_tab: String,
     pub ribbon_collapsed: bool,
-    pub formula_bar: bool,
     pub formula_bar_expanded: bool,
     pub status_bar: bool,
     pub recent: Vec<String>,
@@ -64,7 +63,6 @@ impl Default for UiState {
             system_theme: false,
             ribbon_tab: "Home".into(),
             ribbon_collapsed: false,
-            formula_bar: true,
             formula_bar_expanded: false,
             status_bar: true,
             recent: vec![],
@@ -294,10 +292,6 @@ impl SheetApp {
                 self.ui.ribbon_tab = p.get("tab").and_then(Json::as_str).unwrap_or("Home").to_string();
                 Ok(Json::Null)
             }
-            "view.formulaBar" => {
-                self.ui.formula_bar = p.get("on").and_then(Json::as_bool).unwrap_or(!self.ui.formula_bar);
-                Ok(json!({"on": self.ui.formula_bar}))
-            }
             "view.collapseRibbon" => {
                 self.ui.ribbon_collapsed = !self.ui.ribbon_collapsed;
                 Ok(Json::Null)
@@ -319,7 +313,6 @@ impl SheetApp {
                 }
                 Ok(json!({"mode": self.ui.theme_mode()}))
             }
-            "view.zoom100" => return Some(self.session.run("view.zoom", json!({"percent": 100})).inspect(|_| self.after_engine())),
             "app.language.set" => {
                 // `{"language": "ja"}`; `code` is accepted as an alias.
                 let code = p.get("language").or_else(|| p.get("code")).and_then(Json::as_str).unwrap_or("");
@@ -608,7 +601,7 @@ impl SheetApp {
         self.ribbon_keys(&ctx);
         ribbon::title_bar(self, ui);
         ribbon::show(self, ui);
-        if self.ui.formula_bar {
+        if self.session.prefs.formula_bar {
             formula_bar::show(self, ui);
         }
         if self.ui.status_bar {

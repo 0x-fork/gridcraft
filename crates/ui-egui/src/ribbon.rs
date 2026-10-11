@@ -1636,9 +1636,9 @@ fn view(app: &mut SheetApp, ui: &mut Ui) {
     let s = app.session.active().and_then(|d| d.wb.active().map(|s| (s.show_gridlines, s.show_headings))).unwrap_or((true, true));
     let lang = app.ui.language;
     ui.vertical(|ui| {
-        let mut fb = app.ui.formula_bar;
+        let mut fb = app.session.prefs.formula_bar;
         if ui.checkbox(&mut fb, lang.tr("Formula Bar")).changed() {
-            app.ui.formula_bar = fb;
+            act(app, "view.formulaBar", json!({"on": fb}));
         }
         let mut g = s.0;
         if ui.checkbox(&mut g, lang.tr("Gridlines")).changed() {
@@ -1654,7 +1654,7 @@ fn view(app: &mut SheetApp, ui: &mut Ui) {
         app.open_dialog("zoom", json!({}));
     }
     if big_button(ui, Icon::Search, "100%", "Zoom to 100%", false).clicked() {
-        act(app, "view.zoom", json!({"percent": 100}));
+        act(app, "view.zoom100", json!({}));
     }
     if big_button(ui, Icon::Zoom, "Zoom to\nSelection", "Zoom to Selection", false).clicked() {
         let r = app.grid.cells_rect.unwrap_or(Rect::from_min_size(pos2(0.0, 0.0), vec2(1200.0, 700.0)));
