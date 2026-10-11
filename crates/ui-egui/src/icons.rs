@@ -80,6 +80,7 @@ pub enum Icon {
     TextBox,
     Symbol,
     Sparkline,
+    Checkbox,
     Function,
     Name,
     Trace,
@@ -101,6 +102,7 @@ pub enum Icon {
     Theme,
     Margins,
     Orient,
+    SheetRtl,
     Paper,
     PrintArea,
     Script,
@@ -108,6 +110,8 @@ pub enum Icon {
     Share,
     Search,
     Settings,
+    /// Light/dark appearance: a circle, its right half filled.
+    Appearance,
     Sheet,
     Book,
     Folder,
@@ -119,6 +123,12 @@ pub enum Icon {
     Calendar,
     Clock,
     FileName,
+    /// File › Backstage navigation (line art, drawn in the navigation colour).
+    Back,
+    NewFile,
+    OpenFolder,
+    Info,
+    Print,
 }
 
 struct G<'a> {
@@ -423,6 +433,10 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, c: Color32) {
             g.line(&[(12.0, 4.0), (4.0, 12.0)], c, 1.3);
         }
         Icon::Check => g.line(&[(3.0, 8.5), (6.5, 12.0), (13.0, 4.5)], c, 1.3),
+        Icon::Checkbox => {
+            g.rect(2.0, 2.0, 12.0, 12.0, None, Some(c));
+            g.line(&[(4.5, 8.0), (7.0, 10.5), (11.5, 5.0)], c, 1.4);
+        }
         Icon::Fx => g.text(8.0, 8.0, "fx", 10.5, c, false, true),
         Icon::Plus => {
             g.line(&[(8.0, 3.0), (8.0, 13.0)], c, 1.3);
@@ -582,6 +596,14 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, c: Color32) {
             g.rect(2.0, 4.0, 8.0, 10.0, None, Some(c));
             g.rect(6.0, 2.0, 8.0, 6.0, Some(Color32::WHITE), Some(BLUE));
         }
+        Icon::SheetRtl => {
+            // A sheet with an arrow running right to left.
+            g.rect(2.0, 2.5, 12.0, 8.0, None, Some(c));
+            g.stroke(&[(6.0, 2.5), (6.0, 10.5)], light);
+            g.stroke(&[(10.0, 2.5), (10.0, 10.5)], light);
+            g.line(&[(13.5, 13.0), (4.5, 13.0)], BLUE, 1.4);
+            g.poly(&[(2.0, 13.0), (5.0, 10.5), (5.0, 15.5)], BLUE);
+        }
         Icon::PrintArea => {
             g.rect(2.5, 2.5, 11.0, 11.0, None, Some(light));
             g.line(&[(4.0, 4.0), (11.0, 4.0), (11.0, 10.0), (4.0, 10.0), (4.0, 4.0)], BLUE, 1.4);
@@ -603,6 +625,16 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, c: Color32) {
         Icon::Settings => {
             g.circle(8.0, 8.0, 5.0, None, Some(c));
             g.circle(8.0, 8.0, 2.0, Some(c), None);
+        }
+        Icon::Appearance => {
+            g.circle(8.0, 8.0, 5.5, None, Some(c));
+            let half: Vec<(f32, f32)> = (0..=12)
+                .map(|i| {
+                    let a = std::f32::consts::PI * (i as f32 / 12.0 - 0.5);
+                    (8.0 + 5.5 * a.cos(), 8.0 + 5.5 * a.sin())
+                })
+                .collect();
+            g.poly(&half, c);
         }
         Icon::Book => {
             g.rect(2.0, 2.0, 12.0, 12.0, Some(GREEN), None);
@@ -650,6 +682,29 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, c: Color32) {
             g.stroke(&[(10.0, 1.5), (10.0, 4.5), (13.0, 4.5)], c);
             g.line(&[(5.0, 9.0), (11.0, 9.0)], BLUE, 1.4);
             g.stroke(&[(5.0, 11.5), (9.0, 11.5)], light);
+        }
+        Icon::Back => {
+            g.circle(8.0, 8.0, 6.5, None, Some(c));
+            g.line(&[(11.5, 8.0), (4.8, 8.0)], c, 1.2);
+            g.line(&[(7.5, 5.3), (4.8, 8.0), (7.5, 10.7)], c, 1.2);
+        }
+        Icon::NewFile => {
+            g.line(&[(9.5, 1.5), (3.5, 1.5), (3.5, 14.5), (12.5, 14.5), (12.5, 4.5), (9.5, 1.5), (9.5, 4.5), (12.5, 4.5)], c, 1.1);
+        }
+        Icon::OpenFolder => {
+            g.line(&[(13.0, 6.5), (13.0, 4.5), (7.5, 4.5), (6.0, 3.0), (1.5, 3.0), (1.5, 13.0)], c, 1.1);
+            g.line(&[(1.5, 13.0), (4.0, 7.0), (15.0, 7.0), (12.5, 13.0), (1.5, 13.0)], c, 1.1);
+        }
+        Icon::Info => {
+            g.circle(8.0, 8.0, 6.5, None, Some(c));
+            g.line(&[(8.0, 7.0), (8.0, 11.8)], c, 1.3);
+            g.circle(8.0, 4.8, 0.8, Some(c), None);
+        }
+        Icon::Print => {
+            g.line(&[(4.5, 5.5), (4.5, 1.5), (11.5, 1.5), (11.5, 5.5)], c, 1.1);
+            g.line(&[(4.0, 11.5), (1.5, 11.5), (1.5, 5.5), (14.5, 5.5), (14.5, 11.5), (12.0, 11.5)], c, 1.1);
+            g.line(&[(4.5, 9.0), (4.5, 14.5), (11.5, 14.5), (11.5, 9.0), (4.5, 9.0)], c, 1.1);
+            g.circle(12.3, 7.6, 0.6, Some(c), None);
         }
     }
 }

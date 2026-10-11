@@ -94,6 +94,9 @@ pub struct Sheet {
     #[serde(default)]
     pub pivots: Vec<PivotTable>,
     pub protection: Option<SheetProtection>,
+    /// Allow Edit Ranges (meaningful while the sheet is protected).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edit_ranges: Vec<crate::EditRange>,
     pub print: PrintSettings,
     /// Last selection and scroll position, saved with the file.
     pub view_active: CellRef,
@@ -141,6 +144,7 @@ impl Sheet {
             sparklines: vec![],
             pivots: vec![],
             protection: None,
+            edit_ranges: vec![],
             print: PrintSettings::default(),
             view_active: CellRef::default(),
             view_top_left: CellRef::default(),

@@ -1,6 +1,6 @@
 # Target-app parity: GridCraft vs Microsoft Excel
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (Page Layout view, #329) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (community merges: worksheet functions 513 / 523, catalog 271 / 290) · **Target:** Microsoft Excel (Microsoft 365)
 
 This is the authoritative parity assessment. [`ROADMAP.md`](../ROADMAP.md) summarizes it,
 [`gaps.md`](gaps.md) lists every shortfall, and the area checklists hold the detail:
@@ -13,9 +13,9 @@ generated ribbon checklist is [`parity-checklist.md`](parity-checklist.md).
 | Number | Value | Kind |
 |---|---|---|
 | Feature breadth (weighted by use) | **~75%** | estimated from the area table below; anchored on two measurements |
-| Ribbon and menu catalog | **258 / 290 (89.0%)** | measured: `cargo xtask parity` (`crates/engine/src/catalog.rs` ∩ registered command ids) |
-| Worksheet functions, by name | **501 / 523 (95.8%)** | measured: registered functions vs Microsoft's published function list (method below) |
-| Worksheet functions that do real work | **492 / 523 (94.1%)** | measured: excludes 9 stubs (7 CUBE functions, WEBSERVICE, FILTERXML) |
+| Ribbon and menu catalog | **271 / 290 (93.4%)** | measured: `cargo xtask parity` (`crates/engine/src/catalog.rs` ∩ registered command ids) |
+| Worksheet functions, by name | **513 / 523 (98.1%)** | measured: registered functions vs Microsoft's published function list (method below) |
+| Worksheet functions that do real work | **504 / 523 (96.4%)** | measured: excludes 9 stubs (7 CUBE functions, WEBSERVICE, FILTERXML) |
 | **Ready for real work** | **~50%** | estimated; written weights below (51.6 computed) |
 | **Mainstream practitioner** | **~50%** | estimated; [method](#mainstream-practitioner) (69.5 depth × 0.90 × 0.92 × 0.88 = 50.6) |
 | **Essentials user** | **~63%** | estimated; [method](#essentials-user) (80.2 depth × 0.92 × 0.95 × 0.90 = 63.1) |
@@ -53,7 +53,7 @@ long `.xls` track, so about half parallelizes (≈30–50 wall-clock hours with 
   LEFT/LEFTB, LEN/LENB, MID/MIDB, REPLACE/REPLACEB, RIGHT/RIGHTB, SEARCH/SEARCHB, BETA.INV) and
   COPILOT and PY: **523 functions**. Ours: every `f!(…)` spec in `crates/functions/src/*.rs` plus
   `SPECIAL_FUNCTIONS` in `crates/calc/src/eval.rs` (evaluator special forms), minus the test-only
-  `ADD2`: **501**, all of them Excel names.
+  `ADD2`: **505**, all of them Excel names.
 - **Ribbon catalog:** `crates/engine/src/catalog.rs` (290 unique ids across 15 tabs) against the
   313 command ids registered in `crates/engine/src/cmd/*.rs`, recomputed from source by script and
   identical to the committed `parity-checklist.md`. The catalog is our own transcription of
@@ -80,17 +80,17 @@ performance 8, stability 8, localization 4, hardware 2, platforms 2, ecosystem 2
 | Area | Weight | Breadth | Ready | Hours | Evidence |
 |---|---|---|---|---|---|
 | Formula language and calculation | 18 | ~92% | ~72% | 20–30 | A1/R1C1 parser, reference adjustment, dependency-graph recalc, dynamic arrays and `#SPILL!`, `A1#`, LET/LAMBDA and helpers, structured references, names, 3-D references. Open correctness bugs: 15-digit equality (#57), stale spills after structural edits and cleared blockers (#133, #139), 3-D span endpoint deletion (#140), sheet rename and qualified names (#134). Single-threaded |
-| Worksheet functions | 12 | 95.8% (measured) | ~82% | 18–30 | 501 / 523 names, 492 working. Missing: FORECAST.ETS family, ODDF*/ODDL*, GETPIVOTDATA, TRIMRANGE, PERCENTOF, BAHTTEXT, IMAGE plus cloud functions. No conformance suite against Excel-computed oracles; edge-case bugs keep surfacing (#137, #138). [function-parity.md](function-parity.md) |
+| Worksheet functions | 12 | 98.1% (measured) | ~82% | 16–26 | 513 / 523 names, 504 working. Missing: GETPIVOTDATA, IMAGE plus cloud functions. No conformance suite against Excel-computed oracles; edge-case bugs keep surfacing (#137, #138). [function-parity.md](function-parity.md) |
 | Editing, navigation, clipboard, fill | 12 | ~90% | ~70% | 15–25 | Point mode, F4, AutoComplete, Paste Special, AutoFill, Flash Fill, Find/Replace, Go To Special. Bugs: rectangular drag-select (#28), monthly fill (#132), cut across sheets (#128), Insert Copied Cells missing (#21), key tips only on part of the Home tab (#43; #33, #49). [ui-parity.md](ui-parity.md) |
 | Cell formatting, styles, conditional formatting | 10 | ~95% | ~80% | 8–14 | Full number-format language, borders, 47 cell styles, 60 table styles, all CF rule kinds including data bars, colour scales and icon sets. Gaps: font weights beyond regular/bold (#168), system fonts list (#4), themes |
 | Sort, filter, tables, validation, outline | 8 | ~82% | ~70% | 10–16 | Multi-level sort, AutoFilter, Advanced Filter, tables with totals, validation, outline, subtotals, consolidate. Bugs: subtotal header (#131), validation edits (#129), table style panic caught (#130); no slicers on tables |
-| PivotTables | 7 | ~65% | ~45% | 25–40 | Insert/Recommended, field list, three layouts, date grouping, show-values-as, refresh, XLSX round-trip. Missing: slicers, timelines, calculated fields/items, PivotCharts, value/label filters, number grouping, GETPIVOTDATA, data-model pivots. Round-trip never checked in Excel |
+| PivotTables | 7 | ~65% | ~45% | 25–40 | Insert/Recommended, field list, three layouts, date grouping, show-values-as, refresh, calculated fields, XLSX round-trip. Missing: slicers, timelines, calculated items, PivotCharts, value/label filters, number grouping, GETPIVOTDATA, data-model pivots. Round-trip never checked in Excel |
 | Charts and sparklines | 8 | ~50% | ~30% | 40–60 | 25 chart kinds, all 2-D. The chart model holds title, legend position, a data-labels flag, gridlines flag and axis titles; no axis scaling, trendlines, error bars, per-point formatting, chart sheets, 3-D, surface, map, Pareto. Several kinds don't survive XLSX round trip (open PRs #158, #161). [chart-parity.md](chart-parity.md) |
-| Page layout, print, PDF | 5 | ~80% | ~55% | 12–20 | Page setup, print titles, breaks, Page Break Preview, Page Layout view with in-place headers/footers (#329), PDF export and printing. The PDF writer uses only the 14 standard fonts without embedding (no CJK or other non-Latin text in PDF); web print only exports (#141, #143) |
-| What-if and analysis | 4 | ~50% | ~40% | 22–35 | Goal Seek, Scenario Manager, data tables. Missing: Solver, Analysis ToolPak, Forecast Sheet, Analyze Data |
+| Page layout, print, PDF | 5 | ~80% | ~55% | 12–20 | Page setup, print titles, breaks, Page Break Preview, headers/footers, PDF export and printing. No true Page Layout view; the PDF writer uses only the 14 standard fonts without embedding (no CJK or other non-Latin text in PDF); web print only exports (#141, #143) |
+| What-if and analysis | 4 | ~50% | ~40% | 22–35 | Goal Seek, Scenario Manager, data tables, Analysis ToolPak (13 of 19 tools, no charts). Missing: Solver, Forecast Sheet, Analyze Data |
 | Get & Transform, external data, data model | 5 | ~15% | ~10% | 60–100 | Import of CSV/TSV, JSON, HTML. No Power Query editor, no From Web, database or folder sources, no connections or refresh, no relationships or data model, no external workbook links (dropped with a warning) |
 | Insert objects | 3 | ~55% | ~45% | 25–40 | Pictures, 8 shape kinds (Excel has ~170), text boxes, own icon set, ink with Ink to Shape, hyperlinks, checkboxes. Missing: SmartArt, WordArt, equations, signature line, objects, 3-D models, screenshot, pictures in cells (PR #105) |
-| Review, comments, protection, collaboration | 4 | ~55% | ~40% | 35–55 | Threaded comments, notes, spelling (system dictionary), thesaurus, sheet and workbook protection. Missing: comment navigation, Show Changes, Allow Edit Ranges, notes-to-comments conversion, accessibility checker, co-authoring, opening password-encrypted files (refused with a message since #17) |
+| Review, comments, protection, collaboration | 4 | ~55% | ~40% | 35–55 | Threaded comments, notes, spelling (system dictionary), thesaurus, sheet and workbook protection, Allow Edit Ranges with Excel-compatible password hashes (#307). Missing: comment navigation, Show Changes, notes-to-comments conversion, accessibility checker, co-authoring, opening password-encrypted files (refused with a message since #17) |
 | Automation | 4 | ~30% | ~20% | 12–20 | Recorded, editable GridCraft scripts (Automate tab). VBA is out of scope by owner decision and is **dropped** when an `.xlsm` is opened (warning shown). No Office Scripts compatibility |
 | **Weighted** | 100 | **~75%** | **~59%** | **300–485** | |
 
@@ -277,7 +277,7 @@ The inventory carried over from the 2026-10-07 ROADMAP.md, updated for what land
 - Engine: A1/R1C1 formula parser with reference adjustment, dependency-graph recalculation with
   dynamic arrays (spill + `#SPILL!`), cycle detection, LET/LAMBDA/MAP/REDUCE/SCAN/BYROW/BYCOL/
   MAKEARRAY, structured table references, defined names, INDIRECT/OFFSET/INDEX references,
-  501 worksheet functions (478 at M0) (math, statistics and distributions, text and regex, lookup incl.
+  505 worksheet functions (478 at M0) (math, statistics and distributions, text and regex, lookup incl.
   XLOOKUP/FILTER/SORT/UNIQUE/VSTACK, dates, financial incl. bonds, engineering incl. complex
   numbers and Bessel, database, information).
 - Number formats: Excel's full format-code language (sections, conditions, colours, dates and
@@ -332,7 +332,14 @@ The inventory carried over from the 2026-10-07 ROADMAP.md, updated for what land
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-11 | minor | Page Layout view landed (#329); page layout notes updated, no score change |
+| 2026-10-11 | minor | Worksheet functions 505 / 523 (96.6%; 496 working): ODDFPRICE, ODDFYIELD, ODDLPRICE, ODDLYIELD |
+| 2026-10-11 | minor | Worksheet functions 503 / 523 (96.2%; 494 working): PERCENTOF, EUROCONVERT |
+| 2026-10-11 | minor | Worksheet functions 502 / 523 (96.0%; 493 working): BAHTTEXT |
+| 2026-10-11 | minor | Worksheet functions 502 / 523 (96.0%; 493 working): TRIMRANGE |
+| 2026-10-11 | minor | View › Formula Bar and Zoom 100% are engine commands (CLI/MCP); catalog 258 → 260 / 290 (#289) |
+| 2026-10-11 | minor | Review › Allow Edit Ranges; catalog 258 → 259 / 290 (#307) |
+| 2026-10-11 | minor | PivotTables: calculated fields (`pivot.calculatedField`) |
+| 2026-10-11 | minor | PivotTables: PivotCharts (`insert.pivotChart`) |
 | 2026-10-10 | minor | Readiness-by-audience table: hours to ~95% for each of the three numbers (full 650–1,050, mainstream 200–310, essentials 60–100). Full number confirmed as the additive weighted sum over the written dimension weights (no change) |
 | 2026-10-10 | minor | Added Mainstream practitioner (~50%) and Essentials user (~63%) with written weights and discounts, and user-evidence counts; re-checked the full number after the 10-10 merges (charts 38→30, localization 5→10; still 51.6, ~50%) |
 | 2026-10-10 | minor | Stage checked against the new alpha gate (six core workflows, all pass): stays alpha |

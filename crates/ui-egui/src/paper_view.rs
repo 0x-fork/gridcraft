@@ -127,6 +127,7 @@ pub(crate) fn paint_pages(
     si: usize,
     sh: &Sheet,
     sel: &gridcraft_engine::Selection,
+    outline: Rect,
     cf: &mut CfCache,
     t: &Tokens,
 ) -> Vec<((u32, u32), (u32, u32), Rect)> {
@@ -167,7 +168,7 @@ pub(crate) fn paint_pages(
         }
         // The selection outline may straddle the margin edge (as at A1 in Normal view).
         let sel_clip = clip.expand(3.0).intersect(page).intersect(geo.cells);
-        grid::paint_selection(&p.with_clip_rect(sel_clip), geo, sh, sel, t, app);
+        grid::paint_selection(&p.with_clip_rect(sel_clip), geo, sh, sel, outline, t, app, rows, cols);
     }
     quads
 }
