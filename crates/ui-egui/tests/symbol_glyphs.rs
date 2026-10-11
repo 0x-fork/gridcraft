@@ -22,7 +22,8 @@ fn ui_symbols_have_glyphs_when_a_symbol_face_is_installed() {
             let galley = ctx.fonts_mut(|f| f.layout_no_wrap(text.to_owned(), font.clone(), Color32::BLACK));
             galley.rows.iter().flat_map(|r| r.glyphs.iter().map(|g| (g.chr, g.uv_rect))).collect::<Vec<_>>()
         };
-        let tofu: Vec<_> = glyphs("\u{25FB}").into_iter().map(|(_, uv)| uv).collect();
+        // A private-use code point no font covers renders as the replacement box.
+        let tofu: Vec<_> = glyphs("\u{10FFFD}").into_iter().map(|(_, uv)| uv).collect();
         let missing: String = glyphs(UI_SYMBOLS).into_iter().filter(|(_, uv)| tofu.contains(uv)).map(|(c, _)| c).collect();
         assert!(missing.is_empty(), "these interface symbols render as boxes in {:?}: {missing}", font.family);
     }
