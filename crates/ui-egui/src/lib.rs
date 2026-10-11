@@ -332,6 +332,10 @@ impl SheetApp {
 
     /// Runs a command and shows its error in a message box (for menu/ribbon clicks).
     pub fn run_or_alert(&mut self, id: &str, params: Json) {
+        // Printing from the UI also hands the PDF to the host's print flow (web).
+        if id == "file.print" {
+            return self.print_now(params);
+        }
         if let Err(e) = self.run(id, params) {
             self.alert(e);
         }
@@ -350,8 +354,8 @@ impl SheetApp {
     /// build) hands the bytes straight to the browser's print flow; errors show the usual
     /// alert. Desktop builds have no `services.print`, so this falls back to `run_or_alert`
     /// (which still produces the PDF — just without a UI to act on the result yet).
-    pub fn print_now(&mut self) {
-        match self.run("file.print", json!({})) {
+    pub fn print_now(&mut self, params: Json) {
+        match self.run("file.print", params) {
             Ok(r) => {
                 let Some(b64) = r.get("base64").and_then(Json::as_str) else { return };
                 let Some(bytes) = gridcraft_engine::io::base64_decode(b64) else {
@@ -362,13 +366,7 @@ impl SheetApp {
                     print(&bytes);
                 }
             }
-            Err(e) => {
-                if e.contains("is not available right now") {
-                    self.toast = Some((e, now_ms()));
-                } else {
-                    self.message = Some(("GridCraft".into(), clean_error(&e)));
-                }
-            }
+            Err(e) => self.alert(e),
         }
     }
 

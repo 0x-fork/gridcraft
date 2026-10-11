@@ -106,7 +106,7 @@ pub fn title_bar(app: &mut SheetApp, ui: &mut Ui) {
                     }
                 }
                 if ui.button("Print…").clicked() {
-                    app.print_now();
+                    app.print_now(json!({}));
                 }
             });
             // Centered title.
@@ -1994,7 +1994,7 @@ pub fn shortcut(app: &mut SheetApp, key: Key, m: Modifiers) {
         Key::N => Some(("file.new", json!({}))),
         Key::W => Some(("file.close", json!({}))),
         Key::P => {
-            app.print_now();
+            app.print_now(json!({}));
             None
         }
         Key::K => {
