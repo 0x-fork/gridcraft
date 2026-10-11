@@ -1507,6 +1507,7 @@ dependencies = [
 name = "gridcraft-core"
 version = "0.5.0"
 dependencies = [
+ "js-sys",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
