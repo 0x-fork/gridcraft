@@ -247,6 +247,9 @@ impl SheetApp {
 
     /// Runs an engine command (or a UI command) and handles UI requests it makes.
     pub fn run(&mut self, id: &str, params: Json) -> Result<Json, String> {
+        if matches!(id, "file.save" | "file.saveAs" | "file.saveBytes") {
+            self.store_view_state();
+        }
         if id.starts_with("file.")
             || matches!(
                 id,
@@ -485,8 +488,9 @@ impl SheetApp {
                         let path = if std::path::Path::new(&path).extension().is_none() { format!("{path}.xlsx") } else { path };
                         self.run_or_alert("file.save", json!({"path": path}));
                     }
-                } else if let Some(dl) = &self.services.download
-                    && let Ok(r) = self.session.run("file.saveBytes", json!({"format": "xlsx"}))
+                } else if self.services.download.is_some()
+                    && let Ok(r) = self.run("file.saveBytes", json!({"format": "xlsx"}))
+                    && let Some(dl) = &self.services.download
                     && let Some(b) = r.get("base64").and_then(Json::as_str).and_then(gridcraft_engine::io::base64_decode)
                 {
                     let name = r.get("name").and_then(Json::as_str).unwrap_or("Book.xlsx").to_string();
@@ -532,12 +536,45 @@ impl SheetApp {
     }
 
     pub fn view(&self) -> SheetView {
-        self.view_key().and_then(|k| self.views.get(&k).copied()).unwrap_or_default()
+        self.view_key().and_then(|k| self.views.get(&k).copied()).unwrap_or_else(|| self.saved_view())
     }
 
     pub fn view_mut(&mut self) -> Option<&mut SheetView> {
         let k = self.view_key()?;
-        Some(self.views.entry(k).or_default())
+        let saved = self.saved_view();
+        Some(self.views.entry(k).or_insert(saved))
+    }
+
+    /// The view a sheet opens with: scrolled to the file's saved first visible cell (`topLeftCell`).
+    fn saved_view(&self) -> SheetView {
+        let Some(sh) = self.session.active().and_then(|d| d.wb.active()) else { return SheetView::default() };
+        if sh.view != gridcraft_engine::model::SheetViewMode::Normal {
+            return SheetView::default();
+        }
+        let (fr, fc) = sh.freeze.unwrap_or((0, 0));
+        let top = sh.view_top_left;
+        let y = sh.row_top(top.row.max(fr)) - sh.row_top(fr);
+        let x = sh.col_left(top.col.max(fc)) - sh.col_left(fc);
+        SheetView { scroll: egui::vec2(x.max(0.0) as f32, y.max(0.0) as f32) }
+    }
+
+    /// Hands the active document's scroll positions (first visible cell per sheet) and active
+    /// cell to the engine so a save writes them (`sheetView topLeftCell`). Normal view only:
+    /// Page Layout view scrolls over pages, not cells.
+    pub fn store_view_state(&mut self) {
+        let Some(d) = self.session.active_mut() else { return };
+        let mut tops = Vec::new();
+        for (&(uid, si), v) in &self.views {
+            let Some(sh) = d.wb.sheets.get(si).filter(|sh| uid == d.uid && sh.view == gridcraft_engine::model::SheetViewMode::Normal) else {
+                continue;
+            };
+            let (fr, fc) = sh.freeze.unwrap_or((0, 0));
+            // A hair past the edge so a row that starts exactly at the scroll offset is the one found.
+            let row = sh.row_at(sh.row_top(fr) + v.scroll.y.max(0.0) as f64 + 0.01);
+            let col = sh.col_at(sh.col_left(fc) + v.scroll.x.max(0.0) as f64 + 0.01);
+            tops.push((si, CellRef::new(row, col)));
+        }
+        d.store_view(&tops);
     }
 
     /// Starts editing the active cell. `text` replaces the content (typing) or pre-fills it.
@@ -769,6 +806,7 @@ impl SheetApp {
             && self.session.active().is_some_and(|d| d.is_dirty() && d.path.as_deref().is_some_and(|p| p.ends_with(".xlsx")))
         {
             self.grid.last_autosave = now;
+            self.store_view_state();
             let _ = self.session.run("file.save", json!({}));
         }
         // Window title.
