@@ -752,6 +752,27 @@ pub(crate) fn cell_text_y(valign: VAlign, rect: Rect, gh: f32, z: f32) -> f32 {
     }
 }
 
+/// Where to put a `TextShape` holding a galley of `size` turned by `angle` (egui radians, so
+/// negative for upward text) for it to sit in `rect` per the cell's alignment. egui turns the
+/// galley about `pos`, its top-left corner, so the turned box is placed first and `pos` follows.
+/// General keeps the text at the left. Bottom (the default) puts upward text at the bottom, but
+/// downward text at the top, where it starts reading.
+pub(crate) fn rotated_text_pos(rect: Rect, size: egui::Vec2, angle: f32, h: HAlign, v: VAlign, pad: f32, indent: f32) -> Pos2 {
+    let rot = egui::emath::Rot2::from_angle(angle);
+    let turned = Rect::from_points(&[vec2(0.0, 0.0), vec2(size.x, 0.0), vec2(0.0, size.y), size].map(|c| (rot * c).to_pos2()));
+    let x = match h {
+        HAlign::Center | HAlign::CenterAcross | HAlign::Distributed => rect.center().x - turned.width() / 2.0,
+        HAlign::Right => rect.right() - pad - indent - turned.width(),
+        _ => rect.left() + pad + indent,
+    };
+    let y = match v {
+        VAlign::Center | VAlign::Justify | VAlign::Distributed => rect.center().y - turned.height() / 2.0,
+        VAlign::Bottom if angle < 0.0 => rect.bottom() - pad - turned.height(),
+        _ => rect.top() + pad,
+    };
+    pos2(x, y) - turned.min.to_vec2()
+}
+
 /// Mirror what the grid painted into `layer` (the shape indices in `range`) for a right-to-left
 /// sheet. Geometry is reflected; text and meshes (glyphs, pictures) keep their reading direction
 /// and only move so that their box lands mirrored. Floating objects (`objects`: shape index
@@ -1060,13 +1081,7 @@ pub(crate) fn paint_quadrant(
             } else {
                 galley.clone()
             };
-            // Upward text grows up and right from the bottom-left corner; downward text grows down
-            // and left from its anchor, so that anchor sits one block-height in from the top-left.
-            let pos = if angle > 0.0 {
-                pos2(rect.left() + pad + galley.size().y * angle.sin(), rect.top() + pad)
-            } else {
-                pos2(rect.left() + pad, rect.bottom() - pad)
-            };
+            let pos = rotated_text_pos(*rect, galley.size(), angle, st.align.h, st.align.v, pad, indent);
             let mut shape = egui::epaint::TextShape::new(pos, galley, color);
             shape.angle = angle;
             cp.add(shape);
@@ -3071,6 +3086,75 @@ mod tests {
         let gh_overflow = 60.0;
         let y_bottom_ovf = wrapped_cell_text_y(VAlign::Bottom, rect, gh_overflow, z);
         assert!(y_bottom_ovf >= rect.top());
+    }
+
+    /// The screen box of a galley of `size` drawn at `pos` turned by `angle` about `pos`, as egui
+    /// draws a rotated `TextShape`.
+    fn rotated_box(pos: Pos2, size: egui::Vec2, angle: f32) -> Rect {
+        let rot = egui::emath::Rot2::from_angle(angle);
+        let pts = [vec2(0.0, 0.0), vec2(size.x, 0.0), vec2(0.0, size.y), size].map(|v| pos + rot * v);
+        Rect::from_points(&pts)
+    }
+
+    #[test]
+    fn rotated_text_box_follows_the_cell_alignment() {
+        // A tall, narrow merged block (one 3-character column over four 60pt rows).
+        let rect = Rect::from_min_max(pos2(10.0, 20.0), pos2(40.0, 340.0));
+        let size = vec2(90.0, 15.0);
+        let pad = 2.5;
+        let near = |a: f32, b: f32| (a - b).abs() < 0.01;
+        for deg in [90i16, -90, 45, -45] {
+            let angle = -(deg as f32).to_radians();
+            for v in [VAlign::Top, VAlign::Center, VAlign::Bottom] {
+                for h in [HAlign::Left, HAlign::Center, HAlign::Right] {
+                    let bb = rotated_box(rotated_text_pos(rect, size, angle, h, v, pad, 0.0), size, angle);
+                    let what = format!("{deg}° {h:?}/{v:?}: {bb:?} in {rect:?}");
+                    assert!(near(bb.height(), rotated_box(Pos2::ZERO, size, angle).height()), "{what}");
+                    assert!(bb.top() >= rect.top() && bb.bottom() <= rect.bottom(), "{what}");
+                    // A narrow column can't hold a 45° line across: only check where it fits.
+                    let fits_x = bb.width() <= rect.width() - 2.0 * pad;
+                    match h {
+                        HAlign::Left => assert!(near(bb.left(), rect.left() + pad), "{what}"),
+                        HAlign::Right => assert!(near(bb.right(), rect.right() - pad), "{what}"),
+                        _ => assert!(near(bb.center().x, rect.center().x), "{what}"),
+                    }
+                    if fits_x {
+                        assert!(bb.left() >= rect.left() && bb.right() <= rect.right(), "{what}");
+                    }
+                    match v {
+                        VAlign::Top => assert!(near(bb.top(), rect.top() + pad), "{what}"),
+                        VAlign::Center => assert!(near(bb.center().y, rect.center().y), "{what}"),
+                        // Bottom is the default: downward text keeps starting at the top, as before.
+                        _ if deg < 0 => assert!(near(bb.top(), rect.top() + pad), "{what}"),
+                        _ => assert!(near(bb.bottom(), rect.bottom() - pad), "{what}"),
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn upright_text_with_default_alignment_keeps_its_place() {
+        let rect = Rect::from_min_max(pos2(10.0, 20.0), pos2(40.0, 340.0));
+        let size = vec2(90.0, 15.0);
+        let pad = 2.5;
+        let near = |a: Pos2, b: Pos2| (a - b).length() < 0.01;
+        // Upward text starts at the bottom-left corner, downward text one block-height in from the top-left.
+        let up = rotated_text_pos(rect, size, -std::f32::consts::FRAC_PI_2, HAlign::General, VAlign::Bottom, pad, 0.0);
+        assert!(near(up, pos2(rect.left() + pad, rect.bottom() - pad)), "{up:?}");
+        let down = rotated_text_pos(rect, size, std::f32::consts::FRAC_PI_2, HAlign::General, VAlign::Bottom, pad, 0.0);
+        assert!(near(down, pos2(rect.left() + pad + size.y, rect.top() + pad)), "{down:?}");
+    }
+
+    #[test]
+    fn upward_text_with_middle_align_is_centred_in_a_merged_block() {
+        // Issue #435: "Licht Strom (?)" turned up in A1:A4 with Middle Align was drawn at the bottom.
+        let rect = Rect::from_min_max(pos2(10.0, 20.0), pos2(40.0, 340.0));
+        let size = vec2(90.0, 15.0);
+        let angle = -std::f32::consts::FRAC_PI_2;
+        let bb = rotated_box(rotated_text_pos(rect, size, angle, HAlign::Center, VAlign::Center, 2.5, 0.0), size, angle);
+        assert!((bb.center().y - rect.center().y).abs() < 0.01, "{bb:?} not centred in {rect:?}");
+        assert!((bb.center().x - rect.center().x).abs() < 0.01, "{bb:?} not centred in {rect:?}");
     }
 }
 
