@@ -302,6 +302,9 @@ pub(crate) fn commit<R>(d: &mut DocState, f: impl FnOnce(&mut Ctx) -> Result<R>)
     if !protection_checked {
         check_protection(&d.wb, &wb, &d.unlocked_ranges)?;
     }
+    if !structural {
+        check_arrays(&d.wb, &wb)?;
+    }
     if changed.len() <= 200_000 {
         fit_rows.extend(changed.iter().map(|(s, c)| (*s, c.row)));
     }
@@ -370,6 +373,36 @@ pub(crate) fn locked_cell_error(sh: &gridcraft_model::Sheet, c: CellRef, unlocke
         Some(t) => format!("The range \"{t}\" needs its password before it can be changed (Review › Allow Edit Ranges)."),
         None => PROTECTED.into(),
     })
+}
+
+/// Refuses an edit that put something into a cell of a multi-cell legacy array other than its
+/// formula cell, while the array stays (Excel: "You can't change part of an array."). The array
+/// would show its value there while the file kept the new content. Cells shifted by row and
+/// column edits aren't edits of their content, so structural commits aren't checked.
+fn check_arrays(old: &Workbook, new: &Workbook) -> Result<()> {
+    for sh in &old.sheets {
+        if sh.spill.is_empty() {
+            continue;
+        }
+        let Some(after) = new.sheet_index(&sh.name).and_then(|i| new.sheets.get(i)) else { continue };
+        if std::sync::Arc::ptr_eq(sh, after) {
+            continue;
+        }
+        for c in sh.cells.diff(&after.cells) {
+            let filled = after.cell(c).is_some_and(|x| x.formula.is_some() || !x.value.is_empty());
+            if !filled || !sh.spill.contains_key(&c) || same_content(sh.cell(c), after.cell(c)) {
+                continue;
+            }
+            let in_array = sh.spill_ranges.keys().any(|&anchor| {
+                anchor != c
+                    && after.cell(anchor).and_then(|x| x.formula.as_ref()).and_then(|f| f.array).is_some_and(|a| a.start == anchor && a.contains(c))
+            });
+            if in_array {
+                return Err(EngineError::Other("You can't change part of an array.".into()));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Two cells hold the same value or formula (formats aside).

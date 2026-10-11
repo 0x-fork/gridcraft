@@ -1,7 +1,7 @@
 //! Insert tab: tables, charts, sparklines, pictures, shapes, hyperlinks, comments and notes,
 //! conditional formatting (Home › Styles) and symbols.
 
-use gridcraft_core::{CellRef, RangeRef};
+use gridcraft_core::{CellRef, MAX_ROWS, RangeRef};
 use gridcraft_model::*;
 use serde_json::{Value as Json, json};
 
@@ -224,6 +224,12 @@ fn insert_table(s: &mut Session, p: &Json) -> Result<Json> {
     if d.wb.sheet(sheet).is_some_and(|sh| sh.tables.iter().any(|t| t.range.intersects(&r))) {
         return Err(EngineError::Other("A table can't overlap another table.".into()));
     }
+    let arrays = |sh: &gridcraft_model::Sheet| {
+        sh.cells.iter().any(|(_, x)| x.formula.as_ref().and_then(|f| f.array).is_some_and(|a| !a.is_single() && a.intersects(&r)))
+    };
+    if d.wb.sheet(sheet).is_some_and(arrays) {
+        return Err(EngineError::Other("Multi-cell array formulas aren't allowed in tables.".into()));
+    }
     if r.count() > 50_000_000 {
         return Err(bad("insert.table", "range too large"));
     }
@@ -234,8 +240,18 @@ fn insert_table(s: &mut Session, p: &Json) -> Result<Json> {
     let name = str_param(p, "name")
         .map(str::to_string)
         .unwrap_or_else(|| (1..).map(|n| format!("Table{n}")).find(|n| d.wb.table(n).is_none()).unwrap_or_else(|| "Table".into()));
+    if name.is_empty() || name.contains(' ') || name.chars().next().is_some_and(|c| c.is_ascii_digit()) || CellRef::parse(&name).is_some() {
+        return Err(EngineError::Other("The name that you entered is not valid.".into()));
+    }
     if d.wb.table(&name).is_some() || d.wb.names.iter().any(|n| n.name.eq_ignore_ascii_case(&name)) {
         return Err(EngineError::Other("The name entered already exists. Enter a unique name.".into()));
+    }
+    // Without a header row, the data moves down a row to make room for one: never a table with it.
+    let moves_a_table = |sh: &gridcraft_model::Sheet| {
+        sh.tables.iter().any(|t| t.range.end.row >= r.start.row && t.range.start.col <= r.end.col && t.range.end.col >= r.start.col)
+    };
+    if !header && d.wb.sheet(sheet).is_some_and(moves_a_table) {
+        return Err(EngineError::Other("This operation isn't allowed: it would shift cells in a table on your worksheet.".into()));
     }
     let style = str_param(p, "style").unwrap_or("TableStyleMedium2").to_string();
     let id = d.wb.next_object_id();
@@ -245,6 +261,11 @@ fn insert_table(s: &mut Session, p: &Json) -> Result<Json> {
             r
         } else {
             let sh = cx.sheet_mut(sheet)?;
+            // The header row pushes the data down one row: never off the end of the sheet.
+            let last = RangeRef::new(CellRef::new(MAX_ROWS - 1, r.start.col), CellRef::new(MAX_ROWS - 1, r.end.col));
+            if sh.cells.iter_range(last).any(|(_, x)| x.formula.is_some() || !x.value.is_empty()) {
+                return Err(EngineError::Other("To prevent possible loss of data, cells can't be pushed off the end of the worksheet.".into()));
+            }
             sh.cells.shift_rows_in_cols(r.start.col, r.end.col, r.start.row, 1);
             sh.cell_pictures = std::mem::take(&mut sh.cell_pictures)
                 .into_iter()
@@ -257,7 +278,7 @@ fn insert_table(s: &mut Session, p: &Json) -> Result<Json> {
                 sh.set_value(CellRef::new(r.start.row, c), gridcraft_core::Value::text(format!("Column{}", i + 1)));
             }
             cx.structural = true;
-            RangeRef::new(r.start, CellRef::new(r.end.row + 1, r.end.col))
+            RangeRef::new(r.start, CellRef::new((r.end.row + 1).min(MAX_ROWS - 1), r.end.col))
         };
         let sh = cx.sheet_mut(sheet)?;
         let mut names: Vec<String> = Vec::new();

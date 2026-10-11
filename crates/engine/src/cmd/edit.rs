@@ -210,10 +210,17 @@ fn cell_set(s: &mut Session, p: &Json) -> Result<Json> {
     {
         return Err(EngineError::Other(m));
     }
+    let active_sheet = s.doc()?.wb.active_sheet;
     edit(s, |cx| {
         if array {
-            // Legacy Ctrl+Shift+Enter array formula over the selection.
-            let range = cx.sel.current();
+            // Legacy Ctrl+Shift+Enter array formula over the selection, when the selection holds
+            // the cell; a cell elsewhere (or on another sheet) gets a one-cell array.
+            let selected = cx.sel.current();
+            let range = if sheet == active_sheet && selected.contains(at) { selected } else { RangeRef::cell(at) };
+            // A table header can't hold an array's value, and a table resizes under it.
+            if !range.is_single() && cx.wb.sheet(sheet).is_some_and(|sh| sh.tables.iter().any(|t| t.range.intersects(&range))) {
+                return Err(EngineError::Other("Multi-cell array formulas aren't allowed in tables.".into()));
+            }
             let mut cell = input_to_cell(&input, sheet, range.start, &mut cx.wb)?.unwrap_or_default();
             if let Some(f) = cell.formula.as_mut() {
                 std::sync::Arc::make_mut(f).array = Some(range);
@@ -578,6 +585,7 @@ fn undo(s: &mut Session, p: &Json) -> Result<Json> {
     let steps = u32_param(p, "steps").unwrap_or(1).max(1);
     let d = s.doc_mut()?;
     let mut label = String::new();
+    let now = d.wb.clone();
     for _ in 0..steps {
         let Some(e) = d.undo.pop() else { break };
         let cur = crate::HistoryEntry { label: e.label.clone(), wb: d.wb.clone(), selection: d.selection.clone() };
@@ -586,6 +594,7 @@ fn undo(s: &mut Session, p: &Json) -> Result<Json> {
         d.wb = e.wb;
         d.selection = e.selection;
     }
+    super::extra::keep_watch_list(&now, &mut d.wb);
     d.calc.rebuild(&d.wb);
     d.revision += 1;
     Ok(json!({"undone": label}))
@@ -595,6 +604,7 @@ fn redo(s: &mut Session, p: &Json) -> Result<Json> {
     let steps = u32_param(p, "steps").unwrap_or(1).max(1);
     let d = s.doc_mut()?;
     let mut label = String::new();
+    let now = d.wb.clone();
     for _ in 0..steps {
         let Some(e) = d.redo.pop() else { break };
         let cur = crate::HistoryEntry { label: e.label.clone(), wb: d.wb.clone(), selection: d.selection.clone() };
@@ -603,6 +613,7 @@ fn redo(s: &mut Session, p: &Json) -> Result<Json> {
         d.wb = e.wb;
         d.selection = e.selection;
     }
+    super::extra::keep_watch_list(&now, &mut d.wb);
     d.calc.rebuild(&d.wb);
     d.revision += 1;
     Ok(json!({"redone": label}))
@@ -972,7 +983,9 @@ fn paste_special(s: &mut Session, p: &Json) -> Result<Json> {
                                     e
                                 };
                                 let mut moved = Formula::from_expr(e);
-                                moved.array = f.array;
+                                // The array range moves with its formula.
+                                let (dr, dc) = (dest.row as i64 - sc.row as i64, dest.col as i64 - sc.col as i64);
+                                moved.array = f.array.and_then(|a| Some(RangeRef::new(a.start.offset(dr, dc)?, a.end.offset(dr, dc)?)));
                                 return Some(std::sync::Arc::new(moved));
                             }
                             let moved =
@@ -1139,6 +1152,10 @@ fn paste_special(s: &mut Session, p: &Json) -> Result<Json> {
 
 /// Applies a reference adjustment to every cell formula and defined name in the workbook.
 pub(crate) fn rewrite_all_formulas(wb: &mut gridcraft_model::Workbook, target: &str, e: &gridcraft_formula::adjust::Edit) {
+    use gridcraft_formula::adjust::Edit;
+    // Rows and columns inserted or deleted on the target sheet move its legacy array ranges too
+    // (a cut moves its arrays itself).
+    let moves_arrays = matches!(e, Edit::Insert { .. } | Edit::Delete { .. } | Edit::InsertCells { .. } | Edit::DeleteCells { .. });
     for si in 0..wb.sheets.len() {
         let host = wb.sheets.get(si).map(|s| s.name.clone()).unwrap_or_default();
         let keys: Vec<(CellRef, std::sync::Arc<Formula>)> =
@@ -1146,16 +1163,21 @@ pub(crate) fn rewrite_all_formulas(wb: &mut gridcraft_model::Workbook, target: &
         if keys.is_empty() {
             continue;
         }
+        let on_target = moves_arrays && host.eq_ignore_ascii_case(target);
         let Some(sheet) = wb.sheet_mut(si) else { continue };
         for (c, f) in keys {
             let Some(expr) = f.expr() else { continue };
             let new = gridcraft_formula::adjust::adjust(expr, &host, target, e);
             let text = gridcraft_formula::print(&new);
-            if text != f.text
+            let array = match f.array {
+                Some(a) if on_target => super::sheet::map_range(a, e),
+                a => a,
+            };
+            if (text != f.text || array != f.array)
                 && let Some(cell) = sheet.cells.get_mut(c)
             {
                 let mut nf = Formula::from_expr(new);
-                nf.array = f.array;
+                nf.array = array;
                 cell.formula = Some(std::sync::Arc::new(nf));
             }
         }
@@ -1552,6 +1574,22 @@ mod tests {
         assert_eq!(get(&mut s, "C4")["text"], "#N/A");
         let bar = s.doc().unwrap().wb.active().unwrap().cell(CellRef::parse("C2").unwrap()).map(|c| c.bar_text());
         assert_eq!(bar.as_deref(), Some("{=B2:B3*2}"));
+    }
+
+    #[test]
+    fn an_array_entered_outside_the_selection_covers_only_its_cell() {
+        // Found by the command-sequence fuzzer: the array took the selection's range even with
+        // `cell` elsewhere (or on another sheet), so its formula sat outside its own range and the
+        // selected cells were wiped.
+        let mut s = Session::new();
+        s.new_workbook();
+        s.execute("cell.set", json!({"cell": "K20", "input": "keep"})).unwrap();
+        s.execute("selection.set", json!({"range": "K20:K22"})).unwrap();
+        s.execute("cell.set", json!({"cell": "H5", "input": "=1+1", "array": true})).unwrap();
+        let sh = s.doc().unwrap().wb.active().unwrap();
+        let f = sh.cell(CellRef::parse("H5").unwrap()).and_then(|c| c.formula.clone()).unwrap();
+        assert_eq!(f.array, Some(RangeRef::parse("H5").unwrap()));
+        assert_eq!(sh.value(CellRef::parse("K20").unwrap()), Value::text("keep"));
     }
 
     #[test]

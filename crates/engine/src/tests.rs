@@ -1033,6 +1033,202 @@ fn slicer_filters_table() {
 }
 
 #[test]
+fn table_header_formatted_as_accounting_keeps_its_text_as_the_column_name() {
+    // Found by the command-sequence fuzzer: the accounting format pads text (` 172.4 `), and that
+    // padded text became the column name, which the XLSX writer then put in the header cell.
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [[172.4, "Qty"], [1, 2]]})).unwrap();
+    s.execute("home.accounting", json!({"range": "A1:B2"})).unwrap();
+    s.execute("insert.table", json!({"range": "A1:B2", "header": true})).unwrap();
+    let d = s.doc().unwrap();
+    let t = &d.wb.sheet(0).unwrap().tables[0];
+    let names: Vec<_> = t.columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, ["172.4", "Qty"]);
+    assert_eq!(v(&s, "A1"), Value::text("172.4"));
+    reopen(&mut s);
+    assert_eq!(v(&s, "A1"), Value::text("172.4"));
+}
+
+#[test]
+fn a_formula_moved_into_a_table_header_becomes_its_text() {
+    // Found by the command-sequence fuzzer: deleting a header row moved a formula into the
+    // header, which kept it while the XLSX writer wrote the column name there instead.
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Item", "Qty"], ["x", "=1+1"], ["y", 5]]})).unwrap();
+    s.execute("insert.table", json!({"range": "A1:B3", "header": true})).unwrap();
+    s.execute("home.deleteRows", json!({"rows": "1:1"})).unwrap();
+    let d = s.doc().unwrap();
+    let sh = d.wb.sheet(0).unwrap();
+    assert_eq!(sh.cell(CellRef::new(0, 1)).and_then(|x| x.formula.clone()), None);
+    assert_eq!(v(&s, "B1"), Value::text("2"));
+    let names: Vec<_> = sh.tables[0].columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, ["x", "2"]);
+}
+
+#[test]
+fn a_whole_column_table_without_headers_stays_on_the_sheet() {
+    // Found by the command-sequence fuzzer: the inserted header row pushed the table's end past
+    // the last row, so the table had an invalid range and was dropped from the XLSX file.
+    let mut s = s();
+    s.execute("insert.table", json!({"range": "A:C", "header": false})).unwrap();
+    let d = s.doc().unwrap();
+    assert_eq!(d.wb.sheet(0).unwrap().tables[0].range.a1(), "A:C");
+    s.execute("cell.set", json!({"cell": "E1", "input": "=ROWS(Table1)"})).unwrap();
+    assert_eq!(v(&s, "E1"), Value::Number(1_048_575.0));
+    reopen(&mut s);
+    assert_eq!(v(&s, "E1"), Value::Number(1_048_575.0));
+    s.execute("cell.set", json!({"cell": "F1048576", "input": "x"})).unwrap();
+    let e = s.execute("insert.table", json!({"range": "F:F", "header": false})).unwrap_err();
+    assert!(e.to_string().contains("pushed off the end"), "{e}");
+}
+
+#[test]
+fn autosum_over_whole_rows_is_one_undo_step_within_the_data() {
+    // Found by the command-sequence fuzzer: AutoSum over rows `3:5` ran one `cell.set` per column
+    // (16,384 undo steps, so undo never got back to the start).
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A3", "values": [[1, 2], [3, 4], [5, 6]]})).unwrap();
+    s.execute("formulas.autoSum", json!({"range": "3:5"})).unwrap();
+    assert_eq!(v(&s, "A6"), Value::Number(9.0));
+    assert_eq!(v(&s, "B6"), Value::Number(12.0));
+    let d = s.doc().unwrap();
+    assert_eq!(d.undo.len(), 2);
+    assert_eq!(d.wb.active().unwrap().cells.used_range().unwrap().a1(), "A3:B6");
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(v(&s, "A6"), Value::Empty);
+    assert_eq!(v(&s, "B6"), Value::Empty);
+}
+
+#[test]
+fn insert_and_delete_cells_never_shift_part_of_a_table() {
+    // Found by the command-sequence fuzzer: Delete Cells moved part of a table's cells (so two
+    // tables overlapped) or narrowed a table without dropping its columns, and a table without
+    // headers pushed the cells of another table down from under it.
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "D8", "values": [["a", "b", "c"], [1, 2, 3], [4, 5, 6]]})).unwrap();
+    s.execute("insert.table", json!({"range": "D8:F10", "header": true})).unwrap();
+    for (cmd, range, shift) in [
+        ("home.deleteCells", "E9:G9", "left"),
+        ("home.deleteCells", "E9", "up"),
+        ("home.insertCells", "C9:D9", "down"),
+        ("home.deleteCells", "D8:F8", "up"),
+        ("home.insertCells", "A9:B9", "right"),
+    ] {
+        let e = s.execute(cmd, json!({"range": range, "shift": shift})).unwrap_err();
+        assert!(e.to_string().contains("shift cells in a table"), "{cmd} {range} {shift}: {e}");
+    }
+    // Whole table columns: the table loses (or gains) columns with them.
+    s.execute("home.deleteCells", json!({"range": "E7:E12", "shift": "left"})).unwrap();
+    let names = |s: &Session| -> Vec<String> { s.doc().unwrap().wb.sheet(0).unwrap().tables[0].columns.iter().map(|c| c.name.clone()).collect() };
+    assert_eq!(names(&s), ["a", "c"]);
+    assert_eq!(s.doc().unwrap().wb.sheet(0).unwrap().tables[0].range.a1(), "D8:E10");
+    s.execute("home.insertCells", json!({"range": "E8:E10", "shift": "right"})).unwrap();
+    assert_eq!(names(&s), ["a", "Column2", "c"]);
+    assert_eq!(v(&s, "E8"), Value::text("Column2"));
+    let e = s.execute("insert.table", json!({"range": "H1:H2", "name": "T1"})).unwrap_err();
+    assert!(e.to_string().contains("not valid"), "a cell reference isn't a table name: {e}");
+    let e = s.execute("insert.table", json!({"range": "D5:F6", "header": false})).unwrap_err();
+    assert!(e.to_string().contains("shift cells in a table"), "{e}");
+}
+
+#[test]
+fn undo_and_redo_keep_the_watch_window_list() {
+    // Found by the command-sequence fuzzer: the list lives in the workbook but isn't an edit, so
+    // undoing an earlier edit swapped in a snapshot without it.
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "1"})).unwrap();
+    s.execute("formulas.watchWindow", json!({"add": "Sheet1!A1"})).unwrap();
+    let watched = |s: &mut Session| -> Vec<String> {
+        let rows = s.execute("formulas.watchWindow", json!({})).unwrap();
+        rows.as_array().unwrap().iter().map(|r| r["cell"].as_str().unwrap().to_string()).collect()
+    };
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(watched(&mut s), ["Sheet1!A1"], "kept after undo");
+    s.execute("edit.redo", json!({})).unwrap();
+    assert_eq!(watched(&mut s), ["Sheet1!A1"], "kept after redo");
+}
+
+#[test]
+fn merging_over_a_spill_blocks_it_and_unmerging_unblocks_it() {
+    // Found by the command-sequence fuzzer: merges changed no cell the spill depended on, so the
+    // spill went on as if the merged cells were free (a full recalc gave #SPILL!).
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "=SEQUENCE(3)"})).unwrap();
+    s.execute("home.mergeCenter", json!({"range": "A2:B3"})).unwrap();
+    assert_eq!(v(&s, "A1"), Value::Error(gridcraft_core::CellError::Spill));
+    s.execute("home.mergeCenter", json!({"range": "A2:B3"})).unwrap();
+    assert_eq!(v(&s, "A1"), Value::Number(1.0));
+    assert_eq!(v(&s, "A3"), Value::Number(3.0));
+}
+
+#[test]
+fn multi_cell_array_formulas_and_tables_dont_overlap() {
+    // Found by the command-sequence fuzzer: an array over a table header lost its value to the
+    // header name written as text, then showed #SPILL! (and reloaded from XLSX differently).
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "B2", "values": [["Item", "Qty"], ["x", 2]]})).unwrap();
+    s.execute("insert.table", json!({"range": "B2:C3", "header": true})).unwrap();
+    s.execute("selection.set", json!({"range": "B1:B2"})).unwrap();
+    let e = s.execute("cell.set", json!({"input": "=1", "array": true})).unwrap_err();
+    assert!(e.to_string().contains("aren't allowed in tables"), "{e}");
+    assert_eq!(v(&s, "B2"), Value::text("Item"));
+    s.execute("selection.set", json!({"range": "E1:E2"})).unwrap();
+    s.execute("cell.set", json!({"input": "=1", "array": true})).unwrap();
+    let e = s.execute("insert.table", json!({"range": "E2:F3"})).unwrap_err();
+    assert!(e.to_string().contains("aren't allowed in tables"), "{e}");
+    // One-cell arrays are fine.
+    s.execute("selection.set", json!({"range": "C3"})).unwrap();
+    s.execute("cell.set", json!({"input": "=5", "array": true})).unwrap();
+    assert_eq!(v(&s, "C3"), Value::Number(5.0));
+}
+
+#[test]
+fn copies_of_a_long_named_sheet_get_unique_names() {
+    // Found by the command-sequence fuzzer: `name (2)` was cut to 31 characters, so the second
+    // copy of a 30-character name took the first copy's name.
+    let mut s = s();
+    s.execute("sheet.rename", json!({"sheet": 0, "name": "Long name of a sheet 31 chars!"})).unwrap();
+    s.execute("sheet.move", json!({"sheet": 0, "to": 1, "copy": true})).unwrap();
+    s.execute("sheet.move", json!({"sheet": 0, "to": 2, "copy": true})).unwrap();
+    let d = s.doc().unwrap();
+    let names: Vec<&str> = d.wb.sheets.iter().map(|x| x.name.as_str()).collect();
+    assert_eq!(names, ["Long name of a sheet 31 chars!", "Long name of a sheet 31 cha (2)", "Long name of a sheet 31 cha (3)"]);
+}
+
+#[test]
+fn row_and_column_inserts_move_legacy_array_ranges() {
+    // Found by the command-sequence fuzzer: the formula cell moved but its array range stayed,
+    // so the array covered the wrong cells (and read back from XLSX as #SPILL!).
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "7"})).unwrap();
+    s.execute("selection.set", json!({"range": "C3:D3"})).unwrap();
+    s.execute("cell.set", json!({"input": "=$A$1*2", "array": true})).unwrap();
+    s.execute("home.insertColumns", json!({"cols": "B:B"})).unwrap();
+    s.execute("home.insertRows", json!({"rows": "1:1"})).unwrap();
+    let d = s.doc().unwrap();
+    let f = d.wb.sheet(0).unwrap().cell(CellRef::new(3, 3)).and_then(|x| x.formula.clone()).unwrap();
+    assert_eq!(f.array, Some(gridcraft_core::RangeRef::parse("D4:E4").unwrap()));
+    assert_eq!(v(&s, "E4"), Value::Number(14.0));
+    reopen(&mut s);
+    assert_eq!(v(&s, "E4"), Value::Number(14.0));
+}
+
+#[test]
+fn part_of_a_legacy_array_cant_be_changed() {
+    // Found by the command-sequence fuzzer: a value typed into an array cell showed in the
+    // workbook, but the file kept the array there (Excel refuses the edit).
+    let mut s = s();
+    s.execute("selection.set", json!({"range": "A1:A3"})).unwrap();
+    s.execute("cell.set", json!({"input": "=5", "array": true})).unwrap();
+    let e = s.execute("range.setValues", json!({"range": "A2", "values": [[13]]})).unwrap_err();
+    assert!(e.to_string().contains("part of an array"), "{e}");
+    assert_eq!(v(&s, "A2"), Value::Number(5.0));
+    // Replacing the whole array is fine.
+    s.execute("range.setValues", json!({"range": "A1", "values": [[1], [2], [3]]})).unwrap();
+    assert_eq!(v(&s, "A2"), Value::Number(2.0));
+}
+
+#[test]
 fn create_names_from_selection() {
     let names = |s: &Session| -> Vec<(String, String)> {
         let mut v: Vec<_> = s.doc().unwrap().wb.names.iter().map(|n| (n.name.clone(), n.formula.clone())).collect();

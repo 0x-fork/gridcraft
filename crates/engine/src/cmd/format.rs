@@ -561,8 +561,11 @@ fn merge(s: &mut Session, p: &Json, how: &str) -> Result<Json> {
         if how == "center" && s.doc()?.wb.sheet(sheet).is_some_and(|sh| ranges.iter().all(|r| sh.merges.contains(r))) { "unmerge" } else { how };
     edit(s, |cx| {
         let mut touched = Vec::new();
+        // Areas whose merging changes: a merged cell blocks a dynamic array's spill.
+        let mut areas: Vec<RangeRef> = ranges.clone();
         for r in &ranges {
             let sh = cx.sheet_mut(sheet)?;
+            areas.extend(sh.merges.iter().filter(|m| m.intersects(r)));
             sh.merges.retain(|m| !m.intersects(r));
             match how {
                 "unmerge" => {}
@@ -592,6 +595,17 @@ fn merge(s: &mut Session, p: &Json, how: &str) -> Result<Json> {
                     }
                 }
             }
+        }
+        // Spills over the areas, and blocked ones that could reach them, are evaluated again.
+        let sh = cx.sheet_mut(sheet)?;
+        for a in &areas {
+            touched.extend(sh.spill_ranges.iter().filter(|(_, r)| r.intersects(a)).map(|(anchor, _)| (sheet, *anchor)));
+            let reach = RangeRef::new(CellRef::new(0, 0), a.end);
+            let blocked = sh
+                .cells
+                .iter_range(reach)
+                .filter(|(_, x)| x.formula.is_some() && x.value == gridcraft_core::Value::Error(gridcraft_core::CellError::Spill));
+            touched.extend(blocked.map(|(c, _)| (sheet, c)));
         }
         cx.changed.extend(touched);
         Ok(())

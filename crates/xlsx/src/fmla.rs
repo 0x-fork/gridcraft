@@ -76,7 +76,9 @@ fn expr_to_file(e: Expr) -> String {
             Some(n) => Expr::Call(n, args),
             None => Expr::Call(name, args),
         },
-        // Files have no `#` operator: Excel writes `A1#` as `_xlfn.ANCHORARRAY(A1)`.
+        // Files have no `#` operator: Excel writes `A1#` as `_xlfn.ANCHORARRAY(A1)`, and a spill
+        // reference that became `#REF!` (its cell was deleted) as plain `#REF!`.
+        Expr::Unary(gridcraft_formula::UnOp::Spill, r) if matches!(*r, Expr::Error(_)) => *r,
         Expr::Unary(gridcraft_formula::UnOp::Spill, r) => Expr::Call("_xlfn.ANCHORARRAY".into(), vec![*r]),
         // Nor an `@` operator: Excel writes `@x` as `_xlfn.SINGLE(x)`.
         Expr::Unary(gridcraft_formula::UnOp::At, x) => Expr::Call("_xlfn.SINGLE".into(), vec![*x]),
@@ -115,6 +117,11 @@ mod tests {
         assert_eq!(to_file(&Formula::new("SUM(Sheet1!$D$1#)+B2#")), "SUM(_xlfn.ANCHORARRAY(Sheet1!$D$1))+_xlfn.ANCHORARRAY(B2)");
         assert_eq!(text_to_file("=Sheet1!$D$1#"), "_xlfn.ANCHORARRAY(Sheet1!$D$1)");
         assert_eq!(from_file("SUM(_xlfn.ANCHORARRAY(Sheet1!$D$1))+_xlfn.ANCHORARRAY(B2)"), "SUM(Sheet1!$D$1#)+B2#");
+        // Found by the command-sequence fuzzer: deleting the anchor of `H5#` left `=#REF!` in
+        // the workbook but `ANCHORARRAY(#REF!)` in the file, which read back differently.
+        let deleted = Formula::from_expr(Expr::Unary(gridcraft_formula::UnOp::Spill, Box::new(Expr::Error(gridcraft_core::CellError::Ref))));
+        assert_eq!(deleted.text, "#REF!");
+        assert_eq!(to_file(&deleted), "#REF!");
     }
 
     #[test]
