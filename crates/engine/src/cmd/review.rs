@@ -132,6 +132,12 @@ fn convert_notes(s: &mut Session, _: &Json) -> Result<Json> {
 
 fn protect_sheet(s: &mut Session, p: &Json) -> Result<Json> {
     let sheet = target_sheet(s, p)?;
+    // Re-protecting a password-protected sheet would replace the password without knowing it:
+    // unprotect it first, as in Excel. One without a password can take new options directly.
+    let has_password = |pr: &SheetProtection| pr.password.is_some() || pr.legacy_password_hash.is_some();
+    if s.doc()?.wb.sheet(sheet).and_then(|sh| sh.protection.as_ref()).is_some_and(has_password) {
+        return Err(EngineError::Other("The sheet is protected with a password. Unprotect it first (Review › Unprotect Sheet).".into()));
+    }
     let b = |k: &str| bool_param(p, k).unwrap_or(false);
     let prot = SheetProtection {
         password: None,
@@ -401,6 +407,9 @@ mod tests {
         assert!(matches!(&prot.password, Some(PasswordHash::Iterated { algorithm, .. }) if algorithm == "SHA-512"));
         assert!(s.execute("review.unprotectSheet", json!({})).is_err());
         assert!(s.execute("review.unprotectSheet", json!({"password": "pass"})).is_err());
+        // Protecting again can't swap the password out from under it.
+        assert!(s.execute("review.protectSheet", json!({})).is_err());
+        assert_eq!(s.doc().unwrap().wb.active().unwrap().protection.as_ref(), Some(&prot));
         s.execute("review.unprotectSheet", json!({"password": "pa55"})).unwrap();
         assert!(!s.doc().unwrap().wb.active().unwrap().is_protected());
         // A GridCraft JSON workbook saved before carried the internal hash under `password_hash`.
