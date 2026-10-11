@@ -934,6 +934,10 @@ pub(crate) fn paint_quadrant(
         if cfl.as_ref().is_some_and(|l| l.hide_value) || v.is_empty() {
             continue;
         }
+        // Align and clip header text inside the content area, away from the dropdown.
+        let filter_space = sh.filter_button_space(c) * z;
+        let text_rect = Rect::from_min_max(rect.min, pos2((rect.right() - filter_space).max(rect.left()), rect.bottom()));
+        let rect = &text_rect;
         let st = &lk.style;
         let size = st.font.size * 96.0 / 72.0 * z;
         let fam = theme::cell_family(&st.font.name, st.font.bold, st.font.italic);
@@ -1012,7 +1016,13 @@ pub(crate) fn paint_quadrant(
         }
         // Overflow into empty neighbours for text (not upright text, whose width is its line height).
         let mut clip = *rect;
-        if !numeric && !matches!(v, Value::Number(_)) && st.align.rotation.abs() != 90 && w > rect.width() - 2.0 * pad && in_merge(c).is_none() {
+        if filter_space == 0.0
+            && !numeric
+            && !matches!(v, Value::Number(_))
+            && st.align.rotation.abs() != 90
+            && w > rect.width() - 2.0 * pad
+            && in_merge(c).is_none()
+        {
             let mut right = rect.right();
             let mut left = rect.left();
             if matches!(halign, HAlign::Left | HAlign::Center | HAlign::Justify) {
@@ -1170,8 +1180,10 @@ pub(crate) fn paint_quadrant(
 
 pub fn filter_button_rect(geo: &Geo, sh: &Sheet, c: CellRef) -> Rect {
     let rect = geo.cell_rect(sh, c);
-    let s = (rect.height() - 4.0).clamp(10.0, 18.0);
-    Rect::from_min_size(pos2(rect.right() - s - 2.0, rect.bottom() - s - 2.0), vec2(s, s))
+    // Keep the button within the same header slot that AutoFit reserves.
+    let pad = 2.0 * geo.z;
+    let s = (rect.height() - 4.0).clamp(10.0, 18.0).min((sh.filter_button_space(c) * geo.z - pad).max(0.0));
+    Rect::from_min_size(pos2(rect.right() - s - pad, rect.bottom() - s - pad), vec2(s, s))
 }
 
 /// The outline segments of merged area `m` drawn at `rect`: the top and left edges come from the
@@ -2226,12 +2238,7 @@ fn row_edge(geo: &Geo, sh: &Sheet, y: f32) -> Option<(u32, f32)> {
 
 fn is_filter_button(sh: &Sheet, geo: &Geo, p: Pos2) -> bool {
     let c = geo.cell_at(sh, p);
-    let header = sh.autofilter.as_ref().is_some_and(|af| af.range.start.row == c.row && c.col >= af.range.start.col && c.col <= af.range.end.col)
-        || sh
-            .tables
-            .iter()
-            .any(|t| t.filter_button && t.header_row && t.range.start.row == c.row && c.col >= t.range.start.col && c.col <= t.range.end.col);
-    header && filter_button_rect(geo, sh, c).contains(p)
+    sh.has_filter_button(c) && filter_button_rect(geo, sh, c).contains(p)
 }
 
 fn object_anchor(sh: &Sheet, kind: &str, id: u32) -> Option<gridcraft_engine::model::Anchor> {

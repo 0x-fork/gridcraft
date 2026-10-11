@@ -1019,7 +1019,9 @@ fn autofit_cols(s: &mut Session, p: &Json) -> Result<Json> {
                     let st = cx.wb.styles.get(sh.style_id(cell));
                     let text = crate::display::cell_text(&cx.wb, sh, cell);
                     for line in text.lines() {
-                        max = max.max(approx_text_width(line, st.font.size, st.font.bold) + 6.0 + st.align.indent as f32 * 9.0);
+                        max = max.max(
+                            approx_text_width(line, st.font.size, st.font.bold) + 6.0 + st.align.indent as f32 * 9.0 + sh.filter_button_space(cell),
+                        );
                     }
                 }
                 if max > 0.0 {
