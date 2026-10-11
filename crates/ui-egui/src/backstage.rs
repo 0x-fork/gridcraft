@@ -773,7 +773,7 @@ fn options(app: &mut SheetApp, ui: &mut Ui) {
         ui.end_row();
     });
     ui.add_space(6.0);
-    let mut formula_bar = app.ui.formula_bar;
+    let mut formula_bar = app.session.prefs.formula_bar;
     if ui.checkbox(&mut formula_bar, lang.tr("Show formula bar")).changed() {
         app.run_or_alert("view.formulaBar", json!({"on": formula_bar}));
     }
