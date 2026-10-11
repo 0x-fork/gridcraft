@@ -284,3 +284,31 @@ pub fn notice_bar(app: &mut SheetApp, ui: &mut Ui) {
         app.notice = None;
     }
 }
+
+/// Turn a monochrome image (black on white) into an alpha mask tinted with the active text color.
+pub fn raster_to_alpha_mask(pixels: &mut [egui::Color32]) {
+    for p in pixels.iter_mut() {
+        // Darkness of source becomes the opacity
+        let darkness = 255u8.saturating_sub(p.r());
+        // Pure white glyph with variable alpha
+        *p = egui::Color32::from_rgba_unmultiplied(255, 255, 255, darkness);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_raster_to_alpha_mask() {
+        let mut pixels = vec![
+            egui::Color32::WHITE,                   // r=255 -> darkness=0 -> alpha=0
+            egui::Color32::BLACK,                   // r=0 -> darkness=255 -> alpha=255
+            egui::Color32::from_rgb(100, 100, 100), // r=100 -> darkness=155 -> alpha=155
+        ];
+        raster_to_alpha_mask(&mut pixels);
+        assert_eq!(pixels[0], egui::Color32::from_rgba_unmultiplied(255, 255, 255, 0));
+        assert_eq!(pixels[1], egui::Color32::from_rgba_unmultiplied(255, 255, 255, 255));
+        assert_eq!(pixels[2], egui::Color32::from_rgba_unmultiplied(255, 255, 255, 155));
+    }
+}
