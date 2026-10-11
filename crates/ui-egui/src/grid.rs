@@ -1673,9 +1673,7 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                 d.selection.anchor = sel.anchor;
             }
         } else if mods.command {
-            let mut ranges: Vec<String> = sel.ranges.iter().map(|r| r.a1()).collect();
-            ranges.push(c.a1());
-            let _ = app.session.run("selection.set", json!({"range": ranges.join(","), "active": c.a1()}));
+            select_ranges(app, RangeRef::cell(c), true, c);
         } else {
             let _ = app.session.run("selection.set", json!({"cell": c.a1()}));
             if primary_clicked && wb.styles.get(sh.style_id(c)).num_fmt.as_str() == "checkbox" {
@@ -2097,11 +2095,32 @@ pub fn follow_link(app: &mut SheetApp, target: &str) {
     }
 }
 
+/// The areas after a click: with `add` (Ctrl) the clicked area is added, or removed when it is already
+/// selected (unless it is the only one, so the selection never ends up empty).
+fn toggled_ranges(mut ranges: Vec<String>, clicked: String, add: bool) -> Vec<String> {
+    if !add {
+        return vec![clicked];
+    }
+    if ranges.len() > 1 && ranges.contains(&clicked) {
+        ranges.retain(|x| *x != clicked);
+    } else if !ranges.contains(&clicked) {
+        ranges.push(clicked);
+    }
+    ranges
+}
+
 fn select_ranges(app: &mut SheetApp, r: RangeRef, add: bool, active: CellRef) {
-    let mut ranges: Vec<String> =
+    let current: Vec<String> =
         if add { app.session.active().map(|d| d.selection.ranges.iter().map(|x| x.a1()).collect()).unwrap_or_default() } else { vec![] };
-    ranges.push(r.a1());
-    let _ = app.session.run("selection.set", json!({"range": ranges.join(","), "active": active.a1()}));
+    let clicked = r.a1();
+    let ranges = toggled_ranges(current, clicked.clone(), add);
+    // A removed area takes the active cell with it; `selection.set` then puts it at the start of the last area.
+    let params = if ranges.contains(&clicked) {
+        json!({"range": ranges.join(","), "active": active.a1()})
+    } else {
+        json!({"range": ranges.join(",")})
+    };
+    let _ = app.session.run("selection.set", params);
 }
 
 /// Grid keyboard handling when no text field has focus.
@@ -2890,6 +2909,16 @@ mod pane_tests {
         assert!(!range_in_pane(sel, frozen_cols.0, frozen_cols.1));
         assert!(!range_in_pane(sel, frozen_rows.0, frozen_rows.1));
         assert!(!range_in_pane(sel, corner.0, corner.1));
+    }
+
+    #[test]
+    fn ctrl_click_on_a_selected_header_deselects_it() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(toggled_ranges(s(&["A:A", "C:C"]), "C:C".into(), true), s(&["A:A"]));
+        assert_eq!(toggled_ranges(s(&["A:A"]), "C:C".into(), true), s(&["A:A", "C:C"]));
+        assert_eq!(toggled_ranges(s(&["A:A"]), "A:A".into(), true), s(&["A:A"]));
+        assert_eq!(toggled_ranges(s(&["A1", "B2", "3:3"]), "B2".into(), true), s(&["A1", "3:3"]));
+        assert_eq!(toggled_ranges(s(&["A:A", "C:C"]), "C:C".into(), false), s(&["C:C"]));
     }
 
     #[test]
