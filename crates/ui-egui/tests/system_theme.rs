@@ -162,3 +162,29 @@ fn invalid_mode_preserves_preferences_and_legacy_overrides_leave_system_mode() {
     system_theme(&mut h, Some(Theme::Dark));
     assert_appearance(&h, false);
 }
+
+#[test]
+fn title_bar_switch_and_file_menu_choose_the_theme() {
+    // #194: one click in the title bar switches light/dark; File › Display theme offers all three.
+    let mut h = harness(UiState::default());
+    system_theme(&mut h, Some(Theme::Light));
+    assert_appearance(&h, false);
+    h.get_by_role_and_label(egui::accesskit::Role::CheckBox, "Dark Mode").click();
+    h.run_steps(2);
+    assert_eq!(preferences(&h)["dark"], true);
+    assert_eq!(preferences(&h)["systemTheme"], false);
+    assert_appearance(&h, true);
+    h.get_by_role_and_label(egui::accesskit::Role::CheckBox, "Dark Mode").click();
+    h.run_steps(2);
+    assert_appearance(&h, false);
+
+    h.get_by_label("File").click();
+    h.run_steps(3);
+    h.get_by_label("Display theme ⏵").click();
+    h.run_steps(3);
+    h.get_by_label("System").click();
+    h.run_steps(3);
+    assert_eq!(preferences(&h)["systemTheme"], true);
+    system_theme(&mut h, Some(Theme::Dark));
+    assert_appearance(&h, true);
+}

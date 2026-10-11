@@ -113,6 +113,16 @@ pub fn title_bar(app: &mut SheetApp, ui: &mut Ui) {
                 if icon_button(ui, Icon::Comment, t.text_dim, "Comments", vec2(28.0, 26.0)).clicked() {
                     app.open_dialog("comments", json!({}));
                 }
+                // Quick light/dark switch (#194); right-click offers System as well. The same
+                // choice lives in File › Display theme and the View tab.
+                let lang = app.ui.language;
+                let theme = icon_button(ui, Icon::Appearance, t.text_dim, "Dark Mode", vec2(28.0, 26.0));
+                let dark = ui.ctx().theme() == egui::Theme::Dark;
+                theme.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, dark, lang.tr("Dark Mode")));
+                if theme.clicked() {
+                    act(app, "view.darkMode", json!({}));
+                }
+                theme.context_menu(|ui| theme_choices(app, ui));
             });
         });
     });
@@ -230,7 +240,22 @@ fn file_menu(app: &mut SheetApp, ui: &mut Ui) {
                 ui.close();
             }
         }
+        // Excel keeps the theme under File › Account › Office Theme (#194).
+        ui.separator();
+        ui.menu_button(app.ui.language.tr("Display theme"), |ui| theme_choices(app, ui));
     });
+}
+
+/// System / Light / Dark, as in the View tab's Display theme box (`view.theme`).
+fn theme_choices(app: &mut SheetApp, ui: &mut Ui) {
+    let lang = app.ui.language;
+    let mode = app.ui.theme_mode();
+    for (value, label) in [("system", "System"), ("light", "Light"), ("dark", "Dark")] {
+        if ui.radio(mode == value, lang.tr(label)).clicked() {
+            act(app, "view.theme", json!({"mode": value}));
+            ui.close();
+        }
+    }
 }
 
 fn contextual_tabs(app: &SheetApp) -> Vec<&'static str> {
