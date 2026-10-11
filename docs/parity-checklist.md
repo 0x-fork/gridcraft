@@ -4,7 +4,7 @@
 
 Each entry is an Excel ribbon or menu command (feature names only). It counts as implemented when GridCraft registers a command with the same id. This measures breadth only; the overall assessment (depth, fidelity, effort) is in [target-app-parity.md](target-app-parity.md).
 
-**Overall: 271 / 290 commands implemented (93.4%).**
+**Overall: 272 / 290 commands implemented (93.8%).**
 
 | Tab | Implemented | Total | Parity |
 |---|---|---|---|
@@ -14,7 +14,7 @@ Each entry is an Excel ribbon or menu command (feature names only). It counts as
 | Draw | 4 | 4 | 100% |
 | Page Layout | 23 | 23 | 100% |
 | Formulas | 23 | 23 | 100% |
-| Data | 22 | 28 | 79% |
+| Data | 23 | 28 | 82% |
 | Review | 15 | 18 | 83% |
 | View | 20 | 20 | 100% |
 | Automate | 3 | 3 | 100% |
