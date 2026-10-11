@@ -8,7 +8,7 @@ use std::sync::Arc;
 use egui::{Align2, Color32, CursorIcon, FontId, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use gridcraft_engine::cf::{CfCache, CfLook};
 use gridcraft_engine::core::{CellRef, MAX_COLS, MAX_ROWS, RangeRef, Value, col_to_letters};
-use gridcraft_engine::model::{BorderStyle, Color, HAlign, LineIndex, PatternType, Sheet, Style, Underline, VAlign, Workbook};
+use gridcraft_engine::model::{BorderLine, BorderStyle, Color, HAlign, LineIndex, PatternType, Sheet, Style, Underline, VAlign, Workbook};
 use serde_json::json;
 
 use crate::SheetApp;
@@ -1037,12 +1037,19 @@ pub(crate) fn paint_quadrant(
     // Borders (over fills and text).
     for (c, rect, lk, _) in &looks {
         let b = &lk.style.borders;
-        let edges = [
-            (b.top, [rect.left_top(), rect.right_top()]),
-            (b.bottom, [rect.left_bottom(), rect.right_bottom()]),
-            (b.left, [rect.left_top(), rect.left_bottom()]),
-            (b.right, [rect.right_top(), rect.right_bottom()]),
-        ];
+        let merge = merges.iter().find(|m| m.start == *c);
+        let edges = match merge {
+            // A merged area's outline lives on the cells along each of its edges (Excel writes the
+            // right edge on the last column's cells and the bottom edge on the last row's), so each
+            // edge is drawn cell by cell from the cell it belongs to.
+            Some(m) => merged_edges(wb, si, sh, geo, *m, *rect, (r0, r1), (c0, c1), cf),
+            None => vec![
+                (b.top, [rect.left_top(), rect.right_top()]),
+                (b.bottom, [rect.left_bottom(), rect.right_bottom()]),
+                (b.left, [rect.left_top(), rect.left_bottom()]),
+                (b.right, [rect.right_top(), rect.right_bottom()]),
+            ],
+        };
         for (line, pts) in edges {
             if line.is_none() {
                 continue;
@@ -1111,6 +1118,47 @@ pub fn filter_button_rect(geo: &Geo, sh: &Sheet, c: CellRef) -> Rect {
     let rect = geo.cell_rect(sh, c);
     let s = (rect.height() - 4.0).clamp(10.0, 18.0);
     Rect::from_min_size(pos2(rect.right() - s - 2.0, rect.bottom() - s - 2.0), vec2(s, s))
+}
+
+/// The outline segments of merged area `m` drawn at `rect`: the top and left edges come from the
+/// first row's and first column's cells, the bottom and right edges from the last row's and last
+/// column's cells, one segment per visible cell (limited to the visible `rows` × `cols`).
+#[allow(clippy::too_many_arguments)]
+fn merged_edges(
+    wb: &Workbook,
+    si: usize,
+    sh: &Sheet,
+    geo: &Geo,
+    m: RangeRef,
+    rect: Rect,
+    rows: (u32, u32),
+    cols: (u32, u32),
+    cf: &mut CfCache,
+) -> Vec<(BorderLine, [Pos2; 2])> {
+    let mut out = Vec::new();
+    let (cs, ce) = (m.start.col.max(cols.0), m.end.col.min(cols.1));
+    for col in cs..=ce {
+        if sh.col_width(col) == 0.0 {
+            continue;
+        }
+        let (x0, x1) = (geo.x(sh, col), geo.x(sh, col.saturating_add(1)));
+        let top = look(wb, si, sh, CellRef::new(m.start.row, col), cf).0.style.borders.top;
+        let bottom = look(wb, si, sh, CellRef::new(m.end.row, col), cf).0.style.borders.bottom;
+        out.push((top, [pos2(x0, rect.top()), pos2(x1, rect.top())]));
+        out.push((bottom, [pos2(x0, rect.bottom()), pos2(x1, rect.bottom())]));
+    }
+    let (rs, re) = (m.start.row.max(rows.0), m.end.row.min(rows.1));
+    for row in rs..=re {
+        if sh.row_height(row) == 0.0 {
+            continue;
+        }
+        let (y0, y1) = (geo.y(sh, row), geo.y(sh, row.saturating_add(1)));
+        let left = look(wb, si, sh, CellRef::new(row, m.start.col), cf).0.style.borders.left;
+        let right = look(wb, si, sh, CellRef::new(row, m.end.col), cf).0.style.borders.right;
+        out.push((left, [pos2(rect.left(), y0), pos2(rect.left(), y1)]));
+        out.push((right, [pos2(rect.right(), y0), pos2(rect.right(), y1)]));
+    }
+    out
 }
 
 pub(crate) fn paint_border(p: &Painter, pts: [Pos2; 2], style: BorderStyle, col: Color32) {
