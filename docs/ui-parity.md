@@ -57,10 +57,62 @@ Sources: `crates/ui-egui/src` (ribbon, grid, editor, formula bar, dialogs, panes
 | F2, F4, F5, F9 family, Shift+F3, F11 | yes | most; F11 chart sheet missing (no chart sheets) |
 | Mac-specific (Cmd variants, Fn keys) | yes | Cmd mapping done |
 | Delete selected charts, pictures and shapes | yes | done (#213) |
+| Shortcuts bound to commands | 200+ documented shortcuts per platform | audited below (#110): shortcuts whose feature exists are bound, with the exceptions listed; the rest wait for their features |
+| Ctrl+arrow, Ctrl+Shift+arrow, Ctrl+Home/End, Ctrl+Shift+Home/End, Page Up/Down, Alt+Page | yes | done |
+| Ctrl+1, Ctrl+; and Ctrl+Shift+; , Ctrl+D/R, Ctrl+E, Ctrl+T/L, Ctrl+K, Ctrl+Shift+L, Ctrl+Shift+~!@#$%^&_ | yes | done |
+| F2, F4, F5, F7, F9 family, Shift+F2/F3/F10/F11, F12 | yes | done; F11 chart sheet, F8 extend mode, F3 Paste Name, F4 Repeat missing |
+| Mac-specific (Cmd variants, Control variants, Fn keys) | yes | done where a feature exists (`keymap.rs` picks the Mac variant) |
 | Requests | — | #110 (more shortcuts and hot keys), #33 (sequential Alt; initial support landed in #43) |
 
-Work: a shortcut table generated from the command catalog checked against Microsoft's published
-shortcut lists for Windows and Mac, then fill the gaps: 6–10 h.
+### Shortcut audit (#110)
+
+Checked against Microsoft's published "Keyboard shortcuts in Excel" (Windows and Mac tables,
+2026-10-11). Alt key-tip sequences are tracked separately (#33). Bindings live in
+`crates/ui-egui/src/grid.rs` (navigation, editing keys), `ribbon::shortcut` (Ctrl/Cmd letters),
+`keymap.rs` (everything added in #110, with a `lookup` table that tests cover) and
+`formula_bar.rs` (keys while editing). "Ctrl" means Cmd on a Mac unless the Mac column says
+otherwise. Number-format and border keys match the physical key (Ctrl+Shift+4, wherever `$` is).
+
+| Shortcut (Windows) | Mac | Action | Status |
+|---|---|---|---|
+| Ctrl+C / X / V, Ctrl+Z / Y, Ctrl+A, Ctrl+B / I / U | same with Cmd | clipboard, undo/redo, select all, bold/italic/underline | present |
+| Ctrl+S, Ctrl+Shift+S, Ctrl+O, Ctrl+N, Ctrl+W | Cmd | save, save as, open, new, close | present |
+| Ctrl+F, Ctrl+H, Ctrl+G, Ctrl+K, Ctrl+T | Cmd (Ctrl+H) | find, replace, go to, hyperlink, table | present |
+| Ctrl+D, Ctrl+R, Ctrl+E, Ctrl+1, Ctrl+9 / 0, Ctrl+Shift+9 / 0 | Cmd (Ctrl+E on Mac: see below) | fill down/right, Flash Fill, Format Cells, hide/unhide | present |
+| Ctrl+- , Ctrl+Shift+= | Cmd | Delete / Insert cells dialog | present |
+| Ctrl+; , Ctrl+` | Control+; | current date, show formulas | present (Mac Control+; added) |
+| Arrows, Shift / Ctrl / Ctrl+Shift+arrows, Home, Ctrl+Home / End, Page Up / Down, Ctrl+Page Up / Down | Cmd+arrows | navigation and extension | present |
+| Tab, Shift+Tab, Enter, Shift+Enter, Ctrl+Space, Shift+Space, Delete, Esc | same | entry and selection | present |
+| F2, F9, F10 (key tips), F4 / Alt+Enter / Ctrl+Enter / Ctrl+Shift+Enter while editing | same | edit, calculate, references, new line, fill, array | present |
+| Ctrl+Shift+~ ! @ # $ % ^ | Control+Shift | General, Number, Time, Date, Currency, Percent, Scientific | **added** |
+| Ctrl+Shift+& / Ctrl+Shift+_ | Cmd+Option+0 / Cmd+Option+- (and Cmd+Option+arrows for one side) | outline border / remove borders | **added** |
+| Ctrl+2 / 3 / 4 / 5 | — | bold / italic / underline / strikethrough | **added** |
+| Ctrl+Shift+: | Cmd+; | current time | **added** |
+| Ctrl+' / Ctrl+Shift+" | Control | formula / value from the cell above | **added** |
+| Ctrl+L | Cmd+L is Align Left, Cmd+E Center, Control+E Flash Fill | create table | **added** |
+| Ctrl+Shift+L | Cmd+Shift+F (present) / Control+Shift+L | filter | **added** |
+| Ctrl+Shift+F, Ctrl+Shift+G | — | Format Cells Font tab, Workbook Statistics | **added** |
+| — | Cmd+Shift+H, Cmd+Shift+R, Cmd+Shift+K / J, Control+L, Control+U | replace, sort, group / ungroup, Define Name, edit cell | **added** |
+| Alt+Shift+Right / Left | Option+Right / Left is next/previous sheet | group / ungroup | **added** |
+| Ctrl+Shift+* (Ctrl+Shift+8), Ctrl+Shift+Space | Cmd+Shift+Space | current region, select all | **added** |
+| Ctrl+Shift+Home / End, Shift+Home | same | extend to A1 / last used cell / row start | **added** |
+| Ctrl+P | Cmd+P | print | **added** |
+| Ctrl+Shift+> / < | Cmd+Shift+> / < | font size | **added** |
+| Ctrl+Alt+V | Cmd+Control+V, Cmd+Option+V | Paste Special | **added** |
+| Ctrl+Alt+= / Ctrl+Alt+- | — | zoom in / out (10% steps) | **added** |
+| Alt+=, Alt+Down, Alt+Page Down / Up | Option+Down, Option+Page Down / Up | AutoSum, drop-down list, one screen right / left | **added** |
+| Alt+F1, Alt+Shift+F1, Shift+F11 | Shift+F11 | embedded chart, new sheet | **added** |
+| Shift+F2, Ctrl+Shift+F2 | Shift+F2, Cmd+Shift+F2 | note, threaded comment | **added** |
+| Shift+F3, Ctrl+F3, Ctrl+Shift+F3 | Shift+F3, Cmd+F3 (Define Name), Cmd+Shift+F3 | Insert Function, Name Manager, Create from Selection | **added** |
+| F5, Shift+F5 (Mac), F7, Shift+F9, Ctrl+Alt+F9, F12, Ctrl+F4 | same | Go To, Find, Spelling, calculate sheet / all, Save As, close | **added** |
+| Shift+F10, Alt+Shift+F10, Ctrl+F1 | Shift+F10, Cmd+Option+R | context menu, Error Checking, ribbon | **added** |
+| F1, F3, F4 (repeat), F6 / Shift+F6, F8 / Shift+F8, F11, End mode | same | help, Paste Name, Repeat, pane cycling, extend/add mode, chart sheet | missing (no such feature yet) |
+| Ctrl+6, Ctrl+8, Ctrl+Q, Ctrl+Shift+A, Ctrl+A after a function name, Ctrl+Shift+U, Ctrl+Alt+P | same | objects, outline symbols, Quick Analysis, argument names, Function Arguments, formula bar height, tooltips | missing |
+| Ctrl+Shift+Page Up / Down, Ctrl+Alt+5, Ctrl+Shift+F1, Ctrl+F5–F10, Alt+F8 / F11 / F12 | same | group sheets, shape cycling, full screen, window keys, macros, VBA, Power Query | missing |
+| — | Cmd+= (calculate), Cmd+T (references while editing; F4 works), Shift+F7, Cmd+Shift+L | Mac-only extras | missing (Cmd+= is egui's zoom key; no thesaurus or Modify Cell Style) |
+
+On Windows, AltGr arrives as Ctrl+Alt: a Ctrl+Alt key that also types a character is treated as
+text, so AltGr symbols (e.g. `~` on a German layout) never trigger a shortcut.
 
 ## Dialogs
 
@@ -84,7 +136,7 @@ by rule and will never match Office's, by design.
 
 ## Work (50–80 h)
 
-Key tips 3–5 · shortcut audit 6–10 · context menus and Quick Analysis 5–8 · Page Layout view
+Key tips 3–5 · remaining shortcuts with their features 2–4 · context menus and Quick Analysis 5–8 · Page Layout view
 8–12 · Options dialog and ribbon/QAT customization 6–10 · accessibility 12–18 · selection and
 scrollbar bugs 2–4 · pixel/feel pass against observed Excel 7–12.
 
@@ -95,5 +147,6 @@ scrollbar bugs 2–4 · pixel/feel pass against observed Excel 7–12.
 | 2026-10-11 | minor | Delete and Backspace now remove the selected chart, picture or shape (#213) |
 | 2026-10-10 | minor | Keep formula helpers inside the worksheet when scrolling (#200) |
 | 2026-10-11 | trivial | Theme: title-bar light/dark switch, File › Display theme, system appearance on first run (#194, #239) |
+| 2026-10-11 | minor | Keyboard shortcut audit against Microsoft's Windows and Mac lists; missing shortcuts for existing features added (#110) |
 | 2026-10-10 | minor | Chart resize bug (#190) |
 | 2026-10-10 | major | Created: chrome, grid, keyboard, dialogs, accessibility; key tips, Page Layout view and accessibility tree flagged |

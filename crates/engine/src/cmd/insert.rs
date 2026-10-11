@@ -157,8 +157,10 @@ pub fn specs() -> Vec<CommandSpec> {
             has_doc,
             insert_link
         ),
-        cmd!("review.newNote", "New Note", ["Review", "Notes"], None, "{cell?, text, author?}", has_doc, |s, p| comment(s, p, false)),
-        cmd!("review.newComment", "New Comment", ["Review", "Comments"], None, "{cell?, text, author?}", has_doc, |s, p| comment(s, p, true)),
+        cmd!("review.newNote", "New Note", ["Review", "Notes"], Some("Shift+F2"), "{cell?, text, author?}", has_doc, |s, p| comment(s, p, false)),
+        cmd!("review.newComment", "New Comment", ["Review", "Comments"], Some("Cmd+Shift+F2"), "{cell?, text, author?}", has_doc, |s, p| comment(
+            s, p, true
+        )),
         cmd!("review.replyComment", "Reply", [], None, "{cell?, text, author?}", has_doc, reply_comment),
         cmd!("review.resolveComment", "Resolve Thread", [], None, "{cell?, resolved?: true}", has_doc, resolve_comment),
         cmd!("review.deleteComment", "Delete Comment", ["Review", "Comments"], None, "{cell?}", has_doc, delete_comment),

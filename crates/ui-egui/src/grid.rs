@@ -1949,8 +1949,11 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
                     return;
                 }
             }
-            egui::Event::Key { key, pressed: true, modifiers: m, .. } => {
+            egui::Event::Key { key, physical_key, pressed: true, modifiers: m, .. } => {
                 use egui::Key;
+                if crate::keymap::dispatch(app, ctx, key, physical_key, m, geo, sh) {
+                    continue;
+                }
                 let cmd = m.command;
                 let shift = m.shift;
                 let mv = |app: &mut SheetApp, dr: i64, dc: i64| {
