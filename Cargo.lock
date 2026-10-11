@@ -1427,6 +1427,7 @@ dependencies = [
  "image",
  "log",
  "muda",
+ "pollster 1.0.1",
  "rfd",
  "serde_json",
  "winresource",

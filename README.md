@@ -230,8 +230,16 @@ $env:WGPU_BACKEND = "vulkan"
 Remove-Item Env:WGPU_BACKEND                     # restore the default for later launches
 ```
 
-An explicit `gl` override can bring the driver crash back on affected systems. The macOS, Linux
-and web backend defaults are unchanged.
+An explicit `gl` override can bring the driver crash back on affected systems, and `vulkan` can
+bring back a crash in some Intel UHD Graphics drivers (`igvk64.dll`, #120). The macOS, Linux and
+web backend defaults are unchanged.
+
+**If the app is slow on an older Windows PC, or DirectX 12 can't start:** when DirectX 12 finds no
+graphics card with a driver for it, it only offers Microsoft's software renderer, which draws every
+frame on the processor. In that case GridCraft uses OpenGL instead, without setting anything; if
+the first renderer fails to start, it tries the other one once. The log file records the choice
+(lines starting with `graphics:`). `WGPU_BACKEND` still overrides it (and then nothing else is
+tried), e.g. `$env:WGPU_BACKEND = "gl"` or `"dx12"`.
 
 ### macOS
 

@@ -285,37 +285,65 @@ fn main() -> eframe::Result<()> {
         viewport = viewport.with_icon(i);
     }
     let options = eframe::NativeOptions { viewport, ..Default::default() };
-    // Before eframe creates the wgpu instance: default Windows to DirectX 12 only (see graphics.rs).
+    // Before eframe creates the wgpu instance: Windows starts on DirectX 12, or OpenGL when
+    // DirectX 12 has no GPU driver, and never touches Vulkan unless asked (see graphics.rs).
     #[cfg(target_os = "windows")]
-    let options = {
+    let backend_override = eframe::wgpu::Backends::from_env();
+    #[cfg(target_os = "windows")]
+    let (options, first_backends) = {
         let mut options = options;
-        graphics::configure(&mut options, eframe::wgpu::Backends::from_env());
-        options
+        let backends = graphics::configure(&mut options, backend_override);
+        (options, backends)
     };
+    #[cfg(target_os = "windows")]
+    let retry_options = options.clone();
     // Registered before the event loop starts, so it catches the Finder event that launched us as
     // well as later ones. Lives until the event loop returns; the app creator only borrows it.
     #[cfg(target_os = "macos")]
     let apple_events = apple_events::AppleEvents::install();
     #[cfg(target_os = "macos")]
     let apple_events = &apple_events;
-    eframe::run_native(
-        "GridCraft",
-        options,
-        Box::new(move |cc| {
-            SheetApp::setup_context_for_language(&cc.egui_ctx, app.ui.dark, app.ui.language);
-            if let Some(port) = control_port {
-                match control_server::start(port, cc.egui_ctx.clone()) {
-                    Ok(rx) => app.control_rx = Some(rx),
-                    Err(e) => log::error!("control channel on port {port}: {e}"),
+    // The app waits here until a start gets as far as creating it; a start that fails before
+    // (no graphics adapter, device or surface) leaves it here for the next attempt.
+    let pending = std::cell::Cell::new(Some(app));
+    let run = |options: eframe::NativeOptions| {
+        eframe::run_native(
+            "GridCraft",
+            options,
+            Box::new(|cc| {
+                let Some(mut app) = pending.take() else {
+                    return Err("the app was already created".into());
+                };
+                SheetApp::setup_context_for_language(&cc.egui_ctx, app.ui.dark, app.ui.language);
+                if let Some(port) = control_port {
+                    match control_server::start(port, cc.egui_ctx.clone()) {
+                        Ok(rx) => app.control_rx = Some(rx),
+                        Err(e) => log::error!("control channel on port {port}: {e}"),
+                    }
                 }
-            }
-            Ok(Box::new(App(
-                app,
-                #[cfg(target_os = "macos")]
-                None,
-                #[cfg(target_os = "macos")]
-                apple_events.connect(&cc.egui_ctx),
-            )))
-        }),
-    )
+                Ok(Box::new(App(
+                    app,
+                    #[cfg(target_os = "macos")]
+                    None,
+                    #[cfg(target_os = "macos")]
+                    apple_events.connect(&cc.egui_ctx),
+                )))
+            }),
+        )
+    };
+    let result = run(options);
+    // A graphics error before the app existed: start once more with the other backend (eframe
+    // reuses its event loop for the second run). Errors after that, or from winit, are returned.
+    #[cfg(target_os = "windows")]
+    if let Err(eframe::Error::Wgpu(e)) = &result
+        && let Some(app) = pending.take()
+        && let Some(backends) = graphics::fallback_backends(backend_override, first_backends)
+    {
+        log::error!("graphics: the renderer didn't start on {first_backends:?} ({e}); trying {backends:?}");
+        pending.set(Some(app));
+        let mut options = retry_options;
+        graphics::configure_backends(&mut options, backends);
+        return run(options);
+    }
+    result
 }
