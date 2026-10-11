@@ -108,10 +108,16 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     let mut wb = Workbook::new();
     wb.sheets.clear();
 
-    // Styles and theme.
+    // Styles and theme. Cell checkboxes live in the feature property bags, which styles refer to.
+    let mut checkboxes = Vec::new();
+    if let Some(r) = find_rel(&wb_rels, "FeaturePropertyBag").cloned()
+        && let Some(x) = cx.optional_xml(&r.target)?
+    {
+        checkboxes = crate::feature_bags::checkbox_complements(&x);
+    }
     if let Some(r) = find_rel(&wb_rels, "styles").cloned() {
         if let Some(x) = cx.optional_xml(&r.target)? {
-            let StylesIn { xfs, dxfs, palette, named, num_fmts } = read_styles(&x);
+            let StylesIn { xfs, dxfs, palette, named, num_fmts } = read_styles(&x, &checkboxes);
             cx.num_fmts = num_fmts;
             cx.xf_map = xfs.into_iter().enumerate().map(|(i, s)| if i == 0 { StyleId::DEFAULT } else { cx.styles.intern(s) }).collect();
             cx.dxfs = dxfs;
