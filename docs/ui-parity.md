@@ -1,6 +1,6 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (outline band with − / + and level buttons for grouped rows and columns, #373) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (AutoFit reserves filter dropdown space, observed against Windows Excel) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Interaction, controls and feel, against Excel. Part of [target-app-parity.md](target-app-parity.md).
 **UI/UX fidelity: ~55% ready, 50–80 h** (estimated). Ribbon command coverage is measured
@@ -32,6 +32,14 @@ Sources: `crates/ui-egui/src` (ribbon, grid, editor, formula bar, dialogs, panes
 | Multiple windows per workbook | yes | no (#162) | see [hardware-parity.md](hardware-parity.md) |
 
 ## Grid interaction
+
+AutoFit column width includes dropdown space only for filter header cells (tables and ordinary
+AutoFilters), then takes the maximum against body cells. Windows Excel 16.0 build 20326,
+observed using synthetic workbooks via its public automation API on 2026-10-11, reserves
+12.5 points at 100-200% zoom and 25 points at 50%, independently of row height. GridCraft
+uses that allowance in its grid units; its existing approximate font measurement remains.
+Header text aligns and clips before the button. Command and header-double-click paths share
+this logic, with one undo step.
 
 | Behaviour | Status |
 |---|---|
@@ -151,6 +159,7 @@ scrollbar bugs 2–4 · pixel/feel pass against observed Excel 7–12.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | AutoFit accounts for table and ordinary filter dropdowns, including low zoom; header text excludes the button area |
 | 2026-10-11 | minor | Outline band for grouped rows and columns, Show / Hide Detail on the Data tab, numpad navigation keys in shortcuts (#373) |
 | 2026-10-11 | minor | Shift+Space / Ctrl+Space no longer start an edit; Control+Space selects the column on Mac (#338) |
 | 2026-10-11 | minor | Selected whole columns can be reordered by dragging their headers to an insertion point |

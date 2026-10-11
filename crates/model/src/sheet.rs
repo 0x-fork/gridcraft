@@ -221,6 +221,20 @@ impl Sheet {
 
     // ---- geometry
 
+    /// Whether this cell has a table or ordinary AutoFilter dropdown.
+    pub fn has_filter_button(&self, c: CellRef) -> bool {
+        self.autofilter.as_ref().is_some_and(|af| af.range.start.row == c.row && af.range.contains(c))
+            || self.tables.iter().any(|t| t.filter_button && t.header_row && t.range.start.row == c.row && t.range.contains(c))
+    }
+
+    /// Horizontal header space in unzoomed grid units (96 units per inch).
+    /// Observed in Windows Excel 16.0 build 20326: AutoFit reserves 12.5 pt at
+    /// 100-200% zoom, 25 pt at 50%, regardless of header row height. Below 100%
+    /// the dropdown keeps its screen width. This is geometry, not font padding.
+    pub fn filter_button_space(&self, c: CellRef) -> f32 {
+        if self.has_filter_button(c) { (12.5 * 96.0 / 72.0) / (self.zoom as f32 / 100.0).clamp(0.1, 1.0) } else { 0.0 }
+    }
+
     pub fn col_width(&self, col: u32) -> f32 {
         match self.cols.get(&col) {
             Some(i) if i.hidden => 0.0,
