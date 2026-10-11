@@ -374,6 +374,11 @@ const JAPANESE: &[(&str, &str)] = &[
     ("Unfreeze Panes", "ウィンドウ枠固定の解除"),
     ("Dark Mode", "ダーク モード"),
     ("Display theme", "表示テーマ"),
+    ("Animations", "アニメーション"),
+    (
+        "Glide the selection outline to the cell you move to instead of jumping there",
+        "選択範囲の枠を、移動先のセルまで滑らかに動かします（瞬時には切り替えません）",
+    ),
     ("System", "システム"),
     ("Light", "ライト"),
     ("Dark", "ダーク"),

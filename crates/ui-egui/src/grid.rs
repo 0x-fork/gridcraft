@@ -70,6 +70,8 @@ pub struct GridState {
     pub filter_menu: Option<(u32, Pos2)>,
     pub context_menu: Option<Pos2>,
     pub marching_phase: f32,
+    /// The selection outline on its way to a new selection.
+    pub glide: crate::selection_glide::SelectionGlide,
     pub last_click: Option<(CellRef, f64)>,
     pub hover_cell: Option<CellRef>,
     pub autosave: bool,
@@ -380,9 +382,10 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     let si = wb.active_sheet;
     let Some(sh) = wb.sheet(si) else { return };
     let sel = d.selection.clone();
+    let place = (d.uid, si);
     let mut view = app.view();
     // Scrolling.
-    let (scroll_delta, zoom_delta, modifiers) = ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.modifiers));
+    let (scroll_delta, zoom_delta, modifiers, now) = ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.modifiers, i.time));
     if (resp.hovered() || resp.contains_pointer()) && !crate::text_box::contains_pointer(app, ui.ctx()) {
         if zoom_delta != 1.0 {
             let z = (sh.zoom as f32 * zoom_delta).clamp(10.0, 400.0).round();
@@ -435,6 +438,20 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
         *v = view;
     }
     app.grid.cells_rect = Some(geo.mirror_rect(geo.cells));
+    // The selection outline glides to a new selection. It stays on its cells when Animations is
+    // off, when egui's animations are (the headless harness), and while a screenshot is on its way.
+    let outline = app.grid.glide.frame(crate::selection_glide::Frame {
+        place,
+        range: sel.current(),
+        target: geo.range_rect(sh, sel.current()),
+        view: geo.cells,
+        now,
+        frame_nr: ui.ctx().cumulative_frame_nr(),
+        animate: app.ui.animations && ui.ctx().global_style().animation_time > 0.0 && !app.shots.in_flight(),
+    });
+    if app.grid.glide.is_gliding() {
+        ui.ctx().request_repaint();
+    }
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, t.grid_bg);
     // Everything up to the headers is painted in logical (left-to-right) coordinates.
@@ -462,7 +479,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
         }
         let p = painter.with_clip_rect(*clip);
         paint_quadrant(&p, &geo, &wb, si, sh, *rows, *cols, &mut cf, &t);
-        paint_selection(&p, &geo, sh, &sel, &t, app, *rows, *cols);
+        paint_selection(&p, &geo, sh, &sel, outline, &t, app, *rows, *cols);
     }
     // Freeze lines.
     if geo.fr > 0 {
@@ -500,7 +517,8 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     let track_x = if rtl { (available.left(), rect.left()) } else { (rect.right(), available.right()) };
     vertical_scrollbar(app, ui, sh, &geo, track_x, max_y, &t);
     if app.session.clipboard.is_some() {
-        app.grid.marching_phase = (app.grid.marching_phase + 0.5) % 8.0;
+        // By the clock, not per frame: a gliding outline repaints more often than the ants step.
+        app.grid.marching_phase = crate::selection_glide::ants_phase(now);
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(60));
     }
 }
@@ -1040,6 +1058,51 @@ fn paint_cf_icon(p: &Painter, r: Rect, set: &str, idx: usize) {
     }
 }
 
+/// Where the active cell is on screen: the whole merged cell when it is part of one.
+fn active_rect(geo: &Geo, sh: &Sheet, sel: &gridcraft_engine::Selection) -> Rect {
+    match sh.merge_at(sel.active) {
+        Some(m) => geo.range_rect(sh, m),
+        None => geo.cell_rect(sh, sel.active),
+    }
+}
+
+/// The rectangles shaded for a selection: every area except the active cell, which stays clear so
+/// it is plain where typing goes. A single selected cell has no fill. `outline` is where the
+/// current area is drawn this frame: it glides to a new selection, and its fill with it.
+pub fn selection_fill(geo: &Geo, sh: &Sheet, sel: &gridcraft_engine::Selection, outline: Rect) -> Vec<Rect> {
+    selection_fill_where(geo, sh, sel, outline, |_| true)
+}
+
+/// `selection_fill` for the areas `keep` accepts (a frozen pane draws only the areas it shows).
+fn selection_fill_where(geo: &Geo, sh: &Sheet, sel: &gridcraft_engine::Selection, outline: Rect, keep: impl Fn(&RangeRef) -> bool) -> Vec<Rect> {
+    if sel.is_single_cell() {
+        return vec![];
+    }
+    let active = active_rect(geo, sh, sel);
+    let area = |r: &RangeRef| if *r == sel.current() { outline } else { geo.range_rect(sh, *r) };
+    sel.ranges.iter().filter(|r| keep(r)).flat_map(|r| rect_around(area(r), active)).collect()
+}
+
+/// `area` without `hole`: the strips above and below the hole, then what is left beside it. The
+/// selection fill is translucent, so the active cell can't be cleared by painting over it; the
+/// pieces never overlap for the same reason. Pieces with no size, or whose numbers aren't finite,
+/// are dropped.
+fn rect_around(area: Rect, hole: Rect) -> impl Iterator<Item = Rect> {
+    // `intersect` takes the sane side of a NaN, which would make a broken hole cover the area.
+    let hole = if hole.is_finite() { area.intersect(hole) } else { Rect::NOTHING };
+    let parts = if hole.is_positive() {
+        [
+            Rect::from_min_max(area.min, pos2(area.max.x, hole.min.y)),
+            Rect::from_min_max(pos2(area.min.x, hole.max.y), area.max),
+            Rect::from_min_max(pos2(area.min.x, hole.min.y), pos2(hole.min.x, hole.max.y)),
+            Rect::from_min_max(pos2(hole.max.x, hole.min.y), pos2(area.max.x, hole.max.y)),
+        ]
+    } else {
+        [area, Rect::NOTHING, Rect::NOTHING, Rect::NOTHING]
+    };
+    parts.into_iter().filter(|r| r.is_positive() && r.is_finite())
+}
+
 /// True when `r` covers at least one cell of the pane that shows `rows` x `cols` (inclusive).
 /// The panes of a frozen sheet share one coordinate system, so a range that lives only in the
 /// scrolling pane would otherwise be drawn over the frozen pane as well.
@@ -1047,36 +1110,27 @@ fn range_in_pane(r: RangeRef, rows: (u32, u32), cols: (u32, u32)) -> bool {
     r.start.row <= rows.1 && r.end.row >= rows.0 && r.start.col <= cols.1 && r.end.col >= cols.0
 }
 
+/// `outline` is where the current area's border is drawn this frame (see `selection_glide`).
 #[allow(clippy::too_many_arguments)]
 fn paint_selection(
     p: &Painter,
     geo: &Geo,
     sh: &Sheet,
     sel: &gridcraft_engine::Selection,
+    outline: Rect,
     t: &Tokens,
     app: &SheetApp,
     rows: (u32, u32),
     cols: (u32, u32),
 ) {
     // Fill all areas except the active cell.
-    for r in &sel.ranges {
-        if !range_in_pane(*r, rows, cols) {
-            continue;
-        }
-        if r.is_single() && sel.ranges.len() == 1 {
-            continue;
-        }
-        let rect = geo.range_rect(sh, *r);
+    for rect in selection_fill_where(geo, sh, sel, outline, |r| range_in_pane(*r, rows, cols)) {
         p.rect_filled(rect, 0.0, t.sel_fill);
     }
     let active_range = sh.merge_at(sel.active).unwrap_or_else(|| RangeRef::cell(sel.active));
-    let active = geo.range_rect(sh, active_range);
+    let active = active_rect(geo, sh, sel);
     let active_here = range_in_pane(active_range, rows, cols);
     let cur_here = range_in_pane(sel.current(), rows, cols);
-    if active_here && !(sel.ranges.len() == 1 && sel.current().is_single()) {
-        p.rect_filled(active.shrink(1.0), 0.0, t.grid_bg.gamma_multiply(0.0));
-    }
-    let cur = geo.range_rect(sh, sel.current());
     // Editing a formula: outline its references instead of the selection.
     if let Some(ed) = &app.editor
         && ed.is_formula()
@@ -1098,14 +1152,14 @@ fn paint_selection(
         }
     }
     if cur_here {
-        p.rect_stroke(cur.expand(0.5), 0.0, Stroke::new(2.0, t.sel_border), StrokeKind::Middle);
+        p.rect_stroke(outline.expand(0.5), 0.0, Stroke::new(2.0, t.sel_border), StrokeKind::Middle);
     }
     if active_here && sel.ranges.len() > 1 {
         p.rect_stroke(active, 0.0, Stroke::new(1.0, t.sel_border), StrokeKind::Inside);
     }
     // Fill handle (bottom-right of the current area).
     if app.editor.is_none() && range_in_pane(RangeRef::cell(sel.current().end), rows, cols) {
-        let h = Rect::from_center_size(cur.right_bottom(), vec2(6.0, 6.0));
+        let h = Rect::from_center_size(outline.right_bottom(), vec2(6.0, 6.0));
         p.rect_filled(h.expand(1.0), 0.0, Color32::WHITE);
         p.rect_filled(h, 0.0, t.sel_border);
     }
@@ -2580,6 +2634,67 @@ fn paint_pages(app: &mut SheetApp, p: &Painter, geo: &Geo, sh: &Sheet) {
         );
     }
     p.rect_stroke(pr, 0.0, Stroke::new(3.0, blue), StrokeKind::Outside);
+}
+
+#[cfg(test)]
+mod selection_fill_tests {
+    use super::*;
+
+    #[test]
+    fn rect_around_leaves_the_hole_and_never_overlaps() {
+        let area = Rect::from_min_max(pos2(100.0, 50.0), pos2(400.0, 250.0));
+        let check = |hole: Rect, pieces: usize| {
+            let parts: Vec<Rect> = rect_around(area, hole).collect();
+            assert_eq!(parts.len(), pieces, "{hole:?}: {parts:?}");
+            let cut = area.intersect(hole);
+            let cut_area = if cut.is_positive() { cut.area() } else { 0.0 };
+            let shaded: f32 = parts.iter().map(Rect::area).sum();
+            assert!((shaded - (area.area() - cut_area)).abs() < 0.5, "everything but the hole is shaded: {hole:?}");
+            for (i, a) in parts.iter().enumerate() {
+                assert!(area.contains_rect(*a), "nothing outside the area: {a:?}");
+                assert!(!a.shrink(0.01).intersects(hole), "the hole stays clear: {a:?} vs {hole:?}");
+                // The fill is translucent: a part shaded twice would show darker.
+                assert!(parts.iter().skip(i + 1).all(|b| !a.shrink(0.01).intersects(*b)), "{parts:?}");
+            }
+        };
+        let cell = |x: f32, y: f32| Rect::from_min_size(pos2(x, y), vec2(64.0, 16.0));
+        // In the middle, in each corner (where a drag began), along an edge.
+        check(cell(200.0, 100.0), 4);
+        check(cell(100.0, 50.0), 2);
+        check(cell(336.0, 50.0), 2);
+        check(cell(100.0, 234.0), 2);
+        check(cell(336.0, 234.0), 2);
+        check(cell(100.0, 100.0), 3);
+        // A merged cell as wide, or as tall, as the area; one that is all of it, or more.
+        check(Rect::from_min_max(pos2(100.0, 100.0), pos2(400.0, 132.0)), 2);
+        check(Rect::from_min_max(pos2(200.0, 50.0), pos2(264.0, 250.0)), 2);
+        check(area, 0);
+        check(area.expand(30.0), 0);
+        // The active cell is in another area, touches this one, or is only partly inside it.
+        check(cell(500.0, 300.0), 1);
+        check(cell(400.0, 50.0), 1);
+        check(cell(380.0, 240.0), 2);
+    }
+
+    #[test]
+    fn rect_around_survives_hostile_numbers() {
+        let sane = Rect::from_min_max(pos2(0.0, 0.0), pos2(64.0, 16.0));
+        let bad = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, f32::MAX, f32::MIN, -1.0, 0.0];
+        for a in bad {
+            for b in bad {
+                let weird = Rect::from_min_max(pos2(a, b), pos2(b, a));
+                for (area, hole) in [(sane, weird), (weird, sane), (weird, weird)] {
+                    for part in rect_around(area, hole) {
+                        assert!(part.is_positive() && part.is_finite(), "{area:?} around {hole:?}: {part:?}");
+                    }
+                }
+                // A hole that makes no sense leaves the whole area shaded.
+                if !weird.intersects(sane) {
+                    assert_eq!(rect_around(sane, weird).collect::<Vec<_>>(), vec![sane]);
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

@@ -185,6 +185,10 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Gridlines" => "Líneas de cuadrícula",
         "Headings" => "Encabezados",
         "Zoom" => "Zoom",
+        "Animations" => "Animaciones",
+        "Glide the selection outline to the cell you move to instead of jumping there" => {
+            "Desliza el contorno de la selección hasta la celda a la que te mueves en lugar de saltar"
+        }
         "Insert Copied Cells" => "Insertar celdas copiadas",
         "Insert Copied Cells…" => "Insertar celdas copiadas…",
         "Insert Cut Cells" => "Insertar celdas cortadas",

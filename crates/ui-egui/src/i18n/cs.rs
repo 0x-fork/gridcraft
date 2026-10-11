@@ -184,6 +184,10 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Gridlines" => "Mřížka",
         "Headings" => "Záhlaví",
         "Zoom" => "Lupa",
+        "Animations" => "Animace",
+        "Glide the selection outline to the cell you move to instead of jumping there" => {
+            "Plynule posouvat rámeček výběru na buňku, na kterou přejdete, místo skoku"
+        }
         "Insert Copied Cells" => "Vložit zkopírované buňky",
         "Insert Copied Cells…" => "Vložit zkopírované buňky…",
         "Insert Cut Cells" => "Vložit vyjmuté buňky",

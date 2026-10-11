@@ -287,6 +287,10 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "More\nFunctions" => "기타\n함수",
         "Page Layout|Orientation" => "용지 방향",
         "Display theme" => "표시 테마",
+        "Animations" => "애니메이션",
+        "Glide the selection outline to the cell you move to instead of jumping there" => {
+            "선택 테두리가 바로 건너뛰지 않고 이동한 셀까지 부드럽게 미끄러집니다"
+        }
         "System" => "시스템",
         "Light" => "밝게",
         "Dark" => "어둡게",

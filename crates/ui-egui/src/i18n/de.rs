@@ -184,6 +184,10 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Gridlines" => "Gitternetzlinien",
         "Headings" => "Überschriften",
         "Zoom" => "Zoom",
+        "Animations" => "Animationen",
+        "Glide the selection outline to the cell you move to instead of jumping there" => {
+            "Den Auswahlrahmen zur angesteuerten Zelle gleiten lassen, statt zu springen"
+        }
         "Insert Copied Cells" => "Kopierte Zellen einfügen",
         "Insert Copied Cells…" => "Kopierte Zellen einfügen…",
         "Insert Cut Cells" => "Ausgeschnittene Zellen einfügen",
