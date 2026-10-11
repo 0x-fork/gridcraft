@@ -197,7 +197,7 @@ egui frontend is a separate crate, so the UI can be swapped without touching the
 
 GridCraft is in **alpha**: the core workflow works end to end, but depth, fidelity and file
 compatibility are still rough. It covers 89% of the Excel ribbon commands in our catalog
-([`docs/parity-checklist.md`](docs/parity-checklist.md)) and 505 of Excel's 523 worksheet functions
+([`docs/parity-checklist.md`](docs/parity-checklist.md)) and 513 of Excel's 523 worksheet functions
 ([`docs/function-parity.md`](docs/function-parity.md)); weighted by what Excel users rely on, we
 estimate it is about 50% ready for real work. Next up: XLSX fidelity on real-world files, very large
 workbooks and multi-threaded recalc, chart depth, text in every script, and `.xls` import. Stage,
@@ -230,8 +230,16 @@ $env:WGPU_BACKEND = "vulkan"
 Remove-Item Env:WGPU_BACKEND                     # restore the default for later launches
 ```
 
-An explicit `gl` override can bring the driver crash back on affected systems. The macOS, Linux
-and web backend defaults are unchanged.
+An explicit `gl` override can bring the driver crash back on affected systems, and `vulkan` can
+bring back a crash in some Intel UHD Graphics drivers (`igvk64.dll`, #120). The macOS, Linux and
+web backend defaults are unchanged.
+
+**If the app is slow on an older Windows PC, or DirectX 12 can't start:** when DirectX 12 finds no
+graphics card with a driver for it, it only offers Microsoft's software renderer, which draws every
+frame on the processor. In that case GridCraft uses OpenGL instead, without setting anything; if
+the first renderer fails to start, it tries the other one once. The log file records the choice
+(lines starting with `graphics:`). `WGPU_BACKEND` still overrides it (and then nothing else is
+tried), e.g. `$env:WGPU_BACKEND = "gl"` or `"dx12"`.
 
 ### macOS
 

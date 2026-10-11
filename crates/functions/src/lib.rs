@@ -124,6 +124,8 @@ pub enum Category {
     Compatibility,
     Web,
     Cube,
+    /// Excel's "Add-in and Automation" category (EUROCONVERT).
+    AddIn,
 }
 
 pub struct FnSpec {

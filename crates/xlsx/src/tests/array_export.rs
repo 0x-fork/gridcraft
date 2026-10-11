@@ -236,8 +236,10 @@ fn implicit_intersection_metadata_respects_function_argument_context() {
             ("SUM(A1:A3)", false),
             ("SUMPRODUCT(A1:A3*B1:B3)", false),
             ("SUMPRODUCT(SQRT(A1:A3))", false),
-            ("SQRT(@A1:A3)", false),
-            ("@A1:A3*2", false),
+            // An explicit `@` is written as `_xlfn.SINGLE`, a dynamic-array formula. Dropping it
+            // instead would need the reader to put it back on legacy formulas.
+            ("SQRT(@A1:A3)", true),
+            ("@A1:A3*2", true),
             ("@(A1:A3*2)", true),
             ("SQRT(INDIRECT(\"A1\"))", false),
             ("SUM(INDIRECT(\"A1:A3\"))", false),

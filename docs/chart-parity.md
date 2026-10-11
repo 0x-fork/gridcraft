@@ -1,6 +1,6 @@
 # Chart parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (created from a source audit of the chart model, renderer and XLSX chart parts) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (PivotCharts) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Excel's chart types and chart elements against GridCraft. Part of
 [target-app-parity.md](target-app-parity.md). **Breadth ~50%, ready ~30%, 40–60 h** (estimated).
@@ -35,7 +35,7 @@ open PRs #158, #161, and issue #190.
 
 | Element | Excel | GridCraft |
 |---|---|---|
-| Move and resize the chart object | yes | move yes; **resize broken** (#190) |
+| Move and resize the chart object | yes | yes (corner handle, Format Chart Area Size fields) |
 | Chart title, axis titles | text, linked to cells, full formatting | text only |
 | Legend | position, overlay, formatting, per-entry delete | position only |
 | Data labels | value, category, series, percentage, from cells, callouts, position | one on/off flag |
@@ -50,10 +50,12 @@ open PRs #158, #161, and issue #190.
 | Chart styles and colour palettes | ~16 styles × colour sets | style number stored, own palettes |
 | Chart sheets | yes | **missing** (skipped with a warning on open) |
 | Chart templates (`.crtx`) | yes | **missing** |
-| Recommended Charts | yes | partial (Insert ▸ Recommended) |
+| Recommended Charts | yes | dialog with recommendations from the data's shape (own heuristic) and an All Charts list, live previews (#215) |
 | Switch Row/Column, Select Data | yes | yes (Switch on charts read from files landed in #116) |
+| Recommended Charts | yes | partial (Insert ▸ Recommended) |
+| Switch Row/Column, Select Data | yes | yes (Switch on charts read from files landed in #116); Select Data dialog: data range, remove series, Horizontal (Category) Axis Labels (#287). No series add/edit or hidden/empty cell options |
 | Sparklines (line, column, win/loss, markers, axis) | yes | line, column, win/loss |
-| PivotCharts | yes | **missing** |
+| PivotCharts | yes | Insert ▸ PivotChart (`insert.pivotChart`): bound to a PivotTable's report, rebuilt on refresh and layout changes, `c:pivotSource` round trip; no field buttons, innermost category level only |
 | Animation on data change | yes (Windows) | no |
 
 ## XLSX round-trip
@@ -72,11 +74,14 @@ back.
 4. Trendlines and error bars (maths shared with LINEST/LOGEST/GROWTH): 6–10 h.
 5. Per-element Format pane parity, smoothed lines, exploded pie, pie/bar of pie, 100% variants: 8–12 h.
 6. 3-D column/bar/pie/area, surface and contour, Pareto: 8–12 h.
-7. Chart sheets, PivotCharts, templates: 6–10 h. Filled map: owner decision on boundary data.
+7. Chart sheets, templates, PivotChart field buttons and multi-level categories: 6–10 h. Filled map: owner decision on boundary data.
 
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | PivotCharts (`insert.pivotChart`) |
+| 2026-10-11 | minor | Recommended Charts dialog with previews (#215) |
+| 2026-10-11 | minor | Select Data dialog with category axis labels; a blank top-left cell makes the first column the categories (#287) |
 | 2026-10-10 | minor | Smooth lines (#62) and Switch Row/Column on file charts (#116) landed; chart resize bug (#190) |
 | 2026-10-10 | major | Created from a source audit: 25 kinds (25 of ~60 subtypes), element gaps, round-trip loss |
