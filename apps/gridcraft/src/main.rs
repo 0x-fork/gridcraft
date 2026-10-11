@@ -166,27 +166,52 @@ fn services() -> Services {
                 .and_then(|p| p.to_str().map(str::to_string))
         })),
         pick_save: Some(Box::new(|suggested: &str| {
-            let stem = std::path::Path::new(suggested).file_stem().and_then(|s| s.to_str()).unwrap_or("Book1").to_string();
-            rfd::FileDialog::new()
-                .set_file_name(format!("{stem}.xlsx"))
-                .add_filter("Excel Workbook (.xlsx)", &["xlsx"])
-                .add_filter("CSV UTF-8 (.csv)", &["csv"])
-                .add_filter("Web Page (.html)", &["html"])
-                .save_file()
-                .and_then(|p| p.to_str().map(str::to_string))
+            let path = std::path::Path::new(suggested);
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Book1").to_string();
+            // The suggested name's type (an export asks for .pdf, .csv or .html) comes first.
+            const TYPES: [(&str, &str); 4] =
+                [("Excel Workbook (.xlsx)", "xlsx"), ("CSV UTF-8 (.csv)", "csv"), ("Web Page (.html)", "html"), ("PDF (.pdf)", "pdf")];
+            let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).filter(|e| TYPES.iter().any(|(_, x)| x == e));
+            let ext = ext.unwrap_or_else(|| "xlsx".to_string());
+            let mut dialog = rfd::FileDialog::new().set_file_name(format!("{stem}.{ext}"));
+            for (label, x) in TYPES.iter().filter(|(_, x)| *x == ext).chain(TYPES.iter().filter(|(_, x)| *x != ext)) {
+                dialog = dialog.add_filter(*label, &[*x]);
+            }
+            dialog.save_file().and_then(|p| p.to_str().map(str::to_string))
         })),
-        open_url: Some(Box::new(|url: &str| {
-            let cmd = if cfg!(target_os = "macos") {
-                "open"
-            } else if cfg!(windows) {
-                "explorer"
-            } else {
-                "xdg-open"
-            };
-            let _ = std::process::Command::new(cmd).arg(url).spawn();
+        open_url: Some(Box::new(|url: &str| open_with_system(url))),
+        // File › Print, Ctrl+P: the print PDF opens in the system's PDF viewer, whose Print
+        // command reaches the printer dialog (GridCraft has no printer driver of its own).
+        print: Some(Box::new(|bytes: &[u8]| match write_print_pdf(&std::env::temp_dir(), bytes) {
+            Ok(path) => open_with_system(&path.to_string_lossy()),
+            Err(e) => log::warn!("print: {e}"),
         })),
         ..Default::default()
     }
+}
+
+/// Opens a URL or file with the system's default application.
+fn open_with_system(target: &str) {
+    let cmd = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(windows) {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
+    if let Err(e) = std::process::Command::new(cmd).arg(target).spawn() {
+        log::warn!("{cmd} {target}: {e}");
+    }
+}
+
+/// Writes a print PDF into `dir` under a fresh name (an earlier print may still be open in the
+/// viewer) and returns its path.
+fn write_print_pdf(dir: &std::path::Path, bytes: &[u8]) -> std::io::Result<std::path::PathBuf> {
+    static PRINTS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = PRINTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed).wrapping_add(1);
+    let path = dir.join(format!("GridCraft print {}-{n}.pdf", std::process::id()));
+    std::fs::write(&path, bytes)?;
+    Ok(path)
 }
 
 fn icon() -> Option<egui::IconData> {
@@ -350,4 +375,20 @@ fn main() -> eframe::Result<()> {
         return run(options);
     }
     result
+}
+
+#[cfg(test)]
+mod print_tests {
+    #[test]
+    fn print_pdfs_get_fresh_names_in_the_given_folder() {
+        let dir = std::env::temp_dir().join(format!("gridcraft-print-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = super::write_print_pdf(&dir, b"%PDF-1.4 a").unwrap();
+        let b = super::write_print_pdf(&dir, b"%PDF-1.4 b").unwrap();
+        assert_ne!(a, b);
+        assert!(a.starts_with(&dir) && a.extension().is_some_and(|e| e == "pdf"));
+        assert_eq!(std::fs::read(&b).unwrap(), b"%PDF-1.4 b");
+        assert!(super::write_print_pdf(&dir.join("missing"), b"x").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
