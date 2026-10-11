@@ -392,6 +392,13 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
                         }
                         ui.label(egui::RichText::new(")").font(theme::ui_font(12.0)));
                     });
+                    // The description too, so values an argument takes (DATEDIF's units, #363) show
+                    // while it's typed; wrapped to the hint's width.
+                    if let Some(desc) = crate::formula_locale::description(&name, ed.locale) {
+                        ui.set_max_width(ui.min_rect().width().max(220.0));
+                        ui.separator();
+                        ui.add(egui::Label::new(egui::RichText::new(desc).small()).wrap());
+                    }
                 }
             });
         });
