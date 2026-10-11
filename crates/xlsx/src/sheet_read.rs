@@ -182,7 +182,6 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
             }
             "extLst" => read_ext(cx, e, &mut sheet),
             "protectedRanges" => read_protected_ranges(e, &mut sheet),
-            "oleObjects" | "controls" => cx.warn(format!("sheet \"{name}\": embedded objects and form controls are not supported")),
             _ => {}
         }
     }

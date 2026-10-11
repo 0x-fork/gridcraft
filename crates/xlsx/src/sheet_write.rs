@@ -420,6 +420,8 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
         }
         s.push_str("/>");
     }
+    // Unmodelled content kept from the source file (printer settings, controls, OLE objects…).
+    let kept = crate::passthrough::SheetKept::write(sheet, &mut rels, out);
     let m = |i: usize| num(p.margins.get(i).copied().unwrap_or(0.75) as f64);
     let _ =
         write!(s, "<pageMargins left=\"{}\" right=\"{}\" top=\"{}\" bottom=\"{}\" header=\"{}\" footer=\"{}\"/>", m(0), m(1), m(2), m(3), m(4), m(5));
@@ -435,7 +437,11 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
     if let Some((w, h)) = p.fit_to {
         let _ = write!(s, " fitToWidth=\"{w}\" fitToHeight=\"{h}\"");
     }
-    let _ = write!(s, " orientation=\"{}\"/>", if p.orientation == Orientation::Landscape { "landscape" } else { "portrait" });
+    let _ = write!(s, " orientation=\"{}\"", if p.orientation == Orientation::Landscape { "landscape" } else { "portrait" });
+    if let Some(id) = kept.page_setup_id() {
+        let _ = write!(s, " r:id=\"{id}\"");
+    }
+    s.push_str("/>");
     if !p.header.is_empty() || !p.footer.is_empty() {
         s.push_str("<headerFooter>");
         if !p.header.is_empty() {
@@ -519,11 +525,16 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
             rels.add_uri(REL_THREADED_COMMENT, &format!("../threadedComments/threadedComment{n}.xml"));
         }
         out.default_type("vml", "application/vnd.openxmlformats-officedocument.vmlDrawing");
-        out.part(&format!("xl/drawings/vmlDrawing{n}.vml"), None, vml_xml(sheet, n).into_bytes());
+        let vml_name = format!("xl/drawings/vmlDrawing{n}.vml");
+        let vml = kept.notes_vml(vml_xml(sheet, n), &vml_name, out);
+        out.part(&vml_name, None, vml.into_bytes());
         rels.add("comments", &format!("../comments{n}.xml"));
         let rid = rels.add("vmlDrawing", &format!("../drawings/vmlDrawing{n}.vml"));
         let _ = write!(s, "<legacyDrawing r:id=\"{rid}\"/>");
+    } else if let Some(rid) = kept.lone_vml(&mut rels, out) {
+        let _ = write!(s, "<legacyDrawing r:id=\"{rid}\"/>");
     }
+    s.push_str(&kept.elements());
     // Tables.
     if !tables.is_empty() {
         let mut parts = String::new();

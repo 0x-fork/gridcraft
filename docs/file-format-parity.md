@@ -15,6 +15,7 @@ support comes from `crates/engine/src/io.rs` (`FileKind`), `crates/xlsx/src` and
 
 | Format | Excel | GridCraft read | GridCraft write | Fidelity / notes | Tests |
 |---|---|---|---|---|---|
+| `.xlsx` Excel Workbook (transitional) | R/W, native | yes | yes | Cells, shared/array/dynamic formulas, styles, themes, merges, CF, validation, tables, comments and notes, hyperlinks, names, freeze panes, outline, print settings, pictures, shapes, charts (simplified, see [chart-parity.md](chart-parity.md)), sparklines, PivotTables (caches and tables), protection, calc settings. **Kept unchanged on save (pass-through, `passthrough.rs`):** custom document properties, ribbon customisation and add-in task panes, custom XML, links to external workbooks (never followed or refreshed), data connections, sheet query tables, printer settings (#324), form controls, ActiveX controls, OLE objects and sheet backgrounds (with their VML shapes); dropped when their sheet is deleted or their parts point at content GridCraft rewrites. **Not preserved:** slicers and slicer caches, timelines, data model, query tables attached to tables, sheet and workbook `extLst` entries we don't model, chart details; Strict Open XML files keep nothing. Never checked in Excel across a corpus: repair prompts unknown. 100 MB files fail (#175) | `roundtrip.rs`, `fixtures.rs`, `malformed.rs`, `pivot_tests.rs` |
 | `.xlsx` Excel Workbook (transitional) | R/W, native | yes | yes | Cells, shared/array/dynamic formulas, styles, themes, merges, CF, validation, tables, notes (with their shown/hidden state) and threaded comments with replies, resolved state and timestamps (`threadedComments` and `persons` parts, #300), hyperlinks, names, freeze panes, outline, print settings, pictures, shapes, charts (simplified, see [chart-parity.md](chart-parity.md)), sparklines, PivotTables (caches and tables), protection, calc settings. **Not preserved:** unmodelled parts and extensions (form controls, slicer caches, timelines, external links, OLE objects, custom XML, data model, query tables, chart details). Never checked in Excel across a corpus: repair prompts unknown. 100 MB files fail (#175) | `roundtrip.rs`, `fixtures.rs`, `malformed.rs`, `pivot_tests.rs` |
 | `.xlsx` Excel Workbook (transitional) | R/W, native | yes | yes | Cells, shared/array/dynamic formulas, styles, themes, merges, CF, validation, tables, comments and notes, hyperlinks, names, freeze panes, outline, print settings, pictures, shapes, charts (simplified, see [chart-parity.md](chart-parity.md)), sparklines, PivotTables (caches and tables), protection, Allow Edit Ranges (`protectedRanges` with their password hashes, #307), calc settings. **Not preserved:** unmodelled parts and extensions (form controls, slicer caches, timelines, external links, OLE objects, custom XML, data model, query tables, chart details). Never checked in Excel across a corpus: repair prompts unknown. 100 MB files fail (#175) | `roundtrip.rs`, `fixtures.rs`, `malformed.rs`, `pivot_tests.rs` |
 | `.xlsx` Strict Open XML | R/W | yes | no (writes transitional) | Excel also saves transitional by default | fixtures |
@@ -63,7 +64,7 @@ refresh. Counted under features (Get & Transform, ~10% ready), not here.
 | Work | Hours |
 |---|---|
 | Real-world XLSX corpus run (craftrules test-corpora standard), and confirm Excel opens our output with no repair prompt (owner runs Excel) | 15–25 |
-| Preserve unmodelled XLSX parts and extensions on round trip (pass-through with relationship fix-up) | 10–15 |
+| Preserve the rest of the unmodelled XLSX content (slicers, timelines, data model, table query tables, `extLst` entries); pass-through landed for the rest (#330) | 6–10 |
 | Streaming XLSX reader for very large files (#175), part-size limits that degrade instead of failing | 10–15 |
 | Legacy `.xls` (BIFF8): styles (fonts, fills, borders, alignment), comments, CF, validation, pictures and charts on import; corpus run; then write | 10–15 |
 | Encrypted workbooks: open with password prompt, save with password (#11) | 8–12 |
@@ -76,6 +77,7 @@ refresh. Counted under features (Get & Transform, ~10% ready), not here.
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-11 | minor | `.xls` (BIFF8) import: values, formulas, number formats, merges, sizes, names (#121) |
+| 2026-10-11 | minor | XLSX pass-through: custom XML, external links, connections, query tables, printer settings, form/ActiveX controls, OLE objects, sheet backgrounds kept on save (#330, #324) |
 | 2026-10-11 | minor | XLSX: threaded comments and persons parts written (they came back as notes before); note visibility read from VML (#300) |
 | 2026-10-11 | minor | XLSX: Allow Edit Ranges (`protectedRanges`) read and written with their password hashes (#307) |
 | 2026-10-10 | minor | Encrypted and `.xls` files are now recognised and refused with a message (#17) |

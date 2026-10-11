@@ -104,6 +104,10 @@ pub struct Sheet {
     /// Normal, Page Layout or Page Break Preview.
     #[serde(default)]
     pub view: SheetViewMode,
+    /// Unmodelled file content of this sheet kept for saving (form controls, OLE objects, query
+    /// tables). Goes away with the sheet; not in JSON.
+    #[serde(skip)]
+    pub preserved: Option<Arc<crate::preserved::Preserved>>,
 }
 
 /// Default width of a column (points) and height of a row (points) for the default font.
@@ -149,6 +153,7 @@ impl Sheet {
             view_active: CellRef::default(),
             view_top_left: CellRef::default(),
             view: SheetViewMode::Normal,
+            preserved: None,
         }
     }
 
