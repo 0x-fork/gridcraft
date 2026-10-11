@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS, RangeRef};
 use gridcraft_formula::adjust::{Axis, Edit};
-use gridcraft_model::{Sheet, Visibility};
+use gridcraft_model::{Anchor, AnchorMode, Sheet, Visibility};
 use serde_json::{Value as Json, json};
 
 use super::*;
@@ -35,7 +35,17 @@ pub fn specs() -> Vec<CommandSpec> {
             p,
             Axis::Cols
         )),
+        cmd!("sheet.moveColumns", "Move Columns", [], None, "{cols?: \"B:C\", before: zero-based column index}", has_doc, move_columns),
         cmd!("home.insertCells", "Insert Cells…", ["Home", "Cells", "Insert"], None, "{range?, shift: right|down|row|column}", has_doc, insert_cells),
+        cmd!(
+            "home.insertCopiedCells",
+            "Insert Copied Cells",
+            ["Home", "Cells", "Insert"],
+            None,
+            "{at?: \"B3\", shift?: down|right}: inserts the copied cells at `at` (the active cell) and pastes them there. Whole copied rows or columns insert whole rows or columns; other blocks shift the cells at `at` down (default) or right. A cut of whole rows or columns moves them (Insert Cut Cells)",
+            has_clipboard,
+            insert_copied_cells
+        ),
         cmd!("home.deleteCells", "Delete Cells…", ["Home", "Cells", "Delete"], None, "{range?, shift: left|up|row|column}", has_doc, delete_cells),
         cmd!("home.insertSheet", "Insert Sheet", ["Home", "Cells", "Insert"], Some("Shift+F11"), "{name?, before?: index}", has_doc, insert_sheet),
         cmd!("home.deleteSheet", "Delete Sheet", ["Home", "Cells", "Delete"], None, "{sheet?}", has_doc, delete_sheet),
@@ -61,6 +71,46 @@ fn lines(s: &Session, p: &Json, axis: Axis) -> Result<(u32, u32)> {
     Ok((a, count))
 }
 
+/// Bottom-right line of an anchor (the `to` marker of a two-cell anchor) and the offset of that
+/// corner inside it, in points. Measured against `sh`'s current geometry.
+fn anchor_corner(sh: &Sheet, a: &Anchor) -> (u32, u32, f32, f32) {
+    let x2 = sh.col_left(a.cell.col) + a.dx as f64 + a.width.max(0.0) as f64;
+    let y2 = sh.row_top(a.cell.row) + a.dy as f64 + a.height.max(0.0) as f64;
+    let tc = sh.col_at(x2);
+    let tr = sh.row_at(y2);
+    (tc, tr, (x2 - sh.col_left(tc)) as f32, (y2 - sh.row_top(tr)) as f32)
+}
+
+/// Repositions one floating object's anchor for a structural insert/delete, honouring its
+/// [`AnchorMode`]: absolute objects ("Don't move or size with cells") stay put; "move but don't
+/// size" follows its cell and keeps its size; "move and size" is re-fitted to the lines it lands
+/// on. `corner` is the pre-edit bottom-right line/offset (from [`anchor_corner`]); a line deleted
+/// out from under an edge collapses that edge onto `at`. `sh` is the post-edit grid, used to
+/// measure the re-fitted size.
+fn shift_anchor(sh: &Sheet, a: Anchor, corner: (u32, u32, f32, f32), axis: Axis, at: u32, map_line: &impl Fn(u32) -> Option<u32>) -> Anchor {
+    if a.mode == AnchorMode::Absolute {
+        return a;
+    }
+    let main = if axis == Axis::Rows { a.cell.row } else { a.cell.col };
+    // A deleted anchor line collapses onto the line that takes its place.
+    let nmain = map_line(main).unwrap_or(at);
+    let (nr, nc) = if axis == Axis::Rows { (nmain, a.cell.col) } else { (a.cell.row, nmain) };
+    if a.mode == AnchorMode::MoveOnly {
+        return Anchor { cell: CellRef::new(nr, nc), ..a };
+    }
+    // Move and size: re-fit to the lines the object lands on. A far edge whose line was deleted
+    // collapses onto the near cell, shrinking the object.
+    let (tc, tr, tdx, tdy) = corner;
+    let far = if axis == Axis::Rows { tr } else { tc };
+    let nfar = map_line(far).unwrap_or(nmain);
+    let (nbr, nbc) = if axis == Axis::Rows { (nfar, tc) } else { (tr, nfar) };
+    let x1 = sh.col_left(nc) + a.dx as f64;
+    let y1 = sh.row_top(nr) + a.dy as f64;
+    let xn = sh.col_left(nbc) + tdx as f64;
+    let yn = sh.row_top(nbr) + tdy as f64;
+    Anchor { cell: CellRef::new(nr, nc), dx: a.dx, dy: a.dy, width: (xn - x1).max(0.0) as f32, height: (yn - y1).max(0.0) as f32, mode: a.mode }
+}
+
 /// Shifts everything that has a position on the sheet for an insert/delete.
 fn shift_sheet_features(sh: &mut Sheet, axis: Axis, at: u32, count: u32, insert: bool) {
     let map_line = |v: u32| -> Option<u32> {
@@ -74,26 +124,24 @@ fn shift_sheet_features(sh: &mut Sheet, axis: Axis, at: u32, count: u32, insert:
             None
         }
     };
-    let map_range = |r: RangeRef| -> Option<RangeRef> {
-        let e = if insert { Edit::Insert { axis, at, count } } else { Edit::Delete { axis, at, count } };
-        let expr = gridcraft_formula::Expr::Ref(gridcraft_formula::Reference {
-            sheet: gridcraft_formula::SheetSel::Current,
-            kind: gridcraft_formula::RefKind::Range(
-                gridcraft_formula::Anchor { row: r.start.row, col: r.start.col, row_abs: false, col_abs: false },
-                gridcraft_formula::Anchor { row: r.end.row, col: r.end.col, row_abs: false, col_abs: false },
-            ),
-        });
-        match gridcraft_formula::adjust::adjust(expr, "S", "S", &e) {
-            gridcraft_formula::Expr::Ref(r) => Some(r.range()),
-            _ => None,
-        }
-    };
+    let e = if insert { Edit::Insert { axis, at, count } } else { Edit::Delete { axis, at, count } };
+    let map_range = |r: RangeRef| map_range(r, &e);
     let map_cell = |c: CellRef| -> Option<CellRef> {
         match axis {
             Axis::Rows => map_line(c.row).map(|r| CellRef::new(r, c.col)),
             Axis::Cols => map_line(c.col).map(|x| CellRef::new(c.row, x)),
         }
     };
+    // Floating objects: snapshot their bottom-right corners against the pre-shift geometry, so a
+    // re-fit after the shift measures against the grid the object actually lands on.
+    let obj_corners: Vec<(u32, u32, f32, f32)> = sh
+        .charts
+        .iter()
+        .map(|o| &o.anchor)
+        .chain(sh.images.iter().map(|o| &o.anchor))
+        .chain(sh.shapes.iter().map(|o| &o.anchor))
+        .map(|a| anchor_corner(sh, a))
+        .collect();
     // Line info.
     let lines = if axis == Axis::Rows { &mut sh.rows } else { &mut sh.cols };
     let old = std::mem::take(lines);
@@ -108,6 +156,10 @@ fn shift_sheet_features(sh: &mut Sheet, axis: Axis, at: u32, count: u32, insert:
     for cf in sh.cond_formats.iter_mut() {
         cf.ranges = cf.ranges.iter().filter_map(|r| map_range(*r)).collect();
     }
+    for er in sh.edit_ranges.iter_mut() {
+        er.ranges = er.ranges.iter().filter_map(|r| map_range(*r)).collect();
+    }
+    sh.edit_ranges.retain(|er| !er.ranges.is_empty());
     sh.cond_formats.retain(|cf| !cf.ranges.is_empty());
     for dv in sh.validations.iter_mut() {
         dv.ranges = dv.ranges.iter().filter_map(|r| map_range(*r)).collect();
@@ -149,17 +201,26 @@ fn shift_sheet_features(sh: &mut Sheet, axis: Axis, at: u32, count: u32, insert:
             None => sh.autofilter = None,
         }
     }
+    sh.cell_pictures =
+        std::mem::take(&mut sh.cell_pictures).into_iter().filter_map(|(c, v)| map_cell(c).filter(CellRef::is_valid).map(|c| (c, v))).collect();
     sh.comments = std::mem::take(&mut sh.comments).into_iter().filter_map(|(c, v)| map_cell(c).map(|c| (c, v))).collect();
     sh.hyperlinks = std::mem::take(&mut sh.hyperlinks).into_iter().filter_map(|(c, v)| map_cell(c).map(|c| (c, v))).collect();
-    for ch in sh.charts.iter_mut() {
-        if let Some(c) = map_cell(ch.anchor.cell) {
-            ch.anchor.cell = c;
-        }
+    // Floating objects follow their anchor lines per their [`AnchorMode`]. Corners were snapshotted
+    // as charts ++ images ++ shapes, matching the three slices below. New anchors are computed
+    // against the post-shift grid first (the re-fit needs its sizes), then written back.
+    let anchored = |ui: usize, a: Anchor| -> Anchor { obj_corners.get(ui).map_or(a, |&corner| shift_anchor(sh, a, corner, axis, at, &map_line)) };
+    let new_charts: Vec<Anchor> = sh.charts.iter().enumerate().map(|(i, o)| anchored(i, o.anchor)).collect();
+    let new_images: Vec<Anchor> = sh.images.iter().enumerate().map(|(i, o)| anchored(new_charts.len() + i, o.anchor)).collect();
+    let base = new_charts.len() + new_images.len();
+    let new_shapes: Vec<Anchor> = sh.shapes.iter().enumerate().map(|(i, o)| anchored(base + i, o.anchor)).collect();
+    for (o, a) in sh.charts.iter_mut().zip(new_charts) {
+        o.anchor = a;
     }
-    for im in sh.images.iter_mut() {
-        if let Some(c) = map_cell(im.anchor.cell) {
-            im.anchor.cell = c;
-        }
+    for (o, a) in sh.images.iter_mut().zip(new_images) {
+        o.anchor = a;
+    }
+    for (o, a) in sh.shapes.iter_mut().zip(new_shapes) {
+        o.anchor = a;
     }
     for sp in sh.sparklines.iter_mut() {
         if let Some(c) = map_cell(sp.cell) {
@@ -196,8 +257,18 @@ fn rewrite(wb: &mut gridcraft_model::Workbook, target: &str, e: &Edit) {
     }
 }
 
+/// Inserting or deleting cells moves the copied block away from the stored source range, so, like
+/// Excel, it cancels copy/cut mode for this workbook (a later paste would take the wrong cells).
+fn cancel_copy_mode(s: &mut Session) {
+    let uid = s.doc().map(|d| d.uid).ok();
+    if s.clipboard.as_ref().is_some_and(|c| Some(c.doc_uid) == uid) {
+        s.clipboard = None;
+    }
+}
+
 fn insert_lines(s: &mut Session, p: &Json, axis: Axis) -> Result<Json> {
     let (at, count) = lines(s, p, axis)?;
+    check_lines_protection(s, p, axis, at, count, true)?;
     let sheet = target_sheet(s, p)?;
     // Refuse to push data off the sheet.
     let limit = if axis == Axis::Rows { MAX_ROWS } else { MAX_COLS };
@@ -207,8 +278,9 @@ fn insert_lines(s: &mut Session, p: &Json, axis: Axis) -> Result<Json> {
             return Err(EngineError::Other("To prevent possible loss of data, Excel cannot shift nonblank cells off of the worksheet.".into()));
         }
     }
-    edit(s, |cx| {
+    let out = edit(s, |cx| {
         let name = cx.wb.sheet(sheet).map(|s| s.name.clone()).unwrap_or_default();
+        cx.protection_checked = true;
         {
             let sh = cx.sheet_mut(sheet)?;
             match axis {
@@ -230,21 +302,25 @@ fn insert_lines(s: &mut Session, p: &Json, axis: Axis) -> Result<Json> {
         rewrite(&mut cx.wb, &name, &Edit::Insert { axis, at, count });
         cx.structural = true;
         Ok(Json::Null)
-    })
+    })?;
+    cancel_copy_mode(s);
+    Ok(out)
 }
 
 fn delete_lines(s: &mut Session, p: &Json, axis: Axis) -> Result<Json> {
     let (at, count) = lines(s, p, axis)?;
+    check_lines_protection(s, p, axis, at, count, false)?;
     let sheet = target_sheet(s, p)?;
-    edit(s, |cx| {
+    let out = edit(s, |cx| {
         let name = cx.wb.sheet(sheet).map(|s| s.name.clone()).unwrap_or_default();
+        cx.protection_checked = true;
         {
             let sh = cx.sheet_mut(sheet)?;
             let block = match axis {
                 Axis::Rows => RangeRef::rows(at, (at + count - 1).min(MAX_ROWS - 1)),
                 Axis::Cols => RangeRef::cols(at, (at + count - 1).min(MAX_COLS - 1)),
             };
-            sh.cells.take_range(block);
+            sh.take_cells(block);
             match axis {
                 Axis::Rows => sh.cells.shift_rows(at + count, -(count as i64)),
                 Axis::Cols => sh.cells.shift_cols(at + count, -(count as i64)),
@@ -254,7 +330,108 @@ fn delete_lines(s: &mut Session, p: &Json, axis: Axis) -> Result<Json> {
         rewrite(&mut cx.wb, &name, &Edit::Delete { axis, at, count });
         cx.structural = true;
         Ok(Json::Null)
-    })
+    })?;
+    cancel_copy_mode(s);
+    Ok(out)
+}
+
+/// Reorders a contiguous block of whole columns without replacing the destination columns.
+/// `before` is a boundary in the original sheet: moving B:C before E produces A,D,B,C,E.
+fn move_columns(s: &mut Session, p: &Json) -> Result<Json> {
+    let (from, count) = lines(s, p, Axis::Cols)?;
+    let before = u32_param(p, "before").ok_or_else(|| bad("sheet.moveColumns", "missing `before`"))?;
+    let end =
+        from.checked_add(count).filter(|end| *end <= MAX_COLS).ok_or_else(|| bad("sheet.moveColumns", "source columns are outside the worksheet"))?;
+    if before >= MAX_COLS || before.checked_add(count).is_none_or(|end| end > MAX_COLS) {
+        return Err(bad("sheet.moveColumns", "destination columns are outside the worksheet"));
+    }
+    if (from..=end).contains(&before) {
+        return Ok(json!({"cols": RangeRef::cols(from, end.saturating_sub(1)).a1()}));
+    }
+    let sheet = target_sheet(s, p)?;
+    if let Some(u) = s.doc()?.wb.sheet(sheet).and_then(|sh| sh.used_range())
+        && u.end.col >= before
+        && u.end.col as u64 + count as u64 >= MAX_COLS as u64
+    {
+        return Err(EngineError::Other("To prevent possible loss of data, columns cannot be shifted off of the worksheet.".into()));
+    }
+    check_lines_protection(s, &json!({"cols": RangeRef::cols(before, before).a1()}), Axis::Cols, before, count, true)?;
+    check_lines_protection(s, &json!({"cols": RangeRef::cols(from, end - 1).a1()}), Axis::Cols, from, count, false)?;
+
+    let moved_from = if before <= from { from + count } else { from };
+    if moved_from.checked_add(count).is_none_or(|end| end > MAX_COLS) {
+        return Err(bad("sheet.moveColumns", "the move is too close to the worksheet boundary"));
+    }
+    let destination = before;
+    let delete_at = moved_from;
+    let final_start = if before > from { before - count } else { before };
+    let active_row = s.doc()?.selection.active.row;
+    let source = RangeRef::cols(moved_from, moved_from + count - 1);
+    let out = edit(s, |cx| {
+        let name = cx.wb.sheet(sheet).map(|sh| sh.name.clone()).unwrap_or_default();
+        cx.protection_checked = true;
+
+        {
+            let sh = cx.sheet_mut(sheet)?;
+            sh.cells.shift_cols(before, count as i64);
+            shift_sheet_features(sh, Axis::Cols, before, count, true);
+        }
+        rewrite(&mut cx.wb, &name, &Edit::Insert { axis: Axis::Cols, at: before, count });
+
+        let mut touched = Vec::new();
+        {
+            let sh = cx.sheet_mut(sheet)?;
+            let pictures: Vec<_> =
+                sh.cell_pictures.iter().filter(|(cell, _)| source.contains(**cell)).map(|(cell, picture)| (*cell, picture.clone())).collect();
+            let cells = sh.take_cells(source);
+            let moved_lines: Vec<_> = (0..count).filter_map(|offset| sh.cols.remove(&(moved_from + offset)).map(|info| (offset, info))).collect();
+            let movement = Edit::Move { from: source, to_row: 0, to_col: destination };
+            shift_cell_features(sh, &movement);
+            for object in sh
+                .charts
+                .iter_mut()
+                .map(|o| &mut o.anchor)
+                .chain(sh.images.iter_mut().map(|o| &mut o.anchor))
+                .chain(sh.shapes.iter_mut().map(|o| &mut o.anchor))
+            {
+                if object.mode != AnchorMode::Absolute && (moved_from..moved_from + count).contains(&object.cell.col) {
+                    object.cell.col = destination + (object.cell.col - moved_from);
+                }
+            }
+            for (cell, value) in cells {
+                let dest = CellRef::new(cell.row, destination + (cell.col - moved_from));
+                sh.cells.set(dest, value);
+                touched.extend([cell, dest]);
+            }
+            for (cell, picture) in pictures {
+                let dest = CellRef::new(cell.row, destination + (cell.col - moved_from));
+                sh.cell_pictures.insert(dest, picture);
+            }
+            for (offset, info) in moved_lines {
+                sh.cols.insert(destination + offset, info);
+            }
+        }
+        for cell in touched {
+            cx.touch(sheet, cell);
+        }
+        rewrite(&mut cx.wb, &name, &Edit::Move { from: source, to_row: 0, to_col: destination });
+
+        {
+            let sh = cx.sheet_mut(sheet)?;
+            sh.cells.shift_cols(delete_at + count, -(count as i64));
+            shift_sheet_features(sh, Axis::Cols, delete_at, count, false);
+        }
+        rewrite(&mut cx.wb, &name, &Edit::Delete { axis: Axis::Cols, at: delete_at, count });
+        *cx.sel = crate::Selection {
+            active: CellRef::new(active_row, final_start),
+            anchor: CellRef::new(active_row, final_start),
+            ranges: vec![RangeRef::cols(final_start, final_start + count - 1)],
+        };
+        cx.structural = true;
+        Ok(json!({"cols": RangeRef::cols(final_start, final_start + count - 1).a1()}))
+    })?;
+    cancel_copy_mode(s);
+    Ok(out)
 }
 
 fn insert_cells(s: &mut Session, p: &Json) -> Result<Json> {
@@ -265,27 +442,24 @@ fn insert_cells(s: &mut Session, p: &Json) -> Result<Json> {
         "column" | "entireColumn" => return insert_lines(s, &json!({"cols": RangeRef::cols(r.start.col, r.end.col).a1()}), Axis::Cols),
         _ => {}
     }
+    let e = Edit::InsertCells { axis: if shift == "right" { Axis::Cols } else { Axis::Rows }, range: r };
     let sheet = target_sheet(s, p)?;
     let right = shift == "right";
-    edit(s, |cx| {
+    let out = edit(s, |cx| {
         let sh = cx.sheet_mut(sheet)?;
         if right {
             sh.cells.shift_cols_in_rows(r.start.row, r.end.row, r.start.col, r.width() as i64);
         } else {
             sh.cells.shift_rows_in_cols(r.start.col, r.end.col, r.start.row, r.height() as i64);
         }
-        // Formulas referring to cells that moved: approximate with a whole-sheet move edit.
-        let moved = if right {
-            RangeRef::new(r.start, CellRef::new(r.end.row, MAX_COLS - 1 - r.width()))
-        } else {
-            RangeRef::new(r.start, CellRef::new(MAX_ROWS - 1 - r.height(), r.end.col))
-        };
+        shift_cell_features(sh, &e);
         let name = cx.wb.sheet(sheet).map(|s| s.name.clone()).unwrap_or_default();
-        let to = if right { (r.start.row, r.start.col + r.width()) } else { (r.start.row + r.height(), r.start.col) };
-        super::edit::rewrite_all_formulas(&mut cx.wb, &name, &Edit::Move { from: moved, to_row: to.0, to_col: to.1 });
+        rewrite(&mut cx.wb, &name, &e);
         cx.structural = true;
         Ok(Json::Null)
-    })
+    })?;
+    cancel_copy_mode(s);
+    Ok(out)
 }
 
 fn delete_cells(s: &mut Session, p: &Json) -> Result<Json> {
@@ -296,31 +470,147 @@ fn delete_cells(s: &mut Session, p: &Json) -> Result<Json> {
         "column" | "entireColumn" => return delete_lines(s, &json!({"cols": RangeRef::cols(r.start.col, r.end.col).a1()}), Axis::Cols),
         _ => {}
     }
+    let e = Edit::DeleteCells { axis: if shift == "left" { Axis::Cols } else { Axis::Rows }, range: r };
     let sheet = target_sheet(s, p)?;
     let left = shift == "left";
-    edit(s, |cx| {
+    let out = edit(s, |cx| {
         let name = cx.wb.sheet(sheet).map(|s| s.name.clone()).unwrap_or_default();
         {
             let sh = cx.sheet_mut(sheet)?;
-            sh.cells.take_range(r);
+            sh.take_cells(r);
             if left {
                 sh.cells.shift_cols_in_rows(r.start.row, r.end.row, r.end.col + 1, -(r.width() as i64));
             } else {
                 sh.cells.shift_rows_in_cols(r.start.col, r.end.col, r.end.row + 1, -(r.height() as i64));
             }
+            shift_cell_features(sh, &e);
         }
-        // References into the deleted block become #REF!; the rest move.
-        let deleted = Edit::Move { from: r, to_row: r.start.row, to_col: r.start.col };
-        let _ = deleted;
-        let moved_from = if left {
-            RangeRef::new(CellRef::new(r.start.row, r.end.col + 1), CellRef::new(r.end.row, MAX_COLS - 1))
-        } else {
-            RangeRef::new(CellRef::new(r.end.row + 1, r.start.col), CellRef::new(MAX_ROWS - 1, r.end.col))
-        };
-        super::edit::rewrite_all_formulas(&mut cx.wb, &name, &Edit::Move { from: moved_from, to_row: r.start.row, to_col: r.start.col });
+        // References into the deleted cells become #REF!; the rest move.
+        rewrite(&mut cx.wb, &name, &e);
         cx.structural = true;
         Ok(Json::Null)
-    })
+    })?;
+    cancel_copy_mode(s);
+    Ok(out)
+}
+
+/// Insert Copied Cells / Insert Cut Cells: makes room at the destination, then pastes (or, for a
+/// cut, moves) the clipboard there, as one undo step.
+fn insert_copied_cells(s: &mut Session, p: &Json) -> Result<Json> {
+    let Some(clip) = s.clipboard.clone() else { return Err(EngineError::Other("Nothing to paste.".into())) };
+    let sheet = target_sheet(s, p)?;
+    let d = s.doc()?;
+    let at = cell_param_on(s, p, "at", sheet)?.unwrap_or(d.selection.current().start);
+    let shift = str_param(p, "shift").unwrap_or("down");
+    if shift != "down" && shift != "right" {
+        return Err(bad("home.insertCopiedCells", format!("unknown `shift`: {shift} (down or right)")));
+    }
+    let sel = clip.selected;
+    let rows = sel.is_full_rows();
+    let cols = sel.is_full_cols();
+    if rows && cols {
+        return Err(EngineError::Other("The copy area is the whole sheet; there is no room to insert it.".into()));
+    }
+    let same_doc = d.uid == clip.doc_uid;
+    let cut = clip.cut && same_doc;
+    if cut && !rows && !cols {
+        return Err(EngineError::Other("Insert Cut Cells works on whole rows or columns; cut whole rows or columns, or use Paste.".into()));
+    }
+    // A moved block can't be inserted inside itself.
+    if cut && clip.sheet == sheet {
+        let inside = if rows { at.row > sel.start.row && at.row <= sel.end.row } else { at.col > sel.start.col && at.col <= sel.end.col };
+        if inside {
+            return Err(EngineError::Other("The cut rows or columns can't be inserted inside themselves.".into()));
+        }
+    }
+    let revision = d.revision;
+    let before = (d.wb.clone(), d.selection.clone());
+    let result = insert_copied_steps(s, &clip, sheet, at, shift, cut);
+    let d = s.doc_mut()?;
+    // The nested steps collapse into this command's single undo step.
+    for _ in 0..d.revision.saturating_sub(revision) {
+        d.undo.pop();
+    }
+    match result {
+        Ok((final_range, out)) => {
+            d.selection = crate::Selection { active: final_range.start, anchor: final_range.start, ranges: vec![final_range] };
+            // Like inserting cells, this ends copy mode (the copied block may have moved).
+            cancel_copy_mode(s);
+            Ok(out)
+        }
+        Err(e) => {
+            d.wb = before.0;
+            d.selection = before.1;
+            d.calc.rebuild(&d.wb);
+            s.clipboard = Some(clip);
+            Err(e)
+        }
+    }
+}
+
+fn insert_copied_steps(s: &mut Session, clip: &crate::Clipboard, sheet: usize, at: CellRef, shift: &str, cut: bool) -> Result<(RangeRef, Json)> {
+    let sel = clip.selected;
+    let rows = sel.is_full_rows();
+    let cols = sel.is_full_cols();
+    // Where the copied block's top-left lands, relative to the (untrimmed) copied lines.
+    let (inserted, paste_at) = if rows {
+        let h = sel.height();
+        let start = at.row;
+        let r = format!("{}:{}", start as u64 + 1, start as u64 + h as u64);
+        s.execute("home.insertRows", json!({"rows": r, "sheet": sheet}))?;
+        let dr = clip.range.start.row.saturating_sub(sel.start.row);
+        (RangeRef::rows(start, start.saturating_add(h - 1).min(MAX_ROWS - 1)), CellRef::new(start.saturating_add(dr), clip.range.start.col))
+    } else if cols {
+        let w = sel.width();
+        let start = at.col;
+        let end = start.saturating_add(w - 1).min(MAX_COLS - 1);
+        s.execute("home.insertColumns", json!({"cols": RangeRef::cols(start, end).a1(), "sheet": sheet}))?;
+        let dc = clip.range.start.col.saturating_sub(sel.start.col);
+        (RangeRef::cols(start, end), CellRef::new(clip.range.start.row, start.saturating_add(dc)))
+    } else {
+        let end = at
+            .offset(clip.range.height() as i64 - 1, clip.range.width() as i64 - 1)
+            .ok_or_else(|| EngineError::Other("The copied cells don't fit on the sheet at this position.".into()))?;
+        let block = RangeRef::new(at, end);
+        s.execute("home.insertCells", json!({"range": block.a1(), "shift": shift, "sheet": sheet}))?;
+        (block, at)
+    };
+    // Inserting ended copy mode; bring the clipboard back for the paste. A cut reads the live
+    // workbook, so it follows the source if the insert pushed it along.
+    let mut clip = clip.clone();
+    if cut {
+        let pushed = clip.sheet == sheet && if rows { sel.start.row >= at.row } else { sel.start.col >= at.col };
+        if pushed {
+            let (dr, dc) = if rows { (inserted.height() as i64, 0) } else { (0, inserted.width() as i64) };
+            clip.range = RangeRef::new(clip.range.start.offset_clamped(dr, dc), clip.range.end.offset_clamped(dr, dc));
+            clip.selected = RangeRef::new(sel.start.offset_clamped(dr, dc), sel.end.offset_clamped(dr, dc));
+        }
+        clip.wb = s.doc()?.wb.clone();
+    }
+    let source_lines = clip.selected;
+    s.clipboard = Some(clip.clone());
+    let out = s.execute("edit.pasteSpecial", json!({"what": "all", "at": paste_at.a1(), "sheet": sheet}))?;
+    if !cut {
+        return Ok((inserted, out));
+    }
+    // Close the gap the moved lines left behind.
+    let (removed, before_dest) = if rows {
+        s.execute(
+            "home.deleteRows",
+            json!({"rows": format!("{}:{}", source_lines.start.row as u64 + 1, source_lines.end.row as u64 + 1), "sheet": clip.sheet}),
+        )?;
+        (source_lines.height(), clip.sheet == sheet && source_lines.start.row < inserted.start.row)
+    } else {
+        s.execute("home.deleteColumns", json!({"cols": RangeRef::cols(source_lines.start.col, source_lines.end.col).a1(), "sheet": clip.sheet}))?;
+        (source_lines.width(), clip.sheet == sheet && source_lines.start.col < inserted.start.col)
+    };
+    let moved = if before_dest {
+        let (dr, dc) = if rows { (-(removed as i64), 0) } else { (0, -(removed as i64)) };
+        RangeRef::new(inserted.start.offset_clamped(dr, dc), inserted.end.offset_clamped(dr, dc))
+    } else {
+        inserted
+    };
+    Ok((moved, out))
 }
 
 fn insert_sheet(s: &mut Session, p: &Json) -> Result<Json> {
@@ -359,6 +649,39 @@ fn edit_doc<R>(d: &mut crate::DocState, f: impl FnOnce(&mut Ctx) -> Result<R>) -
     super::commit(d, f)
 }
 
+/// Sheet protection for inserting or deleting rows/columns: the protection must allow it, and
+/// deleted lines must not hold locked cells.
+fn check_lines_protection(s: &Session, p: &Json, axis: Axis, at: u32, count: u32, insert: bool) -> Result<()> {
+    let sheet = target_sheet(s, p)?;
+    let wb = &s.doc()?.wb;
+    let Some(sh) = wb.sheet(sheet) else { return Ok(()) };
+    let Some(pr) = &sh.protection else { return Ok(()) };
+    let allowed = match (axis, insert) {
+        (Axis::Rows, true) => pr.insert_rows,
+        (Axis::Rows, false) => pr.delete_rows,
+        (Axis::Cols, true) => pr.insert_columns,
+        (Axis::Cols, false) => pr.delete_columns,
+    };
+    let locked = |st: gridcraft_model::StyleId| wb.styles.get(st).protection.locked;
+    let refuse = || EngineError::Other(PROTECTED.into());
+    if !allowed {
+        return Err(refuse());
+    }
+    if insert {
+        return Ok(());
+    }
+    let end = at.saturating_add(count - 1).min(if axis == Axis::Rows { MAX_ROWS - 1 } else { MAX_COLS - 1 });
+    let infos = if axis == Axis::Rows { &sh.rows } else { &sh.cols };
+    if (at..=end).any(|i| locked(infos.get(&i).and_then(|x| x.style).unwrap_or_default())) {
+        return Err(refuse());
+    }
+    let block = if axis == Axis::Rows { RangeRef::rows(at, end) } else { RangeRef::cols(at, end) };
+    if sh.cells.iter_range(block).any(|(_, cell)| locked(cell.style)) {
+        return Err(refuse());
+    }
+    Ok(())
+}
+
 fn delete_sheet(s: &mut Session, p: &Json) -> Result<Json> {
     let i = target_sheet(s, p)?;
     let d = s.doc()?;
@@ -369,6 +692,7 @@ fn delete_sheet(s: &mut Session, p: &Json) -> Result<Json> {
         return Err(EngineError::Other("A workbook must contain at least one visible worksheet.".into()));
     }
     let name = d.wb.sheet(i).map(|s| s.name.clone()).unwrap_or_default();
+    let order: Vec<String> = d.wb.sheets.iter().map(|s| s.name.clone()).collect();
     let d = s.doc_mut()?;
     edit_doc(d, |cx| {
         cx.wb.sheets.remove(i);
@@ -378,7 +702,7 @@ fn delete_sheet(s: &mut Session, p: &Json) -> Result<Json> {
             let Some(sh) = cx.wb.sheet_mut(si) else { continue };
             for (c, f) in keys {
                 if let Some(e) = f.expr() {
-                    let ne = gridcraft_formula::adjust::delete_sheet(e, &name);
+                    let ne = gridcraft_formula::adjust::delete_sheet(e, &name, &order);
                     if let Some(cell) = sh.cells.get_mut(c) {
                         cell.formula = Some(Arc::new(gridcraft_model::Formula::from_expr(ne)));
                     }
@@ -391,6 +715,13 @@ fn delete_sheet(s: &mut Session, p: &Json) -> Result<Json> {
                 && *sc > i
             {
                 *sc -= 1;
+            }
+            // Names referring to the sheet become #REF!.
+            if let Ok(e) = gridcraft_formula::parse(&n.formula) {
+                let ne = gridcraft_formula::adjust::delete_sheet(e.clone(), &name, &order);
+                if ne != e {
+                    n.formula = gridcraft_formula::print(&ne);
+                }
             }
         }
         if cx.wb.active_sheet >= cx.wb.sheets.len() || cx.wb.active_sheet > i {
@@ -439,6 +770,12 @@ fn rename_sheet(s: &mut Session, p: &Json) -> Result<Json> {
                     se.categories = se.categories.as_deref().map(fix);
                     se.name = se.name.as_deref().map(fix);
                 }
+                // A PivotChart follows its PivotTable's sheet.
+                if let Some((sheet, pivot)) = ch.pivot.as_deref().and_then(crate::pivot::parse_chart_link)
+                    && sheet.eq_ignore_ascii_case(&old)
+                {
+                    ch.pivot = Some(crate::pivot::chart_link(&name, &pivot));
+                }
             }
         }
         for n in cx.wb.names.iter_mut() {
@@ -461,10 +798,32 @@ fn move_sheet(s: &mut Session, p: &Json) -> Result<Json> {
         if copy {
             let mut sh = (*src).clone();
             let base = sh.name.clone();
-            let name = (2..).map(|k| format!("{base} ({k})")).find(|nm| cx.wb.sheet_index(nm).is_none()).unwrap_or(base);
+            let name = (2..).map(|k| format!("{base} ({k})")).find(|nm| cx.wb.sheet_index(nm).is_none()).unwrap_or(base.clone());
             sh.name = name.chars().take(31).collect();
             sh.tables.clear(); // table names must be unique
+            sh.preserved = None; // kept file content (form controls, OLE objects…) stays with the original
             let at = to.min(n);
+            // The copy gets its own copies of the sheet's names, referring to the copy.
+            let copies: Vec<gridcraft_model::DefinedName> = cx
+                .wb
+                .names
+                .iter()
+                .filter(|nm| nm.scope == Some(i))
+                .map(|nm| {
+                    let formula = gridcraft_formula::parse(&nm.formula)
+                        .map(|e| gridcraft_formula::print(&gridcraft_formula::adjust::rename_sheet(e, &base, &sh.name)))
+                        .unwrap_or_else(|_| nm.formula.clone());
+                    gridcraft_model::DefinedName { scope: Some(at), formula, ..nm.clone() }
+                })
+                .collect();
+            for nm in cx.wb.names.iter_mut() {
+                if let Some(sc) = nm.scope.as_mut()
+                    && *sc >= at
+                {
+                    *sc += 1;
+                }
+            }
+            cx.wb.names.extend(copies);
             cx.wb.sheets.insert(at, Arc::new(sh));
             cx.wb.active_sheet = at;
         } else {
@@ -472,6 +831,17 @@ fn move_sheet(s: &mut Session, p: &Json) -> Result<Json> {
             let at = to.min(n - 1);
             cx.wb.sheets.insert(at, sh);
             cx.wb.active_sheet = at;
+            // Sheet-level names follow their sheet.
+            for nm in cx.wb.names.iter_mut() {
+                if let Some(sc) = nm.scope.as_mut() {
+                    *sc = match *sc {
+                        x if x == i => at,
+                        x if i < x && x <= at => x - 1,
+                        x if at <= x && x < i => x + 1,
+                        x => x,
+                    };
+                }
+            }
         }
         cx.structural = true;
         Ok(Json::Null)
@@ -537,4 +907,60 @@ fn step_sheet(s: &mut Session, dir: i64) -> Result<Json> {
     }
     s.doc_mut()?.wb_switch_sheet(i as usize);
     ok()
+}
+
+/// Where a range of the edited sheet goes after a structural edit (`None` = deleted).
+fn map_range(r: RangeRef, e: &Edit) -> Option<RangeRef> {
+    let expr = gridcraft_formula::Expr::Ref(gridcraft_formula::Reference {
+        sheet: gridcraft_formula::SheetSel::Current,
+        kind: gridcraft_formula::RefKind::Range(
+            gridcraft_formula::Anchor { row: r.start.row, col: r.start.col, row_abs: false, col_abs: false },
+            gridcraft_formula::Anchor { row: r.end.row, col: r.end.col, row_abs: false, col_abs: false },
+        ),
+    });
+    match gridcraft_formula::adjust::adjust(expr, "S", "S", e) {
+        gridcraft_formula::Expr::Ref(r) => Some(r.range()),
+        _ => None,
+    }
+}
+
+/// Shifts what Insert/Delete Cells moves along with the cells: merged areas, conditional
+/// format, validation, table, filter and print-area ranges, notes, links and sparklines.
+fn shift_cell_features(sh: &mut Sheet, e: &Edit) {
+    let map_cell = |c: CellRef| map_range(RangeRef::cell(c), e).map(|r| r.start);
+    sh.merges = sh.merges.iter().filter_map(|m| map_range(*m, e)).filter(|m| !m.is_single()).collect();
+    for cf in sh.cond_formats.iter_mut() {
+        cf.ranges = cf.ranges.iter().filter_map(|r| map_range(*r, e)).collect();
+    }
+    for er in sh.edit_ranges.iter_mut() {
+        er.ranges = er.ranges.iter().filter_map(|r| map_range(*r, e)).collect();
+    }
+    sh.edit_ranges.retain(|er| !er.ranges.is_empty());
+    sh.cond_formats.retain(|cf| !cf.ranges.is_empty());
+    for dv in sh.validations.iter_mut() {
+        dv.ranges = dv.ranges.iter().filter_map(|r| map_range(*r, e)).collect();
+    }
+    sh.validations.retain(|dv| !dv.ranges.is_empty());
+    for t in sh.tables.iter_mut() {
+        t.range = map_range(t.range, e).unwrap_or_default();
+    }
+    sh.tables.retain(|t| t.range != RangeRef::default());
+    if let Some(af) = sh.autofilter.as_mut() {
+        match map_range(af.range, e) {
+            Some(r) => af.range = r,
+            None => sh.autofilter = None,
+        }
+    }
+    sh.cell_pictures =
+        std::mem::take(&mut sh.cell_pictures).into_iter().filter_map(|(c, v)| map_cell(c).filter(CellRef::is_valid).map(|c| (c, v))).collect();
+    sh.comments = std::mem::take(&mut sh.comments).into_iter().filter_map(|(c, v)| map_cell(c).map(|c| (c, v))).collect();
+    sh.hyperlinks = std::mem::take(&mut sh.hyperlinks).into_iter().filter_map(|(c, v)| map_cell(c).map(|c| (c, v))).collect();
+    for sp in sh.sparklines.iter_mut() {
+        if let Some(c) = map_cell(sp.cell) {
+            sp.cell = c;
+        }
+    }
+    if let Some(pa) = sh.print.print_area {
+        sh.print.print_area = map_range(pa, e);
+    }
 }

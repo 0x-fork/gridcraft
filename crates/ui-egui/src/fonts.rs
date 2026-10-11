@@ -395,7 +395,7 @@ mod tests {
         std::fs::create_dir_all(dir.join("Sub")).expect("temp dir");
         std::fs::write(dir.join("Sub/Ubuntu-Light.ttf"), epaint_default_fonts::UBUNTU_LIGHT).expect("write");
         std::os::unix::fs::symlink(&dir, dir.join("Sub/loop")).expect("symlink");
-        assert_eq!(scan_dirs(&[dir.clone()]).len(), 1, "the loop doesn't multiply faces");
+        assert_eq!(scan_dirs(std::slice::from_ref(&dir)).len(), 1, "the loop doesn't multiply faces");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

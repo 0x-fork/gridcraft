@@ -84,6 +84,10 @@
 - **Compatible.** XLSX is the native format: styles, themes, formulas (including dynamic arrays),
   tables, conditional formats, validation, comments, hyperlinks, charts, pictures, sparklines,
   PivotTables and print settings round-trip. CSV and TSV too.
+  Excel 97-2003 `.xls` workbooks open with their values, formulas and number formats (formatting and objects not yet).
+  [XLSB worksheet data can be imported](docs/xlsb-import.md), using saved values instead of formulas.
+  [ODS worksheet data can be imported](docs/ods-import.md), using saved values instead of formulas.
+  [Static pictures can live inside cells](docs/cell-pictures.md), fitting their size and moving with the data.
 - **Capable.** A dependency-graph calculation engine with dynamic arrays and spilling,
   500+ worksheet functions plus LET, LAMBDA, MAP, REDUCE, SCAN, BYROW, BYCOL and MAKEARRAY,
   structured table references, Excel's full number-format language, sort and AutoFilter,
@@ -105,6 +109,9 @@ cargo run --release -p gridcraft -- --sample sales --control 7979   # + JSON con
 cargo xtask ci                                                 # fmt, clippy, tests, assets, layering, wasm
 ```
 
+Choose Español under View → Interface language for [Spanish formula names, decimal commas, and semicolon arguments](docs/formula-input.md).
+Workbooks, clipboard exchange, and programmatic APIs retain canonical English syntax.
+
 ### Web
 
 ```sh
@@ -114,6 +121,42 @@ cd apps/gridcraft-web && trunk serve --release     # http://127.0.0.1:8771  (?sa
 
 You need [trunk](https://trunkrs.dev) and the `wasm32-unknown-unknown` target. Open uses the
 browser's file picker (dropping files works too) and Save downloads the workbook.
+
+### Ribbon access keys
+
+Press and release **left Alt** on Windows/Linux/BSD, or press **F10** on any platform,
+then type a sequence below one key at a time. Keytips appear on the supported Home
+controls and menu items. On macOS, use F10 (Fn+F10 if required by your keyboard); Option
+remains available for entering accented characters.
+
+| Sequence after Alt/F10 | Action |
+|---|---|
+| `H A L` / `H A C` / `H A R` | Align left / center / right |
+| `H V S` or legacy `E S` | Open Paste Special |
+| `H O I` or legacy `O C A` | AutoFit selected columns |
+
+In Paste Special, **T/V/F/C** select formats/values/formulas/comments, and **E** toggles
+Transpose. **Enter** applies the selected options; **Escape** cancels the dialog.
+These letters also work with Alt held on Windows/Linux/BSD.
+
+Escape backs out one keytip level; Alt/F10 again exits keytips. Clicking, scrolling,
+or switching windows cancels navigation. Access keys do not start while editing text
+or using another dialog. This is initial support for these Home and legacy paths;
+other ribbon commands and full mouse-free navigation remain to be implemented.
+Browsers or desktop environments may reserve Alt/F10 for their own menus.
+
+### Logs
+
+The desktop app writes its log to standard error and to `gridcraft.log` in the `logs` folder
+next to its settings: `~/.config/gridcraft/logs` on Linux and BSD (`$XDG_CONFIG_HOME/gridcraft/logs`
+when set), `~/Library/Application Support/GridCraft/logs` on macOS and
+`%APPDATA%\GridCraft\logs` on Windows. Each start moves the previous log to `gridcraft.1.log` and
+that one to `gridcraft.2.log`, so the log of a run that crashed survives the next start; attach
+them to a bug report. A log file stops growing at 16 MiB. By default GridCraft's own crates log
+at `info` and everything else at `warn`; `RUST_LOG` replaces that with env_logger-style
+directives, e.g. `RUST_LOG=debug` or `RUST_LOG=warn,gridcraft_engine=debug` (a trailing `*`
+matches a prefix: `gridcraft*=debug`). Runs with `GRIDCRAFT_NO_PREFS` set (no saved settings)
+log to standard error only.
 
 ## For agents: MCP, CLI and the control channel
 
@@ -141,7 +184,7 @@ egui frontend is a separate crate, so the UI can be swapped without touching the
 |---|---|
 | L0 | `core` (addresses, values, errors, dates, input parsing) · `numfmt` (number format codes) |
 | L1 | `formula` (lexer, parser, printer, reference adjustment) · `functions` (worksheet function library) |
-| L2 | `model` (workbook, sheets, copy-on-write cells, styles, tables, charts…) · `calc` (dependency graph, evaluator, dynamic arrays) · `xlsx` (XLSX and CSV) |
+| L2 | `model` (workbook, sheets, copy-on-write cells, styles, tables, charts…) · `calc` (dependency graph, evaluator, dynamic arrays) · `xlsx` (XLSX, CSV, plus XLSB and ODS data import) |
 | L3 | `chart` (toolkit-free chart layout and rendering) |
 | L5 | `engine` (session, commands, history, clipboard, fill, sort, filter, file I/O) |
 | L6 | `ui-egui` (Excel-style UI, control channel) · `mcp` (MCP server) |
@@ -153,12 +196,80 @@ egui frontend is a separate crate, so the UI can be swapped without touching the
 
 ## Roadmap
 
-GridCraft is pre-alpha and moving fast. It covers 89% of Excel's ribbon and menu commands
-([`docs/parity.md`](docs/parity.md)) and about 93% of its worksheet functions; weighted by depth,
-we estimate about 65% of what Excel power users rely on. We're roughly 80% of the way to a first
-alpha. Next up: signed release builds, XLSX fidelity on real-world files, performance on very large
-sheets, then slicers, Solver, chart trendlines and a true Page Layout view. The plan and estimates
-are in [ROADMAP.md](ROADMAP.md).
+GridCraft is in **alpha**: the core workflow works end to end, but depth, fidelity and file
+compatibility are still rough. It covers 89% of the Excel ribbon commands in our catalog
+([`docs/parity-checklist.md`](docs/parity-checklist.md)) and 513 of Excel's 523 worksheet functions
+([`docs/function-parity.md`](docs/function-parity.md)); weighted by what Excel users rely on, we
+estimate it is about 50% ready for real work. Next up: XLSX fidelity on real-world files, very large
+workbooks and multi-threaded recalc, chart depth, text in every script, and `.xls` import. Stage,
+numbers and estimates are in [ROADMAP.md](ROADMAP.md); the ranked work list is [`docs/gaps.md`](docs/gaps.md).
+
+## Downloads
+
+**Download GridCraft** from GitHub: the [latest release](https://github.com/storytold/gridcraft/releases/latest) has every build listed below, and [all releases](https://github.com/storytold/gridcraft/releases) has earlier versions and their notes. `<ver>` in the file names is the version number, and `SHA256SUMS.txt` lists a checksum for every file.
+
+### Windows
+
+| Build | Installer | Portable |
+|---|---|---|
+| x64 (64-bit Intel/AMD) | `gridcraft-<ver>-windows-x64.msi` | `gridcraft-<ver>-windows-x64-portable.zip` |
+| arm64 (Snapdragon and other ARM PCs) | `gridcraft-<ver>-windows-arm64.msi` | `gridcraft-<ver>-windows-arm64-portable.zip` |
+| x86 (32-bit) | `gridcraft-<ver>-windows-x86.msi` | `gridcraft-<ver>-windows-x86-portable.zip` |
+
+Installers and executables are code-signed. The MSI installer offers an optional desktop shortcut
+(unchecked on a new installation).
+
+**If the app doesn't open on Windows:** the desktop app initializes only DirectX 12 by default.
+Letting wgpu also create an OpenGL instance can crash some graphics drivers (AMD's
+`atio6axx.dll`) before the window appears, so the app would flash in Task Manager and quit.
+`WGPU_BACKEND` overrides the default for troubleshooting (for example `dx12` or `vulkan`). In
+PowerShell, from the folder containing the executable:
+
+```powershell
+$env:WGPU_BACKEND = "vulkan"
+& .\gridcraft.exe
+Remove-Item Env:WGPU_BACKEND                     # restore the default for later launches
+```
+
+An explicit `gl` override can bring the driver crash back on affected systems, and `vulkan` can
+bring back a crash in some Intel UHD Graphics drivers (`igvk64.dll`, #120). The macOS, Linux and
+web backend defaults are unchanged.
+
+**If the app is slow on an older Windows PC, or DirectX 12 can't start:** when DirectX 12 finds no
+graphics card with a driver for it, it only offers Microsoft's software renderer, which draws every
+frame on the processor. In that case GridCraft uses OpenGL instead, without setting anything; if
+the first renderer fails to start, it tries the other one once. The log file records the choice
+(lines starting with `graphics:`). `WGPU_BACKEND` still overrides it (and then nothing else is
+tried), e.g. `$env:WGPU_BACKEND = "gl"` or `"dx12"`.
+
+### macOS
+
+| Build | File | Notes |
+|---|---|---|
+| App, universal (Apple silicon + Intel) | `gridcraft-<ver>-macos-universal.dmg` | Signed and notarized |
+| Command-line tool, universal | `gridcraft-cli-<ver>-macos-universal.zip` | Signed and notarized |
+
+### Linux
+
+| Format | x86_64 | aarch64 (ARM64) | Notes |
+|---|---|---|---|
+| AppImage | `gridcraft-<ver>-linux-x86_64.AppImage` | `gridcraft-<ver>-linux-aarch64.AppImage` | Runs anywhere; updates itself with [AppImageUpdate](https://github.com/AppImageCommunity/AppImageUpdate) (`.zsync` files) |
+| Flatpak | `gridcraft-<ver>-linux-x86_64.flatpak` | `gridcraft-<ver>-linux-aarch64.flatpak` | Sandboxed; `flatpak install --user <file>` |
+| Debian/Ubuntu | `gridcraft-<ver>-linux-x86_64.deb` | `gridcraft-<ver>-linux-aarch64.deb` | |
+| Fedora/RHEL/openSUSE | `gridcraft-<ver>-linux-x86_64.rpm` | `gridcraft-<ver>-linux-aarch64.rpm` | |
+| Tarball | `gridcraft-<ver>-linux-x86_64.tar.gz` | `gridcraft-<ver>-linux-aarch64.tar.gz` | Unpack anywhere |
+
+### FreeBSD
+
+| Build | File |
+|---|---|
+| x86_64 | `gridcraft-<ver>-freebsd-x86_64.tar.gz` |
+
+### Web (WebAssembly)
+
+| Build | File | Notes |
+|---|---|---|
+| Static site | `gridcraft-web-<ver>.zip` | Runs in a modern browser; host it on any static server |
 
 ## The Crafting Apps
 

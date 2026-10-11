@@ -196,6 +196,18 @@ pub enum CfRule {
     },
 }
 
+/// Number of icons in an icon set (`3Arrows` → 3, `5Quarters` → 5), always 3 to 5.
+pub fn icon_count(set: &str) -> usize {
+    set.chars().next().and_then(|c| c.to_digit(10)).unwrap_or(3).clamp(3, 5) as usize
+}
+
+/// Excel's default icon-set thresholds: one per icon, the first being the lower bound,
+/// then even percent steps (`0, 33, 67` for three icons).
+pub fn default_icon_thresholds(set: &str) -> Vec<CfValueKind> {
+    let k = icon_count(set);
+    (0..k).map(|i| CfValueKind::Percent((i as f64 * 100.0 / k as f64).round())).collect()
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CondFormat {
     pub ranges: Vec<RangeRef>,
@@ -279,6 +291,10 @@ pub struct Comment {
     pub threaded: bool,
     pub resolved: bool,
     pub visible: bool,
+    /// Threaded comments: when the thread (first entry) and each reply were written, ISO 8601 as
+    /// read from the file (`dT`); empty when unknown, e.g. for comments made here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dates: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -290,6 +306,20 @@ pub struct Hyperlink {
 
 // ---------------------------------------------------------------- drawing objects
 
+/// How a floating object is pinned to the grid when its cells move or resize. Mirrors Excel's
+/// Format ▸ Size and Properties ▸ Properties, stored in the file as the anchor's `editAs`:
+/// `twoCell` (absent `editAs`), `oneCell` and `absolute`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum AnchorMode {
+    /// Move and size with cells (Excel's default; `<xdr:twoCellAnchor>`).
+    #[default]
+    MoveAndSize,
+    /// Move but don't size with cells (`<xdr:twoCellAnchor editAs="oneCell">` / `<xdr:oneCellAnchor>`).
+    MoveOnly,
+    /// Don't move or size with cells (`editAs="absolute"` / `<xdr:absoluteAnchor>`).
+    Absolute,
+}
+
 /// Position of a floating object: top-left cell plus offset, size in points.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Anchor {
@@ -298,6 +328,9 @@ pub struct Anchor {
     pub dy: f32,
     pub width: f32,
     pub height: f32,
+    /// How the object follows its anchor cell when rows/columns move (sort, insert, delete).
+    #[serde(default)]
+    pub mode: AnchorMode,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -340,7 +373,7 @@ pub enum LegendPos {
     Right,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Series {
     /// Formula text for the series name (`Sheet1!$B$1`) or a literal.
     pub name: Option<String>,
@@ -352,6 +385,9 @@ pub struct Series {
     /// Combo charts: this series drawn as a line on the secondary axis.
     pub secondary: bool,
     pub kind: Option<ChartKind>,
+    /// Draw line segments as a smoothed (spline) curve.
+    #[serde(default)]
+    pub smooth: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -370,6 +406,10 @@ pub struct Chart {
     /// Source range when created from a selection (for Switch Row/Column).
     pub source: Option<String>,
     pub by_rows: bool,
+    /// A PivotChart's PivotTable (`Sheet2!PivotTable1`): its series are rebuilt from the report
+    /// whenever the PivotTable is refreshed or its layout changes.
+    #[serde(default)]
+    pub pivot: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -459,6 +499,26 @@ pub struct AutoFilter {
     pub criteria: Vec<(u32, FilterCriterion)>,
 }
 
+/// A slicer: an on-sheet filter widget bound to one column of a table. Clicking its value tiles
+/// sets that column's `FilterCriterion::Values` in the sheet's [`AutoFilter`] and re-applies it,
+/// so a slicer is just a visual front-end over the existing filter machinery.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Slicer {
+    pub id: u32,
+    /// Name of the table this slicer filters.
+    pub table: String,
+    /// Header name of the filtered column within the table.
+    pub column: String,
+    /// Caption shown in the slicer header (defaults to the column name).
+    pub caption: String,
+    pub anchor: Anchor,
+    /// Selected display values. `None` means every value (no filter from this slicer); an empty
+    /// list means nothing is selected (all rows hidden), matching Excel's "clear all buttons".
+    pub selected: Option<Vec<String>>,
+    /// Number of button columns in the layout (Excel default 1).
+    pub columns: u32,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Orientation {
     #[default]
@@ -527,6 +587,24 @@ pub struct SheetProtection {
     pub delete_rows: bool,
     pub sort: bool,
     pub autofilter: bool,
+}
+
+/// Review › Allow Edit Ranges: cells that stay editable on a protected sheet, with or without a
+/// password (XLSX `<protectedRange>`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EditRange {
+    pub title: String,
+    pub ranges: Vec<RangeRef>,
+    pub password: Option<crate::PasswordHash>,
+    /// Windows permissions (`securityDescriptor`), kept as read from the file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_descriptor: Option<String>,
+}
+
+impl EditRange {
+    pub fn contains(&self, c: CellRef) -> bool {
+        self.ranges.iter().any(|r| r.contains(c))
+    }
 }
 
 /// Simple non-cryptographic password hash for sheet protection (like Excel's, protection is a
@@ -679,6 +757,18 @@ pub struct PivotTable {
     pub show_headers: bool,
     /// Area written by the last refresh.
     pub last_range: Option<RangeRef>,
+    /// Calculated fields, usable in the Values area by name.
+    pub calculated_fields: Vec<PivotCalcField>,
+}
+
+/// A calculated field: a formula over other fields (`=Sales*0.1`, `='Unit Price'*Units`). As in
+/// Excel, it is evaluated on the sums of the fields it names for each report cell, not per record.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PivotCalcField {
+    pub name: String,
+    /// Formula text, starting with `=`.
+    pub formula: String,
 }
 
 impl Default for PivotTable {
@@ -700,6 +790,7 @@ impl Default for PivotTable {
             style: "PivotStyleLight16".into(),
             show_headers: true,
             last_range: None,
+            calculated_fields: vec![],
         }
     }
 }

@@ -1,4 +1,4 @@
-//! File menu: new, open, save, close, export, properties.
+//! File menu: new, open, save, close, export, properties, options.
 
 use serde_json::{Value as Json, json};
 
@@ -8,7 +8,7 @@ use crate::DocState;
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!(noundo "file.new", "New Workbook", ["File"], Some("Cmd+N"), "{sample?: \"budget\"|\"sales\"|\"grades\"}", always, new_workbook),
-        cmd!(noundo "file.open", "Open…", ["File"], Some("Cmd+O"), "{path} | {name, base64} (xlsx, xlsm, csv, tsv, txt, json)", always, open),
+        cmd!(noundo "file.open", "Open…", ["File"], Some("Cmd+O"), "{path} | {name, base64} (xlsx, xlsm, xls import, xlsb and ods data import, csv, tsv, txt, json)", always, open),
         cmd!(noundo "file.save", "Save", ["File"], Some("Cmd+S"), "{path?} (xlsx by default; .csv/.tsv/.json/.html by extension)", has_doc, save),
         cmd!(noundo "file.saveAs", "Save As…", ["File"], Some("Cmd+Shift+S"), "{path}", has_doc, save_as),
         cmd!(query "file.saveBytes", "Encode Workbook", [], None, "{format?: xlsx|csv|tsv|json|html} → {base64}", has_doc, save_bytes),
@@ -16,6 +16,15 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "file.exportCsv", "Export as CSV", ["File", "Export"], None, "{path, sheet?}", has_doc, |s, p| export(s, p, "csv")),
         cmd!(noundo "file.exportHtml", "Save as Web Page", ["File", "Export"], None, "{path}", has_doc, |s, p| export(s, p, "html")),
         cmd!("file.properties", "Properties", ["File"], None, "{title?, subject?, author?, company?, keywords?, description?}", has_doc, properties),
+        cmd!(
+            query "file.options",
+            "Options",
+            ["File"],
+            None,
+            "{} → {calculation: {mode, iterative, maxIterations, maxChange}} for the active workbook (the interface opens File › Options; change settings with their own commands, e.g. formulas.calculationOptions, view.theme, app.language.set)",
+            always,
+            options
+        ),
         cmd!(noundo "window.activate", "Switch Window", ["Window"], None, "{index}", has_doc, activate_window),
     ]
 }
@@ -47,8 +56,16 @@ fn open(s: &mut Session, p: &Json) -> Result<Json> {
         return ok();
     };
     let (wb, warnings) = crate::io::open_bytes(&name, &bytes)?;
-    let title = std::path::Path::new(&name).file_name().and_then(|n| n.to_str()).unwrap_or("Book").to_string();
-    let path = str_param(p, "path").map(str::to_string);
+    let imported =
+        matches!(crate::io::FileKind::from_path(&name), Some(crate::io::FileKind::Ods | crate::io::FileKind::Xlsb | crate::io::FileKind::Xls))
+            || matches!(gridcraft_xlsx::sniff(&bytes), gridcraft_xlsx::Format::Ods | gridcraft_xlsx::Format::Xlsb | gridcraft_xlsx::Format::Xls);
+    let title = if imported {
+        format!("{} (imported).xlsx", std::path::Path::new(&name).file_stem().and_then(|n| n.to_str()).unwrap_or("Book"))
+    } else {
+        std::path::Path::new(&name).file_name().and_then(|n| n.to_str()).unwrap_or("Book").to_string()
+    };
+    // An import has no save target: ordinary Save must ask for a new destination.
+    let path = str_param(p, "path").filter(|_| !imported).map(str::to_string);
     // Replace an untouched blank Book1 like Excel does.
     if s.documents().len() == 1
         && s.active().is_some_and(|d| d.path.is_none() && !d.is_dirty() && d.undo.is_empty() && d.wb.sheets.iter().all(|sh| sh.cells.is_empty()))
@@ -56,6 +73,13 @@ fn open(s: &mut Session, p: &Json) -> Result<Json> {
         s.close_document(0);
     }
     let i = s.add_document(DocState::new(wb, path, title));
+    if !warnings.is_empty() {
+        let mut message = warnings.iter().take(5).cloned().collect::<Vec<_>>().join("\n\n");
+        if warnings.len() > 5 {
+            message.push_str(&format!("\n\n{} additional import warnings.", warnings.len() - 5));
+        }
+        s.ui_requests.push(crate::UiRequest::Message(message));
+    }
     let d = s.doc()?;
     Ok(
         json!({"index": i, "title": d.display_title(), "sheets": d.wb.sheets.iter().map(|s| s.name.clone()).collect::<Vec<_>>(), "warnings": warnings}),
@@ -140,6 +164,22 @@ fn properties(s: &mut Session, p: &Json) -> Result<Json> {
         }
         Ok(serde_json::to_value(&cx.wb.props).unwrap_or_default())
     })
+}
+
+/// File › Options: reports the workbook-level settings and asks the interface to show its Options
+/// page. Nothing changes here; every setting has its own command.
+fn options(s: &mut Session, _: &Json) -> Result<Json> {
+    s.ui_requests.push(crate::UiRequest::Dialog("options".into(), json!({})));
+    let calculation = s.active().map(|d| {
+        let c = &d.wb.calc;
+        let mode = match c.mode {
+            gridcraft_model::CalcMode::Automatic => "automatic",
+            gridcraft_model::CalcMode::AutomaticExceptTables => "automaticExceptTables",
+            gridcraft_model::CalcMode::Manual => "manual",
+        };
+        json!({"mode": mode, "iterative": c.iterative, "maxIterations": c.max_iterations, "maxChange": c.max_change})
+    });
+    Ok(json!({"calculation": calculation}))
 }
 
 fn activate_window(s: &mut Session, p: &Json) -> Result<Json> {

@@ -1,7 +1,7 @@
 //! Formulas tab: AutoSum, Insert Function, names, auditing, calculation.
 
 use gridcraft_core::{CellRef, RangeRef};
-use gridcraft_model::{CalcMode, DefinedName};
+use gridcraft_model::{CalcMode, DefinedName, Formula};
 use serde_json::{Value as Json, json};
 
 use super::*;
@@ -32,18 +32,18 @@ pub fn specs() -> Vec<CommandSpec> {
             "Define Name…",
             ["Formulas", "Defined Names"],
             None,
-            "{name, refersTo?: \"=Sheet1!$A$1:$A$10\" (default: the selection), scope?: \"Workbook\"|sheet name, comment?}",
+            "{name, refersTo?: \"=Sheet1!$A$1:$A$10\" (default: the selection), scope?: \"Workbook\"|sheet name, comment?, oldName?, oldScope?} (oldName: edit that name (Name Manager › Edit); a new name also renames it in formulas)",
             has_doc,
             define_name
         ),
-        cmd!("formulas.deleteName", "Delete Name", [], None, "{name, scope?}", has_doc, delete_name),
+        cmd!("formulas.deleteName", "Delete Name", [], None, "{name, scope?: \"Workbook\"|sheet name (default: every scope)}", has_doc, delete_name),
         cmd!(query "formulas.nameManager", "Name Manager", ["Formulas", "Defined Names"], Some("Cmd+F3"), "{} → names with values", has_doc, name_manager),
         cmd!(
             "formulas.createFromSelection",
             "Create from Selection",
             ["Formulas", "Defined Names"],
             Some("Cmd+Shift+F3"),
-            "{range?, top?: true, left?: false, bottom?, right?}",
+            "{range?, top?: true, left?: false, bottom?: false, right?: false, replace?: false (existing names are kept and listed in `skipped`)}",
             has_doc,
             create_from_selection
         ),
@@ -185,6 +185,7 @@ pub fn function_list() -> Vec<Json> {
         ("SHEET", "Information", "SHEET([value])", "Sheet number."),
         ("SHEETS", "Information", "SHEETS([reference])", "Number of sheets."),
         ("AREAS", "Lookup", "AREAS(reference)", "Number of areas in a reference."),
+        ("TRIMRANGE", "Lookup", "TRIMRANGE(range, [trim_rows], [trim_cols])", "A range or array without its blank outer rows and columns."),
         ("ISOMITTED", "Information", "ISOMITTED(argument)", "TRUE when a LAMBDA argument was left out."),
     ];
     for (n, c, sig, d) in specials {
@@ -218,13 +219,24 @@ fn valid_name(n: &str) -> bool {
     if !(first.is_alphabetic() || first == '_' || first == '\\') {
         return false;
     }
-    if n.len() > 255 || n.eq_ignore_ascii_case("R") || n.eq_ignore_ascii_case("C") {
-        return false;
-    }
-    if CellRef::parse(n).is_some() {
+    if n.len() > 255 || CellRef::parse(n).is_some() || is_r1c1(n) {
         return false;
     }
     n.chars().all(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | '\\' | '?'))
+}
+
+/// Looks like an R1C1 reference (`R`, `C`, `RC`, `R2`, `C3`, `R1C1`), which Excel doesn't
+/// accept as a name.
+fn is_r1c1(n: &str) -> bool {
+    let digits = |s: &str| s.bytes().take_while(u8::is_ascii_digit).count();
+    let mut rest = n;
+    if let Some(r) = rest.strip_prefix(['R', 'r']) {
+        rest = r.get(digits(r)..).unwrap_or("");
+    }
+    if let Some(c) = rest.strip_prefix(['C', 'c']) {
+        rest = c.get(digits(c)..).unwrap_or("");
+    }
+    rest.is_empty() && !n.is_empty()
 }
 
 fn define_name(s: &mut Session, p: &Json) -> Result<Json> {
@@ -254,7 +266,32 @@ fn define_name(s: &mut Session, p: &Json) -> Result<Json> {
         return Err(EngineError::Other("There's a problem with this formula.".into()));
     }
     let comment = str_param(p, "comment").unwrap_or("").to_string();
+    // Editing an existing name (Name Manager › Edit…): it must exist, and its new name must not
+    // collide with another name in the target scope.
+    let old = match str_param(p, "oldName") {
+        Some(old_name) => {
+            let old_scope = match str_param(p, "oldScope") {
+                None | Some("Workbook") => None,
+                Some(sh) => Some(d.wb.sheet_index(sh).ok_or_else(|| bad("formulas.defineName", "no such sheet"))?),
+            };
+            if !d.wb.names.iter().any(|n| n.name.eq_ignore_ascii_case(old_name) && n.scope == old_scope) {
+                return Err(bad("formulas.defineName", "no such name to edit"));
+            }
+            let same = old_name.eq_ignore_ascii_case(&name) && old_scope == scope;
+            if !same && d.wb.names.iter().any(|n| n.name.eq_ignore_ascii_case(&name) && n.scope == scope) {
+                return Err(EngineError::Other("The name entered already exists. Enter a unique name.".into()));
+            }
+            Some((old_name.to_string(), old_scope))
+        }
+        None => None,
+    };
     edit(s, |cx| {
+        if let Some((old_name, old_scope)) = &old {
+            cx.wb.names.retain(|n| !(n.name.eq_ignore_ascii_case(old_name) && n.scope == *old_scope));
+            if !old_name.eq_ignore_ascii_case(&name) {
+                rename_name_in_formulas(&mut cx.wb, old_name, *old_scope, &name);
+            }
+        }
         cx.wb.names.retain(|n| !(n.name.eq_ignore_ascii_case(&name) && n.scope == scope));
         cx.wb.names.push(DefinedName { name: name.clone(), scope, formula: refers.clone(), comment: comment.clone(), hidden: false });
         cx.structural = true;
@@ -262,11 +299,61 @@ fn define_name(s: &mut Session, p: &Json) -> Result<Json> {
     })
 }
 
+/// Formulas that use a renamed name follow it: cell formulas and other names' definitions, on
+/// the sheets where `old` resolves to the renamed name (its own sheet for a sheet-scoped name;
+/// every sheet without a same-named sheet-level name for a workbook-level one).
+fn rename_name_in_formulas(wb: &mut gridcraft_model::Workbook, old: &str, old_scope: Option<usize>, new: &str) {
+    let shadowed: Vec<usize> = wb.names.iter().filter(|n| n.name.eq_ignore_ascii_case(old)).filter_map(|n| n.scope).collect();
+    let applies = |sheet: usize| match old_scope {
+        Some(s) => s == sheet,
+        None => !shadowed.contains(&sheet),
+    };
+    // The renamed expression, or `None` when the name doesn't occur in it.
+    let rename = |e: gridcraft_formula::Expr| {
+        let mut hit = false;
+        let out = e.map(&mut |x| match x {
+            gridcraft_formula::Expr::Name(n) if n.eq_ignore_ascii_case(old) => {
+                hit = true;
+                gridcraft_formula::Expr::Name(new.to_string())
+            }
+            o => o,
+        });
+        hit.then_some(out)
+    };
+    for i in 0..wb.sheets.len() {
+        if !applies(i) {
+            continue;
+        }
+        let Some(sh) = wb.sheet_mut(i) else { continue };
+        let formulas: Vec<(CellRef, std::sync::Arc<Formula>)> = sh.cells.iter().filter_map(|(c, x)| x.formula.clone().map(|f| (c, f))).collect();
+        for (c, f) in formulas {
+            let Some(e) = f.expr().and_then(rename) else { continue };
+            let mut nf = Formula::from_expr(e);
+            nf.array = f.array;
+            if let Some(cell) = sh.cells.get_mut(c) {
+                cell.formula = Some(std::sync::Arc::new(nf));
+            }
+        }
+    }
+    for n in wb.names.iter_mut() {
+        if n.scope.is_none_or(applies)
+            && let Some(e) = gridcraft_formula::parse(&n.formula).ok().and_then(rename)
+        {
+            n.formula = gridcraft_formula::print(&e);
+        }
+    }
+}
+
 fn delete_name(s: &mut Session, p: &Json) -> Result<Json> {
     let name = str_param(p, "name").ok_or_else(|| bad("formulas.deleteName", "missing `name`"))?.to_string();
+    let scope = match str_param(p, "scope") {
+        None => None,
+        Some("Workbook") => Some(None),
+        Some(sh) => Some(Some(s.doc()?.wb.sheet_index(sh).ok_or_else(|| bad("formulas.deleteName", "no such sheet"))?)),
+    };
     edit(s, |cx| {
         let before = cx.wb.names.len();
-        cx.wb.names.retain(|n| !n.name.eq_ignore_ascii_case(&name));
+        cx.wb.names.retain(|n| !(n.name.eq_ignore_ascii_case(&name) && scope.is_none_or(|sc| n.scope == sc)));
         if cx.wb.names.len() == before {
             return Err(bad("formulas.deleteName", "no such name"));
         }
@@ -295,6 +382,9 @@ fn create_from_selection(s: &mut Session, p: &Json) -> Result<Json> {
     let r = target_range(s, p)?;
     let top = bool_param(p, "top").unwrap_or(true);
     let left = bool_param(p, "left").unwrap_or(false);
+    let bottom = bool_param(p, "bottom").unwrap_or(false);
+    let right = bool_param(p, "right").unwrap_or(false);
+    let replace = bool_param(p, "replace").unwrap_or(false);
     let d = s.doc()?;
     let sh = d.wb.active().ok_or(EngineError::NoDocument)?;
     let q = gridcraft_formula::quote_sheet(&sh.name);
@@ -309,28 +399,38 @@ fn create_from_selection(s: &mut Session, p: &Json) -> Result<Json> {
     };
     let clean = |t: String| -> String {
         let mut n: String = t.trim().chars().map(|c| if c.is_alphanumeric() || c == '.' { c } else { '_' }).collect();
-        if n.chars().next().is_some_and(|c| c.is_ascii_digit()) || CellRef::parse(&n).is_some() {
+        if !n.is_empty() && !valid_name(&n) {
             n.insert(0, '_');
         }
-        n
+        if valid_name(&n) { n } else { String::new() }
     };
+    // The labels in the chosen edge rows/columns name the cells between them.
+    let (r0, r1) = (r.start.row + top as u32, r.end.row.saturating_sub(bottom as u32));
+    let (c0, c1) = (r.start.col + left as u32, r.end.col.saturating_sub(right as u32));
     let mut made = Vec::new();
-    if top && r.height() > 1 {
-        for c in r.start.col..=r.end.col {
-            let name = clean(sh.value(CellRef::new(r.start.row, c)).display());
-            if !name.is_empty() {
-                made.push((name, abs(RangeRef::new(CellRef::new(r.start.row + 1, c), CellRef::new(r.end.row, c)))));
+    if r0 <= r1 && c0 <= c1 {
+        for (on, row) in [(top, r.start.row), (bottom, r.end.row)] {
+            for c in (c0..=c1).filter(|_| on) {
+                let name = clean(sh.value(CellRef::new(row, c)).display());
+                if !name.is_empty() {
+                    made.push((name, abs(RangeRef::new(CellRef::new(r0, c), CellRef::new(r1, c)))));
+                }
+            }
+        }
+        for (on, col) in [(left, r.start.col), (right, r.end.col)] {
+            for row in (r0..=r1).filter(|_| on) {
+                let name = clean(sh.value(CellRef::new(row, col)).display());
+                if !name.is_empty() {
+                    made.push((name, abs(RangeRef::new(CellRef::new(row, c0), CellRef::new(row, c1)))));
+                }
             }
         }
     }
-    if left && r.width() > 1 {
-        for row in r.start.row + top as u32..=r.end.row {
-            let name = clean(sh.value(CellRef::new(row, r.start.col)).display());
-            if !name.is_empty() {
-                made.push((name, abs(RangeRef::new(CellRef::new(row, r.start.col + 1), CellRef::new(row, r.end.col)))));
-            }
-        }
-    }
+    // Excel asks before replacing an existing name; here it's kept unless `replace` is set, and
+    // reported.
+    let exists = |n: &str| d.wb.names.iter().any(|x| x.name.eq_ignore_ascii_case(n) && x.scope.is_none());
+    let (made, skipped): (Vec<_>, Vec<_>) = made.into_iter().partition(|(n, _)| replace || !exists(n));
+    let skipped: Vec<String> = skipped.into_iter().map(|(n, _)| n).collect();
     let n = made.len();
     edit(s, |cx| {
         for (name, f) in made {
@@ -338,13 +438,13 @@ fn create_from_selection(s: &mut Session, p: &Json) -> Result<Json> {
             cx.wb.names.push(DefinedName { name, scope: None, formula: f, comment: String::new(), hidden: false });
         }
         cx.structural = true;
-        Ok(json!({"created": n}))
+        Ok(json!({"created": n, "skipped": skipped}))
     })
 }
 
 fn trace_precedents(s: &mut Session, p: &Json) -> Result<Json> {
     let d = s.doc()?;
-    let at = cell_param(p, "cell").unwrap_or(d.selection.active);
+    let at = cell_param(s, p, "cell")?.unwrap_or(d.selection.active);
     let areas = d.calc.graph.precedents_of((d.wb.active_sheet, at));
     let v: Vec<Json> = areas.iter().map(|a| json!({"sheet": d.wb.sheet(a.sheet).map(|s| s.name.clone()), "range": a.range.a1()})).collect();
     Ok(Json::Array(v))
@@ -352,7 +452,7 @@ fn trace_precedents(s: &mut Session, p: &Json) -> Result<Json> {
 
 fn trace_dependents(s: &mut Session, p: &Json) -> Result<Json> {
     let d = s.doc()?;
-    let at = cell_param(p, "cell").unwrap_or(d.selection.active);
+    let at = cell_param(s, p, "cell")?.unwrap_or(d.selection.active);
     let mut deps = Vec::new();
     d.calc.graph.dependents(d.wb.active_sheet, at, &mut deps);
     deps.sort();
@@ -393,7 +493,7 @@ fn error_checking(s: &mut Session, _: &Json) -> Result<Json> {
 
 fn evaluate_formula(s: &mut Session, p: &Json) -> Result<Json> {
     let d = s.doc()?;
-    let at = cell_param(p, "cell").unwrap_or(d.selection.active);
+    let at = cell_param(s, p, "cell")?.unwrap_or(d.selection.active);
     let sheet = d.wb.active_sheet;
     let text = match str_param(p, "formula") {
         Some(f) => f.trim_start_matches('=').to_string(),
@@ -425,7 +525,7 @@ fn evaluate_formula(s: &mut Session, p: &Json) -> Result<Json> {
 fn evaluate(s: &mut Session, p: &Json) -> Result<Json> {
     let d = s.doc()?;
     let f = str_param(p, "formula").ok_or_else(|| bad("formulas.evaluate", "missing `formula`"))?;
-    let at = cell_param(p, "cell").unwrap_or(d.selection.active);
+    let at = cell_param(s, p, "cell")?.unwrap_or(d.selection.active);
     let v = gridcraft_calc::evaluate(&d.wb, d.wb.active_sheet, at, f);
     Ok(crate::cmd::inspect::value_json(&v))
 }

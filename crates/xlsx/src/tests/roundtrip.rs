@@ -7,6 +7,7 @@ use std::sync::Arc;
 use gridcraft_core::{CellError, CellRef, DateSystem, RangeRef, Value};
 use gridcraft_model::*;
 
+use crate::package::Package;
 use crate::{read_xlsx, write_xlsx};
 
 fn at(a: &str) -> CellRef {
@@ -117,6 +118,7 @@ fn sample() -> Workbook {
     s.show_zeros = false;
     s.right_to_left = true;
     s.zoom = 125;
+    s.view = gridcraft_model::SheetViewMode::PageLayout;
     s.view_active = at("C7");
 
     let red_b = Box::new(red.clone());
@@ -186,15 +188,56 @@ fn sample() -> Workbook {
         allow_blank: false,
         ..Default::default()
     });
+    s.edit_ranges = vec![
+        EditRange { title: "Open & <free>".into(), ranges: vec![rr("A1:B2"), rr("D4")], password: None, security_descriptor: None },
+        EditRange {
+            title: "Old".into(),
+            ranges: vec![rr("C1:C9")],
+            password: Some(PasswordHash::Legacy(0x83AF)),
+            security_descriptor: Some("O:WDG:WDD:(A;;CC;;;WD)".into()),
+        },
+        EditRange {
+            title: "New".into(),
+            ranges: vec![rr("E1")],
+            password: Some(PasswordHash::new_sha512("pw", b"0123456789abcdef")),
+            security_descriptor: None,
+        },
+    ];
     s.hyperlinks.insert(at("A2"), Hyperlink { target: "https://example.com/?a=1&b=2".into(), tooltip: Some("go".into()) });
     s.hyperlinks.insert(at("A3"), Hyperlink { target: "'Data & Stuff'!B2".into(), tooltip: None });
     s.hyperlinks.insert(at("A4"), Hyperlink { target: "mailto:me@example.com".into(), tooltip: None });
     s.comments.insert(
         at("B2"),
-        Comment { author: "Ann".into(), text: "Note & <stuff>\nline 2".into(), replies: vec![], threaded: false, resolved: false, visible: false },
+        Comment {
+            author: "Ann".into(),
+            text: "Note & <stuff>\nline 2".into(),
+            replies: vec![],
+            threaded: false,
+            resolved: false,
+            visible: false,
+            dates: vec![],
+        },
     );
-    s.comments
-        .insert(at("C3"), Comment { author: "Bob".into(), text: "second".into(), replies: vec![], threaded: false, resolved: false, visible: false });
+    s.comments.insert(
+        at("C3"),
+        Comment { author: "Bob".into(), text: "second".into(), replies: vec![], threaded: false, resolved: false, visible: true, dates: vec![] },
+    );
+    s.comments.insert(
+        at("D4"),
+        Comment {
+            author: "Ann & Co".into(),
+            text: "Threaded <one>\nsecond line".into(),
+            replies: vec![("Bob".into(), "first reply".into()), ("Ann & Co".into(), "second reply".into())],
+            threaded: true,
+            resolved: true,
+            visible: false,
+            dates: vec!["2026-10-11T09:30:00.00".into(), String::new(), "2026-10-11T10:15:00.00".into()],
+        },
+    );
+    s.comments.insert(
+        at("E5"),
+        Comment { author: "Cy".into(), text: "open thread".into(), replies: vec![], threaded: true, resolved: false, visible: false, dates: vec![] },
+    );
     s.autofilter = Some(AutoFilter {
         range: rr("K1:N20"),
         criteria: vec![
@@ -245,7 +288,8 @@ fn sample() -> Workbook {
     let png = b"\x89PNG\r\n\x1a\n0000IHDRfake".to_vec();
     s.images.push(Image {
         id: 10,
-        anchor: Anchor { cell: at("C10"), dx: 5.0, dy: 4.0, width: 120.0, height: 80.0 },
+        // A non-default anchor mode, to prove it survives an xlsx round-trip.
+        anchor: Anchor { cell: at("C10"), dx: 5.0, dy: 4.0, width: 120.0, height: 80.0, mode: AnchorMode::MoveOnly },
         data: png,
         mime: "image/png".into(),
         alt: "Logo \"x\"".into(),
@@ -253,7 +297,7 @@ fn sample() -> Workbook {
     s.shapes.push(Shape {
         id: 11,
         kind: ShapeKind::Ellipse,
-        anchor: Anchor { cell: at("E10"), dx: 0.0, dy: 0.0, width: 64.0, height: 40.0 },
+        anchor: Anchor { cell: at("E10"), dx: 0.0, dy: 0.0, width: 64.0, height: 40.0, mode: AnchorMode::Absolute },
         fill: Color::Rgb(0x4472C4),
         line: Color::Rgb(0x000000),
         text: "Hi\nthere".into(),
@@ -261,7 +305,7 @@ fn sample() -> Workbook {
     s.shapes.push(Shape {
         id: 12,
         kind: ShapeKind::Arrow,
-        anchor: Anchor { cell: at("E14"), dx: 0.0, dy: 0.0, width: 64.0, height: 0.0 },
+        anchor: Anchor { cell: at("E14"), dx: 0.0, dy: 0.0, width: 64.0, height: 0.0, ..Default::default() },
         fill: Color::Auto,
         line: Color::Rgb(0xFF0000),
         text: String::new(),
@@ -269,7 +313,7 @@ fn sample() -> Workbook {
     s.shapes.push(Shape {
         id: 13,
         kind: ShapeKind::TextBox,
-        anchor: Anchor { cell: at("E16"), dx: 0.0, dy: 0.0, width: 64.0, height: 40.0 },
+        anchor: Anchor { cell: at("E16"), dx: 0.0, dy: 0.0, width: 64.0, height: 40.0, ..Default::default() },
         fill: Color::Auto,
         line: Color::Auto,
         text: "box".into(),
@@ -277,7 +321,7 @@ fn sample() -> Workbook {
     let base_chart = Chart {
         id: 20,
         kind: ChartKind::ColumnClustered,
-        anchor: Anchor { cell: at("J5"), dx: 0.0, dy: 0.0, width: 480.0, height: 288.0 },
+        anchor: Anchor { cell: at("J5"), dx: 0.0, dy: 0.0, width: 480.0, height: 288.0, ..Default::default() },
         title: Some("Sales".into()),
         series: vec![Series {
             name: Some("'Data & Stuff'!$B$1".into()),
@@ -287,6 +331,7 @@ fn sample() -> Workbook {
             color: Some(Color::Rgb(0xFF0000)),
             secondary: false,
             kind: None,
+            smooth: false,
         }],
         legend: LegendPos::Bottom,
         data_labels: true,
@@ -296,6 +341,7 @@ fn sample() -> Workbook {
         y_title: Some("Amount".into()),
         source: None,
         by_rows: false,
+        pivot: None,
     };
     for kind in [
         ChartKind::ColumnClustered,
@@ -324,6 +370,7 @@ fn sample() -> Workbook {
         kind: Some(ChartKind::Line),
         secondary: true,
         color: None,
+        smooth: false,
         ..base_chart.series[0].clone()
     });
     s.charts.push(combo);
@@ -336,6 +383,10 @@ fn sample() -> Workbook {
     wb.sheets.push(Arc::new(s2));
     let mut s3 = Sheet::new("2024");
     s3.visibility = Visibility::VeryHidden;
+    s3.comments.insert(
+        at("A1"),
+        Comment { author: "Bob".into(), text: "other sheet".into(), replies: vec![], threaded: true, resolved: false, visible: false, dates: vec![] },
+    );
     wb.sheets.push(Arc::new(s3));
     wb.names.push(DefinedName { name: "Rate".into(), scope: None, formula: "0.07".into(), comment: "c".into(), hidden: false });
     wb.names.push(DefinedName { name: "Local".into(), scope: Some(1), formula: "Hidden!$A$1".into(), comment: String::new(), hidden: true });
@@ -369,6 +420,7 @@ fn full_roundtrip() {
     assert_eq!(back.sheets[1].visibility, Visibility::Hidden);
     assert_eq!(back.sheets[2].visibility, Visibility::VeryHidden);
     assert_eq!(back.sheets[2].name, "2024");
+    assert_eq!(back.sheets[2].comments, wb.sheets[2].comments);
 
     let (a, b) = (wb.sheet(0).unwrap(), back.sheet(0).unwrap());
     assert_eq!(b.name, a.name);
@@ -394,12 +446,14 @@ fn full_roundtrip() {
     assert_eq!(b.tab_color, a.tab_color);
     assert_eq!((b.show_gridlines, b.show_headings, b.show_zeros, b.right_to_left, b.zoom), (false, false, false, true, 125));
     assert_eq!(b.view_active, a.view_active);
+    assert_eq!(b.view, gridcraft_model::SheetViewMode::PageLayout, "sheetView view=\"pageLayout\" round-trips");
     assert_eq!(b.cond_formats, a.cond_formats);
     assert_eq!(b.validations, a.validations);
     assert_eq!(b.hyperlinks, a.hyperlinks);
     assert_eq!(b.comments, a.comments);
     assert_eq!(b.autofilter, a.autofilter);
     assert_eq!(b.protection, a.protection);
+    assert_eq!(b.edit_ranges, a.edit_ranges);
     assert_eq!(b.print, a.print);
     let mut sp = a.sparklines.clone();
     sp[0].source = "'Data & Stuff'!B2:B3".into();
@@ -420,14 +474,17 @@ fn full_roundtrip() {
         ia.cell == ib.cell && close(ia.dx, ib.dx) && close(ia.dy, ib.dy) && close(ia.width, ib.width) && close(ia.height, ib.height),
         "{ia:?} {ib:?}"
     );
+    // The anchor mode (Excel's editAs) survives the round-trip.
+    assert_eq!(ib.mode, AnchorMode::MoveOnly, "image anchor mode");
+    assert_eq!(b.shapes[0].anchor.mode, AnchorMode::Absolute, "shape anchor mode");
+    assert_eq!(b.shapes[1].anchor.mode, AnchorMode::MoveAndSize, "default anchor mode");
     assert_eq!(b.shapes.len(), 3);
     for (x, y) in a.shapes.iter().zip(&b.shapes) {
         assert_eq!((x.kind, &x.text, x.fill, x.line), (y.kind, &y.text, y.fill, y.line));
     }
     assert_eq!(b.charts.len(), a.charts.len());
     for (x, y) in a.charts.iter().zip(&b.charts) {
-        let expect_kind = if x.kind == ChartKind::Waterfall { ChartKind::ColumnClustered } else { x.kind };
-        assert_eq!(y.kind, expect_kind, "chart kind");
+        assert_eq!(y.kind, x.kind, "chart kind");
         assert_eq!(y.title, x.title);
         assert_eq!(y.legend, x.legend);
         assert_eq!(y.data_labels, x.data_labels);
@@ -562,4 +619,197 @@ fn writing_repairs_invalid_models() {
     assert_eq!(s.value(at("A1")), Value::text("X"));
     assert_eq!(s.tables[0].name, "Table1");
     assert_eq!(s.cell(at("B2")).unwrap().style, StyleId::DEFAULT);
+}
+
+#[test]
+fn vba_project_roundtrip() {
+    // A VBA project blob is preserved byte-identically through write and read, and the package
+    // carries the macro-enabled content type plus the vbaProject relationship.
+    let vba = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1 fake OLE2 vbaProject".to_vec();
+    let mut wb = Workbook::new();
+    wb.vba_project = Some(vba.clone());
+    let bytes = write_xlsx(&wb).unwrap();
+    assert_eq!(write_xlsx(&wb).unwrap(), bytes, "output is deterministic");
+
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes.clone())).unwrap();
+    let names: Vec<String> = (0..z.len()).map(|i| z.name_for_index(i).unwrap().to_string()).collect();
+    assert!(names.iter().any(|x| x == "xl/vbaProject.bin"), "missing vbaProject.bin");
+    let mut bin = vec![];
+    z.by_name("xl/vbaProject.bin").unwrap().read_to_end(&mut bin).unwrap();
+    assert_eq!(bin, vba, "vbaProject.bin written byte-identically");
+    let mut ct = String::new();
+    z.by_name("[Content_Types].xml").unwrap().read_to_string(&mut ct).unwrap();
+    assert!(ct.contains("macroEnabled.main+xml"), "macro-enabled main content type: {ct}");
+    assert!(ct.contains("/xl/vbaProject.bin"), "vbaProject content type override: {ct}");
+    let mut rels = String::new();
+    z.by_name("xl/_rels/workbook.xml.rels").unwrap().read_to_string(&mut rels).unwrap();
+    assert!(rels.contains("relationships/vbaProject"), "vbaProject relationship: {rels}");
+
+    let (back, rep) = read_xlsx(&bytes).unwrap();
+    assert_eq!(back.vba_project.as_deref(), Some(vba.as_slice()), "vbaProject survives the read");
+    assert!(rep.warnings.iter().any(|w| w.contains("not executed")), "{:?}", rep.warnings);
+
+    // A workbook without macros stays macro-free and free of VBA warnings.
+    let (plain, rp) = read_xlsx(&write_xlsx(&Workbook::new()).unwrap()).unwrap();
+    assert_eq!(plain.vba_project, None);
+    assert!(rp.warnings.iter().all(|w| !w.contains("VBA")), "{:?}", rp.warnings);
+}
+
+#[test]
+fn vba_project_read_from_foreign_file() {
+    // An .xlsm built by another producer is captured on read (not dropped with a plain warning).
+    let vba: &[u8] = b"PK\x03\x04-not-really-but-opaque-bytes";
+    let bytes = super::minimal(
+        "<sheetData/>",
+        &[("xl/vbaProject.bin", "ignored-as-text")],
+        r#"<Relationship Id="rId9" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProject" Target="vbaProject.bin"/>"#,
+        "",
+    );
+    let (wb, rep) = read_xlsx(&bytes).unwrap();
+    assert!(wb.vba_project.is_some(), "VBA blob captured");
+    assert!(rep.warnings.iter().any(|w| w.contains("not executed")), "{:?}", rep.warnings);
+    let _ = vba;
+}
+
+fn sheet1_xml(bytes: &[u8]) -> (String, bool) {
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut s = String::new();
+    z.by_name("xl/worksheets/sheet1.xml").unwrap().read_to_string(&mut s).unwrap();
+    let metadata = z.by_name("xl/metadata.xml").is_ok();
+    (s, metadata)
+}
+
+/// Excel refuses to open a file whose cached values include `#SPILL!` or `#CALC!`.
+#[test]
+fn spill_and_calc_errors_are_cached_as_value_errors() {
+    let mut wb = Workbook::new();
+    let s = wb.sheet_mut(0).unwrap();
+    s.set_value(at("A1"), Value::Number(1.0));
+    s.cells.set(at("C1"), Cell { value: Value::Error(CellError::Spill), ..Cell::formula(Formula::new("A1:A3*2")) });
+    s.cells.set(at("C2"), Cell { value: Value::Error(CellError::Calc), ..Cell::formula(Formula::new("FILTER(A1:A3,A1:A3>5)")) });
+    s.cells.set(at("C3"), Cell { value: Value::Error(CellError::NA), ..Cell::formula(Formula::new("NA()")) });
+    let bytes = write_xlsx(&wb).unwrap();
+    let (xml, _) = sheet1_xml(&bytes);
+    assert!(!xml.contains("#SPILL!") && !xml.contains("#CALC!"), "{xml}");
+    let mut pkg = Package::open(&bytes).unwrap();
+    let sheet = pkg.read_xml("xl/worksheets/sheet1.xml").unwrap().unwrap();
+    for (address, text, value) in [("C1", "A1:A3*2", "#VALUE!"), ("C2", "_xlfn._xlws.FILTER(A1:A3,A1:A3>5)", "#VALUE!"), ("C3", "NA()", "#N/A")] {
+        let cell = sheet.child("sheetData").unwrap().kids("row").flat_map(|row| row.kids("c")).find(|cell| cell.attr("r") == Some(address)).unwrap();
+        assert_eq!(cell.attr("t"), Some("e"));
+        assert_eq!(cell.child("f").unwrap().text, text);
+        assert_eq!(cell.child("v").unwrap().text, value);
+    }
+}
+
+/// `CT_IconSet` needs one `cfvo` per icon (at least two); a rule without stored thresholds
+/// gets Excel's defaults, one without the lower bound gets it prepended (#235).
+#[test]
+fn icon_sets_always_write_one_cfvo_per_icon() {
+    let mut wb = Workbook::new();
+    let s = wb.sheet_mut(0).unwrap();
+    for (i, (set, thresholds)) in [
+        ("3Arrows", vec![]),
+        ("4Rating", vec![CfValueKind::Number(2.0), CfValueKind::Number(5.0), CfValueKind::Number(8.0)]),
+        ("9Bogus", vec![CfValueKind::Percent(50.0)]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        s.cond_formats.push(CondFormat {
+            ranges: vec![rr(&format!("A{}", i + 1))],
+            rule: CfRule::IconSet { set: set.into(), thresholds, reverse: false, show_value: true },
+            priority: i as u32 + 1,
+            stop_if_true: false,
+        });
+    }
+    let bytes = write_xlsx(&wb).unwrap();
+    let (xml, _) = sheet1_xml(&bytes);
+    assert!(
+        xml.contains(
+            "<iconSet iconSet=\"3Arrows\"><cfvo type=\"percent\" val=\"0\"/><cfvo type=\"percent\" val=\"33\"/><cfvo type=\"percent\" val=\"67\"/></iconSet>"
+        ),
+        "{xml}"
+    );
+    assert!(
+        xml.contains("<iconSet iconSet=\"4Rating\"><cfvo type=\"percent\" val=\"0\"/><cfvo type=\"num\" val=\"2\"/><cfvo type=\"num\" val=\"5\"/><cfvo type=\"num\" val=\"8\"/></iconSet>"),
+        "{xml}"
+    );
+    assert!(xml.contains("<iconSet iconSet=\"9Bogus\"><cfvo type=\"percent\" val=\"0\"/>"), "{xml}");
+    let (back, _) = read_xlsx(&bytes).unwrap();
+    let rules: Vec<usize> = back
+        .sheet(0)
+        .unwrap()
+        .cond_formats
+        .iter()
+        .map(|cf| match &cf.rule {
+            CfRule::IconSet { thresholds, .. } => thresholds.len(),
+            _ => 0,
+        })
+        .collect();
+    assert_eq!(rules, [3, 4, 5]);
+}
+
+/// Files have no `@` operator: Excel writes `@x` as `_xlfn.SINGLE(x)` in a dynamic-array
+/// formula, and reads it back as `@x`.
+#[test]
+fn implicit_intersection_is_written_as_single() {
+    let mut wb = Workbook::new();
+    let s = wb.sheet_mut(0).unwrap();
+    for (r, n) in [(0, 1.0), (1, 3.0), (2, 5.0)] {
+        s.set_value(CellRef::new(r, 0), Value::Number(n));
+    }
+    s.cells.set(at("D3"), Cell { value: Value::Number(10.0), ..Cell::formula(Formula::new("@A1:A3*2")) });
+    s.cells.set(at("D4"), Cell { value: Value::Number(2.0), ..Cell::formula(Formula::new("A1*2")) });
+    let bytes = write_xlsx(&wb).unwrap();
+    let (xml, metadata) = sheet1_xml(&bytes);
+    assert!(xml.contains("<c r=\"D3\" cm=\"1\"><f t=\"array\" ref=\"D3\">_xlfn.SINGLE(A1:A3)*2</f><v>10</v>"), "{xml}");
+    assert!(xml.contains("<c r=\"D4\"><f>A1*2</f>"), "{xml}");
+    assert!(!xml.contains('@'), "{xml}");
+    assert!(metadata);
+    let (back, _) = read_xlsx(&bytes).unwrap();
+    let sh = back.sheet(0).unwrap();
+    assert_eq!(sh.cell(at("D3")).and_then(|c| c.formula.as_ref()).map(|f| f.text.as_str()), Some("@A1:A3*2"));
+    assert_eq!(sh.cell(at("D3")).and_then(|c| c.formula.as_ref()).and_then(|f| f.array), None);
+}
+
+#[test]
+fn threaded_comments_write_persons_and_linked_legacy_notes() {
+    let wb = sample();
+    let bytes = write_xlsx(&wb).unwrap();
+    let mut pkg = Package::open(&bytes).unwrap();
+    let text = |pkg: &mut Package, part: &str| String::from_utf8(pkg.read(part).unwrap().unwrap()).unwrap();
+    // One person per author across the workbook, ids unique.
+    let persons = text(&mut pkg, "xl/persons/person.xml");
+    assert_eq!(persons.matches("<person ").count(), 3, "{persons}");
+    assert!(persons.contains("displayName=\"Ann &amp; Co\""));
+    let ct = text(&mut pkg, "[Content_Types].xml");
+    assert!(ct.contains("application/vnd.ms-excel.threadedcomments+xml") && ct.contains("application/vnd.ms-excel.person+xml"));
+    let tc = text(&mut pkg, "xl/threadedComments/threadedComment1.xml");
+    assert_eq!(tc.matches("<threadedComment ").count(), 4, "{tc}");
+    assert_eq!(tc.matches("parentId=").count(), 2);
+    assert_eq!(tc.matches("done=\"1\"").count(), 1);
+    // The legacy note of each thread points at it.
+    let legacy = text(&mut pkg, "xl/comments1.xml");
+    for id in tc.split("id=\"{").skip(1).filter_map(|s| s.split('}').next()).take(1) {
+        assert!(legacy.contains(&format!("<author>tc={{{id}}}</author>")) && legacy.contains(&format!("xr:uid=\"{{{id}}}\"")), "{legacy}");
+    }
+}
+
+#[test]
+fn bad_comment_dates_are_left_out() {
+    let mut wb = Workbook::new();
+    let s = Arc::make_mut(&mut wb.sheets[0]);
+    let c = Comment {
+        author: "A".into(),
+        text: "t".into(),
+        replies: vec![],
+        threaded: true,
+        resolved: false,
+        visible: false,
+        dates: vec!["\"/><evil".into()],
+    };
+    s.comments.insert(at("A1"), c);
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    let c = &back.sheets[0].comments[&at("A1")];
+    assert!(c.threaded && c.dates.is_empty());
 }

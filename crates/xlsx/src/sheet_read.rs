@@ -7,8 +7,8 @@ use gridcraft_core::date::{serial_from_ymd, time_fraction};
 use gridcraft_core::{CellError, CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
 use gridcraft_formula::Expr;
 use gridcraft_model::{
-    AutoFilter, Cell, CfOperator, CfRule, CfValueKind, Comment, CondFormat, ErrorStyle, FilterCriterion, Formula, Hyperlink, LineInfo, Orientation,
-    Sheet, SheetProtection, Sparkline, SparklineKind, Table, TableColumn, TotalsFn, Validation, ValidationKind,
+    AutoFilter, Cell, CfOperator, CfRule, CfValueKind, Comment, CondFormat, EditRange, ErrorStyle, FilterCriterion, Formula, Hyperlink, LineInfo,
+    Orientation, PasswordHash, Sheet, SheetProtection, Sparkline, SparklineKind, Table, TableColumn, TotalsFn, Validation, ValidationKind,
 };
 
 use crate::IoError;
@@ -29,8 +29,8 @@ struct Shared {
 struct RowState {
     next_row: u32,
     shared: HashMap<u32, Shared>,
-    /// Dynamic-array spill ranges: cached values inside them (other than the anchor) are not
-    /// stored, so the formula can spill again.
+    /// Dynamic-array spill ranges and legacy array ranges: cached values inside them (other than
+    /// the anchor) are not stored, so the formula can fill them again.
     dynamic: Vec<RangeRef>,
     dropped: u64,
     rows: u64,
@@ -142,26 +142,24 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
             }
             "rowBreaks" => sheet.print.row_breaks = e.kids("brk").filter_map(|b| b.attr_u32("id")).filter(|&r| r > 0 && r < MAX_ROWS).collect(),
             "colBreaks" => sheet.print.col_breaks = e.kids("brk").filter_map(|b| b.attr_u32("id")).filter(|&c| c > 0 && c < MAX_COLS).collect(),
-            "sheetProtection" => {
-                if e.flag("sheet", false) {
-                    if e.attr("password").is_some() || e.attr("hashValue").is_some() {
-                        cx.warn(format!("sheet \"{name}\": the protection password was not imported"));
-                    }
-                    sheet.protection = Some(SheetProtection {
-                        password_hash: None,
-                        select_locked: !e.flag("selectLockedCells", false),
-                        select_unlocked: !e.flag("selectUnlockedCells", false),
-                        format_cells: !e.flag("formatCells", true),
-                        format_columns: !e.flag("formatColumns", true),
-                        format_rows: !e.flag("formatRows", true),
-                        insert_columns: !e.flag("insertColumns", true),
-                        insert_rows: !e.flag("insertRows", true),
-                        delete_columns: !e.flag("deleteColumns", true),
-                        delete_rows: !e.flag("deleteRows", true),
-                        sort: !e.flag("sort", true),
-                        autofilter: !e.flag("autoFilter", true),
-                    });
+            "sheetProtection" if e.flag("sheet", false) => {
+                if e.attr("password").is_some() || e.attr("hashValue").is_some() {
+                    cx.warn(format!("sheet \"{name}\": the protection password was not imported"));
                 }
+                sheet.protection = Some(SheetProtection {
+                    password_hash: None,
+                    select_locked: !e.flag("selectLockedCells", false),
+                    select_unlocked: !e.flag("selectUnlockedCells", false),
+                    format_cells: !e.flag("formatCells", true),
+                    format_columns: !e.flag("formatColumns", true),
+                    format_rows: !e.flag("formatRows", true),
+                    insert_columns: !e.flag("insertColumns", true),
+                    insert_rows: !e.flag("insertRows", true),
+                    delete_columns: !e.flag("deleteColumns", true),
+                    delete_rows: !e.flag("deleteRows", true),
+                    sort: !e.flag("sort", true),
+                    autofilter: !e.flag("autoFilter", true),
+                });
             }
             "drawing" => {
                 if let Some(rel) = e.attr("id").and_then(|id| rels.iter().find(|r| r.id == id)) {
@@ -183,7 +181,7 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
                 }
             }
             "extLst" => read_ext(cx, e, &mut sheet),
-            "oleObjects" | "controls" => cx.warn(format!("sheet \"{name}\": embedded objects and form controls are not supported")),
+            "protectedRanges" => read_protected_ranges(e, &mut sheet),
             _ => {}
         }
     }
@@ -198,7 +196,43 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
             read_threaded(cx, &x, &mut sheet);
         }
     }
+    // Which notes are displayed lives in the VML shapes (`<x:Visible/>`). Best effort: the VML is
+    // only read for that flag, so a part that doesn't parse is skipped without a warning.
+    if !sheet.comments.is_empty() {
+        for rel in rels.iter().filter(|r| r.kind == "vmlDrawing") {
+            if let Ok(Some(x)) = cx.pkg.read_xml(&rel.target) {
+                read_note_visibility(&x, &mut sheet, 0);
+            }
+        }
+    }
     Ok(sheet)
+}
+
+/// Allow Edit Ranges. A range whose password can't be read keeps a hash that never matches
+/// (or an unsupported algorithm), so it stays locked rather than open.
+fn read_protected_ranges(e: &El, sheet: &mut Sheet) {
+    for p in e.kids("protectedRange") {
+        let ranges: Vec<RangeRef> = p.attr("sqref").unwrap_or("").split_whitespace().filter_map(RangeRef::parse).collect();
+        if ranges.is_empty() {
+            continue;
+        }
+        let password = if p.attr("algorithmName").is_some() || p.attr("hashValue").is_some() {
+            Some(PasswordHash::Iterated {
+                algorithm: p.attr("algorithmName").unwrap_or("").to_string(),
+                hash: p.attr("hashValue").unwrap_or("").to_string(),
+                salt: p.attr("saltValue").unwrap_or("").to_string(),
+                spin_count: p.attr_u32("spinCount").unwrap_or(0),
+            })
+        } else {
+            p.attr("password").map(|h| match u16::from_str_radix(h.trim(), 16) {
+                Ok(h) => PasswordHash::Legacy(h),
+                // Unreadable: keep it locked.
+                Err(_) => PasswordHash::Iterated { algorithm: String::new(), hash: String::new(), salt: String::new(), spin_count: 0 },
+            })
+        };
+        let title = p.attr("name").unwrap_or("").to_string();
+        sheet.edit_ranges.push(EditRange { title, ranges, password, security_descriptor: p.attr("securityDescriptor").map(str::to_string) });
+    }
 }
 
 fn read_views(e: &El, sheet: &mut Sheet) {
@@ -208,6 +242,7 @@ fn read_views(e: &El, sheet: &mut Sheet) {
     sheet.show_formulas = v.flag("showFormulas", false);
     sheet.show_zeros = v.flag("showZeros", true);
     sheet.right_to_left = v.flag("rightToLeft", false);
+    sheet.view = v.attr("view").and_then(gridcraft_model::SheetViewMode::parse).unwrap_or_default();
     if let Some(z) = v.attr_u32("zoomScale") {
         sheet.zoom = z.clamp(10, 400) as u16;
     }
@@ -362,6 +397,24 @@ fn read_cell(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, c: &El, pos
             None => Value::Empty,
         },
     };
+    let picture = c.attr("vm").and_then(|vm| {
+        if vm == "0" {
+            return None;
+        }
+        let picture = vm.parse::<usize>().ok().and_then(|n| n.checked_sub(1)).and_then(|n| cx.cell_pictures.get(n)).cloned().flatten();
+        if picture.is_none() {
+            cx.warn("some cells have unsupported or missing value metadata; kept their scalar fallback (cell pictures may be missing)");
+        }
+        picture
+    });
+    if let Some(picture) = picture {
+        if c.child("f").is_some() {
+            cx.warn("formula-generated cell pictures were imported as static pictures; their formulas were not retained");
+        }
+        sheet.set_picture(pos, picture);
+        sheet.set_style(pos, style);
+        return;
+    }
     let dynamic = c.attr("cm").is_some();
     let formula = c.child("f").and_then(|f| read_formula(cx, st, f, pos, dynamic));
     let value = if formula.is_none() && st.dynamic.iter().any(|r| r.contains(pos) && r.start != pos) { Value::Empty } else { value };
@@ -398,11 +451,10 @@ fn read_formula(cx: &mut Ctx<'_>, st: &mut RowState, f: &El, pos: CellRef, dynam
             }
             let mut fm = Formula::new(text);
             let range = f.attr("ref").and_then(RangeRef::parse).unwrap_or(RangeRef::cell(pos));
-            if dynamic {
-                if !range.is_single() {
-                    st.dynamic.push(range);
-                }
-            } else {
+            if !range.is_single() {
+                st.dynamic.push(range);
+            }
+            if !dynamic {
                 fm.array = Some(range);
             }
             Some(fm)
@@ -768,33 +820,68 @@ fn read_comments(x: &El, sheet: &mut Sheet) {
         {
             text = rest.strip_prefix('\n').unwrap_or(rest).to_string();
         }
-        sheet.comments.insert(cell, Comment { author, text, replies: vec![], threaded: false, resolved: false, visible: false });
+        sheet.comments.insert(cell, Comment { author, text, replies: vec![], threaded: false, resolved: false, visible: false, dates: vec![] });
+    }
+}
+
+/// Marks the notes whose VML shape carries `<x:Visible/>` as shown. Shapes may sit in groups.
+fn read_note_visibility(x: &El, sheet: &mut Sheet, depth: usize) {
+    if depth > xml::MAX_DEPTH {
+        return;
+    }
+    for e in &x.children {
+        if e.name != "shape" {
+            read_note_visibility(e, sheet, depth + 1);
+            continue;
+        }
+        let Some(cd) = e.child("ClientData").filter(|cd| cd.attr("ObjectType") == Some("Note")) else { continue };
+        if cd.child("Visible").is_none() {
+            continue;
+        }
+        let num = |k: &str| cd.child(k).and_then(|v| v.text.trim().parse::<u32>().ok());
+        if let (Some(row), Some(col)) = (num("Row"), num("Column"))
+            && let Some(c) = sheet.comments.get_mut(&CellRef::new(row, col))
+            && !c.threaded
+        {
+            c.visible = true;
+        }
     }
 }
 
 fn read_threaded(cx: &Ctx<'_>, x: &El, sheet: &mut Sheet) {
     let mut by_id: HashMap<String, CellRef> = HashMap::new();
-    let mut replies: Vec<(String, String, String)> = vec![];
+    let mut replies: Vec<(String, String, String, String)> = vec![];
     for t in x.kids("threadedComment") {
         let Some(cell) = t.attr("ref").and_then(CellRef::parse) else { continue };
         let author = t.attr("personId").and_then(|p| cx.persons.get(p)).cloned().unwrap_or_default();
         let text = t.child("text").map(|e| e.text.clone()).unwrap_or_default();
+        let date = t.attr("dT").unwrap_or("").to_string();
         match t.attr("parentId") {
-            Some(p) => replies.push((p.to_string(), author, text)),
+            Some(p) => replies.push((p.to_string(), author, text, date)),
             None => {
                 if let Some(id) = t.attr("id") {
                     by_id.insert(id.to_string(), cell);
                 }
+                let dates = if date.is_empty() { vec![] } else { vec![date] };
                 sheet
                     .comments
-                    .insert(cell, Comment { author, text, replies: vec![], threaded: true, resolved: t.flag("done", false), visible: false });
+                    .insert(cell, Comment { author, text, replies: vec![], threaded: true, resolved: t.flag("done", false), visible: false, dates });
             }
         }
     }
-    for (parent, author, text) in replies {
+    // Replies in file order; ones whose thread is missing are dropped.
+    for (parent, author, text, date) in replies {
         if let Some(c) = by_id.get(&parent)
             && let Some(cm) = sheet.comments.get_mut(c)
         {
+            if !date.is_empty() {
+                // `dates[0]` is the thread, `dates[i + 1]` reply i; unknown dates stay empty.
+                let at = cm.replies.len() + 1;
+                if cm.dates.len() < at {
+                    cm.dates.resize(at, String::new());
+                }
+                cm.dates.push(date);
+            }
             cm.replies.push((author, text));
         }
     }

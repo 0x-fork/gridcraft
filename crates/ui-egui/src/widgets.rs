@@ -4,8 +4,15 @@
 use egui::{Align2, Color32, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
 use crate::SheetApp;
+use crate::i18n;
 use crate::icons::{self, Icon};
 use crate::theme::{self, Tokens};
+
+/// Translates a label or tooltip for the language of the frame being drawn (English if untranslated).
+/// Ribbon chrome all flows through these widgets, so translating here localises it in one place.
+fn tr<'a>(ui: &Ui, text: &'a str) -> &'a str {
+    i18n::current(ui.ctx()).tr(text)
+}
 
 /// A flat square icon button with hover highlight and tooltip.
 pub fn icon_button(ui: &mut Ui, icon: Icon, color: Color32, tip: &str, size: egui::Vec2) -> Response {
@@ -17,7 +24,7 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, color: Color32, tip: &str, size: egu
         ui.painter().rect_filled(rect, 4.0, t.hover);
     }
     icons::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(16.0, 16.0)), icon, color);
-    resp.on_hover_text(tip)
+    resp.on_hover_text(tr(ui, tip))
 }
 
 /// A toggle-able small button (e.g. Bold) showing a checked state.
@@ -31,15 +38,18 @@ pub fn toggle_button(ui: &mut Ui, icon: Icon, on: bool, tip: &str) -> Response {
         ui.painter().rect_filled(rect, 4.0, t.hover);
     }
     icons::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(16.0, 16.0)), icon, t.text);
-    resp.on_hover_text(tip)
+    resp.on_hover_text(tr(ui, tip))
 }
 
 /// Large ribbon button: 32px icon over a one- or two-line label.
 pub fn big_button(ui: &mut Ui, icon: Icon, label: &str, tip: &str, dropdown: bool) -> Response {
     let t = Tokens::get(ui.ctx());
     let font = theme::ui_font(11.5);
-    let lines: Vec<&str> = label.split('\n').collect();
-    let text_w = lines.iter().map(|l| ui.painter().layout_no_wrap(l.to_string(), font.clone(), t.text).size().x).fold(0.0, f32::max);
+    let label = tr(ui, label);
+    let lines: Vec<_> = label.split('\n').map(|line| ui.painter().layout_no_wrap(line.to_string(), font.clone(), t.text)).collect();
+    let arrow_size = 10.0;
+    let arrow_space = if dropdown { 4.0 + arrow_size } else { 0.0 };
+    let text_w = lines.iter().enumerate().map(|(i, line)| line.size().x + if i + 1 == lines.len() { arrow_space } else { 0.0 }).fold(0.0, f32::max);
     let w = (text_w + 12.0).max(44.0);
     let (rect, resp) = ui.allocate_exact_size(vec2(w, 72.0), Sense::click());
     if resp.is_pointer_button_down_on() {
@@ -48,20 +58,29 @@ pub fn big_button(ui: &mut Ui, icon: Icon, label: &str, tip: &str, dropdown: boo
         ui.painter().rect_filled(rect, 5.0, t.hover);
     }
     icons::paint(ui.painter(), Rect::from_center_size(pos2(rect.center().x, rect.top() + 21.0), vec2(30.0, 30.0)), icon, t.text);
-    for (i, l) in lines.iter().enumerate() {
-        let mut s = l.to_string();
-        if dropdown && i + 1 == lines.len() {
-            s.push_str(" ▾");
+    for (i, line) in lines.iter().enumerate() {
+        let has_arrow = dropdown && i + 1 == lines.len();
+        let line_w = line.size().x + if has_arrow { arrow_space } else { 0.0 };
+        let left = rect.center().x - line_w / 2.0;
+        let y = rect.top() + 46.0 + i as f32 * 13.0;
+        ui.painter().galley(pos2(left, y - line.size().y / 2.0), line.clone(), t.text);
+        if has_arrow {
+            icons::paint(
+                ui.painter(),
+                Rect::from_center_size(pos2(left + line_w - arrow_size / 2.0, y + 1.0), vec2(arrow_size, arrow_size)),
+                Icon::Chevron,
+                t.text_dim,
+            );
         }
-        ui.painter().text(pos2(rect.center().x, rect.top() + 46.0 + i as f32 * 13.0), Align2::CENTER_CENTER, s, font.clone(), t.text);
     }
-    resp.on_hover_text(tip)
+    resp.on_hover_text(tr(ui, tip))
 }
 
 /// Small ribbon button: 16px icon with optional label to the right.
 pub fn small_button(ui: &mut Ui, icon: Icon, label: &str, tip: &str, dropdown: bool) -> Response {
     let t = Tokens::get(ui.ctx());
     let font = theme::ui_font(12.5);
+    let label = tr(ui, label);
     let tw = if label.is_empty() { 0.0 } else { ui.painter().layout_no_wrap(label.to_string(), font.clone(), t.text).size().x + 6.0 };
     let w = 24.0 + tw + if dropdown { 12.0 } else { 0.0 };
     let (rect, resp) = ui.allocate_exact_size(vec2(w, 23.0), Sense::click());
@@ -82,7 +101,7 @@ pub fn small_button(ui: &mut Ui, icon: Icon, label: &str, tip: &str, dropdown: b
             t.text_dim,
         );
     }
-    resp.on_hover_text(tip)
+    resp.on_hover_text(tr(ui, tip))
 }
 
 /// A split button: main part runs the default action, the arrow opens a menu.
@@ -103,7 +122,26 @@ pub fn split_button(ui: &mut Ui, icon: Icon, accent: Option<Color32>, tip: &str)
         ui.painter().rect_filled(Rect::from_min_size(pos2(main.left() + 4.0, main.bottom() - 5.0), vec2(17.0, 3.0)), 0.0, c);
     }
     icons::paint(ui.painter(), Rect::from_center_size(arrow.center(), vec2(10.0, 10.0)), Icon::Chevron, t.text_dim);
-    (m.on_hover_text(tip).clicked(), a)
+    (m.on_hover_text(tr(ui, tip)).clicked(), a)
+}
+
+/// A one-line text field for a value stored in the workbook, which callers reload every frame. The text being typed is
+/// kept in egui memory until the field loses focus, then returned to commit (`None` when Escape cancels the edit).
+pub fn committed_text(ui: &mut Ui, id: egui::Id, current: &str, width: Option<f32>) -> Option<String> {
+    let width = width.unwrap_or(ui.spacing().text_edit_width);
+    let draft = id.with("draft");
+    let mut text = ui.data_mut(|d| d.get_temp::<String>(draft)).unwrap_or_else(|| current.to_string());
+    let r = ui.add(egui::TextEdit::singleline(&mut text).id(id).desired_width(width));
+    if r.lost_focus() {
+        ui.data_mut(|d| d.remove::<String>(draft));
+        return (!ui.input(|i| i.key_pressed(egui::Key::Escape))).then_some(text);
+    }
+    if r.has_focus() {
+        ui.data_mut(|d| d.insert_temp(draft, text));
+    } else {
+        ui.data_mut(|d| d.remove::<String>(draft));
+    }
+    None
 }
 
 /// Our colour palette (theme row + tints + standard colours), returns a picked hex colour,
@@ -197,4 +235,52 @@ pub fn toast(app: &mut SheetApp, ctx: &egui::Context) {
         },
     );
     ctx.request_repaint_after(std::time::Duration::from_millis(200));
+}
+
+/// The info bar under the ribbon (Excel's message-bar slot). Shows an open-time notice with an
+/// optional action button and a dismiss ✕. Returns nothing; dismissing clears `app.notice`.
+pub fn notice_bar(app: &mut SheetApp, ui: &mut Ui) {
+    let Some(notice) = app.notice.clone() else { return };
+    let t = Tokens::get(ui.ctx());
+    let (bg, border) = match notice.kind {
+        crate::NoticeKind::Warning => (t.notice_warn_bg, t.notice_warn_border),
+        crate::NoticeKind::Info => (t.notice_info_bg, t.notice_info_border),
+    };
+    let mut dismiss = false;
+    let mut action: Option<(String, String)> = None;
+    egui::Panel::top("notice_bar").frame(egui::Frame::NONE.fill(bg).inner_margin(egui::Margin::symmetric(12, 0))).show(ui, |ui| {
+        // Bottom border as a 1px strip spanning the bar.
+        let bar = ui.max_rect();
+        ui.painter().rect_stroke(bar, 0.0, Stroke::new(1.0, border), StrokeKind::Inside);
+        ui.horizontal_centered(|ui| {
+            let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+            icons::paint(
+                ui.painter(),
+                r,
+                match notice.kind {
+                    crate::NoticeKind::Warning => Icon::Lock,
+                    crate::NoticeKind::Info => Icon::Note,
+                },
+                border,
+            );
+            ui.add_space(6.0);
+            ui.label(egui::RichText::new(&notice.text).font(theme::ui_font(12.5)).color(t.text));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if icon_button(ui, Icon::Close, t.text_dim, "Dismiss", vec2(20.0, 20.0)).clicked() {
+                    dismiss = true;
+                }
+                if let Some((label, dialog)) = &notice.action
+                    && ui.button(egui::RichText::new(label).font(theme::ui_font(12.5))).clicked()
+                {
+                    action = Some((label.clone(), dialog.clone()));
+                }
+            });
+        });
+    });
+    if let Some((_, dialog)) = action {
+        app.open_dialog(&dialog, serde_json::json!({}));
+    }
+    if dismiss {
+        app.notice = None;
+    }
 }
