@@ -153,6 +153,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | §16: comment navigation, Show Comments, Show All Notes and Convert to Comments landed (#281) |
 | 2026-10-11 | minor | §15: ODDFPRICE, ODDFYIELD, ODDLPRICE, ODDLYIELD added (18 functions missing) |
 | 2026-10-11 | minor | §15: PERCENTOF and EUROCONVERT added (20 functions missing) |
 | 2026-10-11 | minor | §15: BAHTTEXT added (21 functions missing) |

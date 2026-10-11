@@ -706,7 +706,8 @@ impl Dialog {
             "saveChanges" => Dialog::custom("saveChanges", "Save Changes?", json!({"title": p("title")})),
             "start" => Dialog::custom("start", "GridCraft", json!({})),
             "comments" => {
-                app.grid.pane = Some("comments".into());
+                app.grid.pane = None;
+                app.run_or_alert("review.showComments", json!({"on": true}));
                 return None;
             }
             "watch" | "selectionPane" | "formatChart" => {

@@ -4,7 +4,7 @@
 
 Each entry is an Excel ribbon or menu command (feature names only). It counts as implemented when GridCraft registers a command with the same id. This measures breadth only; the overall assessment (depth, fidelity, effort) is in [target-app-parity.md](target-app-parity.md).
 
-**Overall: 266 / 290 commands implemented (91.7%).**
+**Overall: 271 / 290 commands implemented (93.4%).**
 
 | Tab | Implemented | Total | Parity |
 |---|---|---|---|
@@ -15,7 +15,7 @@ Each entry is an Excel ribbon or menu command (feature names only). It counts as
 | Page Layout | 23 | 23 | 100% |
 | Formulas | 23 | 23 | 100% |
 | Data | 22 | 28 | 79% |
-| Review | 10 | 18 | 56% |
+| Review | 15 | 18 | 83% |
 | View | 20 | 20 | 100% |
 | Automate | 3 | 3 | 100% |
 | Table Design | 12 | 13 | 92% |
@@ -273,7 +273,7 @@ Missing:
 - `data.forecastSheet` Forecast Sheet (Forecast)
 - `data.analyzeData` Analyze Data (Analysis)
 
-## Review (10 / 18, 56%)
+## Review (15 / 18, 83%)
 
 Implemented:
 
@@ -282,8 +282,13 @@ Implemented:
 - `review.workbookStatistics` Workbook Statistics (Proofing)
 - `review.checkAccessibility` Check Accessibility (Accessibility)
 - `review.deleteComment` Delete Comment (Comments)
+- `review.previousComment` Previous Comment (Comments)
+- `review.nextComment` Next Comment (Comments)
+- `review.showComments` Show Comments (Comments)
 - `review.newNote` New Note (Notes)
 - `review.showNote` Show/Hide Note (Notes)
+- `review.showAllNotes` Show All Notes (Notes)
+- `review.convertToComments` Convert to Comments (Notes)
 - `review.unprotectSheet` Unprotect Sheet (Protect)
 - `review.protectWorkbook` Protect Workbook (Protect)
 - `review.allowEditRanges` Allow Edit Ranges (Protect)
@@ -292,11 +297,6 @@ Missing:
 
 - `review.smartLookup` Smart Lookup (Insights)
 - `review.translate` Translate (Language)
-- `review.previousComment` Previous Comment (Comments)
-- `review.nextComment` Next Comment (Comments)
-- `review.showComments` Show Comments (Comments)
-- `review.showAllNotes` Show All Notes (Notes)
-- `review.convertToComments` Convert to Comments (Notes)
 - `review.showChanges` Show Changes (Changes)
 
 ## View (20 / 20, 100%)
