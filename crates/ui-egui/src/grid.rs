@@ -1940,14 +1940,12 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
                 app.copy_to_clipboard(ctx, "edit.cut");
             }
             egui::Event::Paste(text) => app.paste_external(text),
-            egui::Event::Text(text) => {
-                if text.chars().all(|c| !c.is_control()) && !text.is_empty() {
-                    app.begin_edit(Some(text), false);
-                    if let Some(ed) = app.editor.as_mut() {
-                        ed.caret = ed.text.chars().count();
-                    }
-                    return;
+            egui::Event::Text(text) if text.chars().all(|c| !c.is_control()) && !text.is_empty() => {
+                app.begin_edit(Some(text), false);
+                if let Some(ed) = app.editor.as_mut() {
+                    ed.caret = ed.text.chars().count();
                 }
+                return;
             }
             egui::Event::Key { key, physical_key, pressed: true, modifiers: m, .. } => {
                 use egui::Key;
@@ -2075,12 +2073,7 @@ fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_open: bool)
     let Some(sh) = wb.sheet(si) else { return };
     let _ = geo;
     // Tables get an autofilter on demand.
-    let table_range = sh
-        .tables
-        .iter()
-        .find(|t| t.range.start.row <= at.y as u32 || true)
-        .filter(|t| col >= t.range.start.col && col <= t.range.end.col)
-        .map(|t| t.range);
+    let table_range = sh.tables.first().filter(|t| col >= t.range.start.col && col <= t.range.end.col).map(|t| t.range);
     if sh.autofilter.is_none()
         && let Some(r) = table_range
     {
