@@ -5,7 +5,7 @@ use std::fmt::Write as _;
 
 use gridcraft_core::RangeRef;
 use gridcraft_formula::quote_sheet;
-use gridcraft_model::{CalcMode, Style, Visibility, Workbook};
+use gridcraft_model::{CalcMode, CalcSettings, Style, Visibility, Workbook};
 
 use crate::package::ZipOut;
 use crate::xml::{esc, esc_attr};
@@ -286,8 +286,17 @@ pub fn write_xlsx(wb: &Workbook, kind: XlsxKind) -> Result<Vec<u8>, IoError> {
         CalcMode::Manual => w.push_str(" calcMode=\"manual\""),
         CalcMode::AutomaticExceptTables => w.push_str(" calcMode=\"autoNoTable\""),
     }
-    if wb.calc.iterative {
-        let _ = write!(w, " iterate=\"1\" iterateCount=\"{}\" iterateDelta=\"{}\"", wb.calc.max_iterations, crate::xml::num(wb.calc.max_change));
+    // CT_CalcPr defaults: iterate off, 100 iterations, 0.001 maximum change. The limits are kept
+    // while iteration is off, as Options keeps them.
+    let calc = &wb.calc;
+    if calc.iterative {
+        w.push_str(" iterate=\"1\"");
+    }
+    if calc.iterative || calc.max_iterations != CalcSettings::DEFAULT_ITERATIONS {
+        let _ = write!(w, " iterateCount=\"{}\"", calc.max_iterations);
+    }
+    if calc.iterative || calc.max_change != CalcSettings::DEFAULT_CHANGE {
+        let _ = write!(w, " iterateDelta=\"{}\"", crate::xml::num(calc.max_change));
     }
     if wb.calc.precision_as_displayed {
         w.push_str(" fullPrecision=\"0\"");

@@ -1574,6 +1574,44 @@ fn reopen(s: &mut Session) {
     s.execute("file.open", json!({"name": "x.xlsx", "base64": b64})).unwrap();
 }
 
+#[test]
+fn calculation_options_enable_iterative_calculation() {
+    let mut s = s();
+    let near = |s: &Session, a: &str, want: f64| {
+        let got = v(s, a).as_f64().unwrap_or(f64::NAN);
+        assert!((got - want).abs() < 0.002, "{a} = {:?}", v(s, a));
+    };
+    s.execute("cell.set", json!({"cell": "A1", "input": "=(A2+10)/2"})).unwrap();
+    s.execute("cell.set", json!({"cell": "A2", "input": "=A1"})).unwrap();
+    assert_eq!(v(&s, "A1"), Value::Error(gridcraft_core::CellError::Circ));
+    assert!(!s.doc().unwrap().calc.circular.is_empty());
+    // Switching it on recalculates the loop.
+    let r = s.execute("formulas.calculationOptions", json!({"iterative": true})).unwrap();
+    assert_eq!(r, json!({"mode": "Automatic", "iterative": true, "maxIterations": 100, "maxChange": 0.001}));
+    near(&s, "A1", 10.0);
+    near(&s, "A2", 10.0);
+    assert!(s.doc().unwrap().calc.circular.is_empty());
+    // Empty params change nothing and report the settings.
+    let r = s.execute("formulas.calculationOptions", json!({})).unwrap();
+    assert_eq!(r["iterative"], true);
+    // Limits are kept within Excel's: 1–32767 iterations, a non-negative change.
+    let r = s.execute("formulas.calculationOptions", json!({"maxIterations": 0, "maxChange": -0.5})).unwrap();
+    assert_eq!((r["maxIterations"].as_u64(), r["maxChange"].as_f64()), (Some(1), Some(0.5)));
+    let r = s.execute("formulas.calculationOptions", json!({"maxIterations": 100000, "maxChange": 0.0001})).unwrap();
+    assert_eq!((r["maxIterations"].as_u64(), r["maxChange"].as_f64()), (Some(32767), Some(0.0001)));
+    // Saved with the workbook.
+    reopen(&mut s);
+    let calc = s.doc().unwrap().wb.calc.clone();
+    assert_eq!((calc.iterative, calc.max_iterations, calc.max_change), (true, 32767, 0.0001));
+    near(&s, "A1", 10.0);
+    // Undo brings the previous settings back.
+    s.execute("formulas.calculationOptions", json!({"iterative": false})).unwrap();
+    assert_eq!(v(&s, "A1"), Value::Error(gridcraft_core::CellError::Circ));
+    s.execute("edit.undo", json!({})).unwrap();
+    assert!(s.doc().unwrap().wb.calc.iterative);
+    near(&s, "A1", 10.0);
+}
+
 fn chart_data(s: &mut Session) {
     s.execute(
         "range.setValues",

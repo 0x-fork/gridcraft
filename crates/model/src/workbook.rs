@@ -18,11 +18,16 @@ pub enum CalcMode {
     Manual,
 }
 
+/// File › Options › Formulas › Calculation options, stored per workbook (`<calcPr>`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CalcSettings {
     pub mode: CalcMode,
+    /// Enable iterative calculation: circular references are calculated repeatedly instead of
+    /// reporting an error.
     pub iterative: bool,
+    /// Maximum Iterations, 1 to [`CalcSettings::MAX_ITERATIONS`].
     pub max_iterations: u32,
+    /// Maximum Change: iteration stops once no value in a circular reference changes by more.
     pub max_change: f64,
     /// Use precision as displayed.
     pub precision_as_displayed: bool,
@@ -30,7 +35,32 @@ pub struct CalcSettings {
 
 impl Default for CalcSettings {
     fn default() -> Self {
-        CalcSettings { mode: CalcMode::Automatic, iterative: false, max_iterations: 100, max_change: 0.001, precision_as_displayed: false }
+        CalcSettings {
+            mode: CalcMode::Automatic,
+            iterative: false,
+            max_iterations: Self::DEFAULT_ITERATIONS,
+            max_change: Self::DEFAULT_CHANGE,
+            precision_as_displayed: false,
+        }
+    }
+}
+
+impl CalcSettings {
+    pub const DEFAULT_ITERATIONS: u32 = 100;
+    pub const DEFAULT_CHANGE: f64 = 0.001;
+    /// The largest Maximum Iterations Excel accepts.
+    pub const MAX_ITERATIONS: u32 = 32_767;
+
+    /// Sets Maximum Iterations, kept within 1 to [`CalcSettings::MAX_ITERATIONS`].
+    pub fn set_max_iterations(&mut self, n: u32) {
+        self.max_iterations = n.clamp(1, Self::MAX_ITERATIONS);
+    }
+
+    /// Sets Maximum Change (its magnitude); a value that isn't finite is ignored.
+    pub fn set_max_change(&mut self, d: f64) {
+        if d.is_finite() {
+            self.max_change = d.abs();
+        }
     }
 }
 

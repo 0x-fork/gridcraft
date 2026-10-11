@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (§3 narrowed by XLSX pass-through, #330) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (§6: iterative calculation landed) · **Target:** Microsoft Excel (Microsoft 365)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -60,9 +60,9 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 
 ### 6. Calculation correctness bugs (F)
 - **Missing:** 15-significant-digit equality; spill updates after structural edits and cleared
-  blockers; 3-D span deletion; qualified names after sheet rename; iterative calculation.
-- **Evidence:** #57, #133, #139, #140, #134; Enable Iterative Calculation stored but unused;
-  PRs #148, #155, #156, #157.
+  blockers; 3-D span deletion; qualified names after sheet rename.
+- **Evidence:** #57, #133, #139, #140, #134; PRs #148, #155, #156, #157. Iterative calculation
+  for circular references landed (no Options dialog yet).
 - **Impact:** wrong numbers are worse than missing features.
 - **Estimate:** 10–15 h. [function-parity.md](function-parity.md#formula-language)
 
@@ -159,6 +159,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | §6: iterative calculation for circular references landed (Maximum Iterations, Maximum Change) |
 | 2026-10-11 | minor | §16: comment navigation, Show Comments, Show All Notes and Convert to Comments landed (#281) |
 | 2026-10-11 | minor | §7: `.xls` (BIFF8) import of values, formulas and number formats (#121) |
 | 2026-10-11 | minor | §3: XLSX pass-through keeps custom XML, external links, connections, query tables, printer settings, controls and OLE objects (#330, #324) |
