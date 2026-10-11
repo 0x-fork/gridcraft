@@ -1,6 +1,6 @@
 # Function parity: worksheet functions and formulas
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (ODDFPRICE, ODDFYIELD, ODDLPRICE, ODDLYIELD added) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (TEXT and number formats: fraction literals, `?` thousands padding, booleans through the text section) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Excel's worksheet functions, category by category, against GridCraft's function library. Part of
 [target-app-parity.md](target-app-parity.md); gaps feed [gaps.md](gaps.md).
@@ -95,6 +95,12 @@ reports keep finding edge cases: MIN() with no arguments (#138), COUNTBLANK past
 10-09). Statistical distributions and financial functions with iterative solvers (RATE, IRR,
 XIRR, YIELD) are the highest-risk for last-digit differences.
 
+TEXT() and cell display share `crates/numfmt`; checked against Excel-cached results in
+number- and text-format test workbooks (352 TEXT cells), all match:
+fraction sections with literal text (`#\:#=/=#`, `#_#/#`), zero fractions, zero-padded
+denominators, `?` placeholders padding the thousands separator, and booleans through the text
+section (`TEXT(TRUE,";;;\@@\@")` = `@TRUE@`).
+
 Work to close (16–26 h in total): the in-scope missing functions (10–16 h with the table above),
 an oracle corpus of Excel-computed results per function (owner runs Excel on generated
 workbooks; results checked in as data, not Excel files) and fixing what it finds (6–10 h).
@@ -103,6 +109,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | TEXT / number formats fixed against Excel-cached results: fraction literals and zero fractions, `0` denominators zero padded, `?` pads the thousands separator, booleans use the text section (226 mismatches → 0 in 352 TEXT cells) |
 | 2026-10-11 | minor | ODDFPRICE, ODDFYIELD, ODDLPRICE, ODDLYIELD added: Financial 55 / 55; 505 / 523 by name, 496 working |
 | 2026-10-11 | minor | PERCENTOF and EUROCONVERT added: 503 / 523 by name, 494 working |
 | 2026-10-11 | minor | BAHTTEXT added: 502 / 523 by name, 493 working |
