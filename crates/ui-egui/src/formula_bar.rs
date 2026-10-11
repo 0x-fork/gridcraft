@@ -112,6 +112,10 @@ fn name_box(app: &mut SheetApp, ui: &mut egui::Ui, t: &Tokens) {
     }
     if resp.lost_focus() {
         if ui.input(|i| i.key_pressed(Key::Enter)) {
+            // The Enter that commits the Name Box is used up here. Left in the frame's input, the
+            // grid (drawn after the formula bar, and focused again now the box let go) would read
+            // it as its own Enter and move the active cell one row down from the jump target (#247).
+            ui.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Key { key: Key::Enter, .. })));
             let target = text.trim().to_string();
             if !target.is_empty() && target != shown {
                 // A new name for the selection, or a place to go.
