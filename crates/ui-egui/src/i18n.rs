@@ -9,6 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
+mod cs;
 mod ko;
 mod pt;
 mod ru;
@@ -26,10 +27,11 @@ pub enum Language {
     Ru,
     #[serde(rename = "pt")]
     PtBr,
+    Cs,
 }
 
 impl Language {
-    pub const ALL: [Self; 7] = [Self::En, Self::Es, Self::Zh, Self::Ja, Self::Ko, Self::Ru, Self::PtBr];
+    pub const ALL: [Self; 8] = [Self::En, Self::Es, Self::Zh, Self::Ja, Self::Ko, Self::Ru, Self::PtBr, Self::Cs];
 
     /// The language's own name, shown in the switcher.
     pub fn name(self) -> &'static str {
@@ -41,6 +43,7 @@ impl Language {
             Self::Ko => "한국어",
             Self::Ru => "Русский",
             Self::PtBr => "Português (Brasil)",
+            Self::Cs => "Čeština",
         }
     }
 
@@ -54,6 +57,7 @@ impl Language {
             Self::Ko => "ko",
             Self::Ru => "ru",
             Self::PtBr => "pt",
+            Self::Cs => "cs",
         }
     }
 
@@ -70,6 +74,7 @@ impl Language {
             "ko" => Some(Self::Ko),
             "ru" => Some(Self::Ru),
             "pt" => Some(Self::PtBr),
+            "cs" => Some(Self::Cs),
             _ => None,
         }
     }
@@ -103,6 +108,7 @@ impl Language {
             Self::Ko => ko::translate(text),
             Self::Ru => ru::translate(text),
             Self::PtBr => pt::translate(text),
+            Self::Cs => cs::translate(text),
         };
         translated.unwrap_or_else(|| text.rsplit_once('|').map_or(text, |(_, label)| label))
     }
