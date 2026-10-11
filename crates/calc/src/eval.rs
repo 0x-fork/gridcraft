@@ -1112,7 +1112,7 @@ impl<'h> Evaluator<'h> {
             };
             let (ra, ca) = (as_array(&rows), as_array(&cols));
             let (h, w) = (ra.rows.max(ca.rows), ra.cols.max(ca.cols));
-            if (h * w) as u64 > MAX_CELLS {
+            if (h as u64).saturating_mul(w as u64) > MAX_CELLS {
                 return err(CellError::Num);
             }
             let mut out = Vec::with_capacity(h * w);
