@@ -677,6 +677,7 @@ impl<'h> Evaluator<'h> {
             "INDIRECT" => self.indirect(args),
             "INDEX" => self.index(args),
             "CELL" => self.cell_info(args),
+            "TRIMRANGE" => self.trimrange(args),
             "SUBTOTAL" | "AGGREGATE" => self.subtotal(name, args),
             "TEXT" => {
                 if args.len() != 2 {
@@ -1468,6 +1469,7 @@ fn is_special(n: &str) -> bool {
             | "INDIRECT"
             | "INDEX"
             | "CELL"
+            | "TRIMRANGE"
             | "SUBTOTAL"
             | "AGGREGATE"
             | "TEXT"
@@ -1505,6 +1507,7 @@ pub const SPECIAL_FUNCTIONS: &[&str] = &[
     "INDIRECT",
     "INDEX",
     "CELL",
+    "TRIMRANGE",
     "SUBTOTAL",
     "AGGREGATE",
     "TEXT",
