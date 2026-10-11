@@ -54,3 +54,7 @@ sync_github_name = true
 [people.GhostMitra]
 sync_github_name = true
 
+[people.jsymes21-byte]
+real_name = "James Symes"
+sync_github_name = true
+
