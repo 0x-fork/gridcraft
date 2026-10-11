@@ -178,9 +178,10 @@ fn title_bar_switch_and_file_menu_choose_the_theme() {
     h.run_steps(2);
     assert_appearance(&h, false);
 
+    // File opens Backstage; its Options page holds the Office Theme choice (#331).
     h.get_by_label("File").click();
     h.run_steps(3);
-    h.get_by_label("Display theme ⏵").click();
+    h.get_by_label("Options").click();
     h.run_steps(3);
     h.get_by_label("System").click();
     h.run_steps(3);
