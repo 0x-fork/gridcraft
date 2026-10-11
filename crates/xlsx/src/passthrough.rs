@@ -32,6 +32,7 @@ use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::QName;
 use quick_xml::{Reader, Writer};
 
+use crate::IoError;
 use crate::package::{self, normalize};
 use crate::read::Ctx;
 use crate::write::{NS_REL, Out, Rels, XML_DECL};
@@ -53,6 +54,23 @@ const MAX_CHAIN: usize = 16;
 const MAX_FRAGMENT: usize = 4 * 1024 * 1024;
 /// Deepest element nesting accepted in a kept fragment.
 const MAX_FRAGMENT_DEPTH: usize = 256;
+
+#[cfg(test)]
+thread_local! {
+    /// A smaller kept-bytes allowance for tests on this thread.
+    pub(crate) static KEPT_TOTAL_FOR_TEST: std::cell::Cell<usize> = const { std::cell::Cell::new(MAX_KEPT_TOTAL) };
+}
+
+fn kept_total() -> usize {
+    #[cfg(test)]
+    {
+        KEPT_TOTAL_FOR_TEST.with(std::cell::Cell::get)
+    }
+    #[cfg(not(test))]
+    {
+        MAX_KEPT_TOTAL
+    }
+}
 
 const NS_REL_STRICT: &str = "http://purl.oclc.org/ooxml/officeDocument/relationships";
 const CT_VML: &str = "application/vnd.openxmlformats-officedocument.vmlDrawing";
@@ -194,7 +212,7 @@ impl KeptReader {
             strict: false,
             defaults: HashMap::new(),
             overrides: HashMap::new(),
-            budget: MAX_KEPT_TOTAL,
+            budget: kept_total(),
             parts_left: MAX_KEPT_PARTS,
         };
         if let Ok(root) = raw_rels(cx, "")
@@ -446,11 +464,19 @@ impl KeptReader {
         seen: &mut HashSet<String>,
     ) -> Result<(PreservedPart, Vec<PreservedPart>), String> {
         let rel = rid.and_then(|id| rels.iter().find(|r| r.id == id && !r.external)).ok_or("the sheet has no VML drawing")?;
-        let data = match cx.pkg.read_limited(&rel.target, MAX_META) {
+        // Charged to the kept total like any other part: many sheets can point at one highly
+        // compressed VML drawing, and each keeps its own copy.
+        if self.budget == 0 {
+            return Err("it is too large".into());
+        }
+        let limit = MAX_META.min(u64::try_from(self.budget).unwrap_or(u64::MAX));
+        let data = match cx.pkg.read_limited(&rel.target, limit) {
             Ok(Some(d)) => d,
             Ok(None) => return Err(format!("{} is missing", rel.target)),
+            Err(IoError::TooLarge(_)) => return Err("it is too large".into()),
             Err(e) => return Err(e.to_string()),
         };
+        self.budget = self.budget.saturating_sub(data.len());
         let text = String::from_utf8(data).map_err(|_| "the VML drawing is not UTF-8".to_string())?;
         let text = strip_notes(&text);
         let vrels = raw_rels(cx, &rel.target)?;

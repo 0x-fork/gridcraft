@@ -45,14 +45,23 @@ const VML: &str = r##"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:
 /// printer settings, an OLE object (in `mc:AlternateContent`), a form control, a note and the VML
 /// drawing all of them share.
 fn rich_package() -> Vec<u8> {
+    rich_package_with(CONTENT_TYPES, false)
+}
+
+/// [`rich_package`] with other content types; `twin` makes sheet "Other" a copy of "Data" that
+/// shares its VML drawing and embedded parts.
+fn rich_package_with(content_types: &str, twin: bool) -> Vec<u8> {
     let workbook = format!(
         r#"<?xml version="1.0"?><workbook xmlns="{NS_MAIN}" xmlns:r="{NS_R}"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/><sheet name="Other" sheetId="2" r:id="rId2"/></sheets><externalReferences><externalReference r:id="rId3"/></externalReferences><definedNames><definedName name="ExternalData_1" localSheetId="0" hidden="1">Data!$E$1:$E$2</definedName></definedNames></workbook>"#
     );
     let sheet1 = format!(
         r#"<?xml version="1.0"?><worksheet xmlns="{NS_MAIN}" xmlns:r="{NS_R}" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:x14="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main" xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" mc:Ignorable="x14"><sheetData><row r="1"><c r="A1"><f>[1]Sheet1!$A$1</f><v>7</v></c><c r="B1"><f>SUM([1]Sheet1!A1:A3)*2</f><v>14</v></c></row></sheetData><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/><pageSetup orientation="landscape" r:id="rId1"/><legacyDrawing r:id="rId2"/><mc:AlternateContent><mc:Choice Requires="x14"><oleObjects><mc:AlternateContent><mc:Choice Requires="x14"><oleObject progId="Package" shapeId="1025" r:id="rId3"><objectPr defaultSize="0" r:id="rId4"><anchor moveWithCells="1"><from><xdr:col>1</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>1</xdr:row><xdr:rowOff>0</xdr:rowOff></from><to><xdr:col>3</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>5</xdr:row><xdr:rowOff>0</xdr:rowOff></to></anchor></objectPr></oleObject></mc:Choice><mc:Fallback><oleObject progId="Package" shapeId="1025" r:id="rId3"/></mc:Fallback></mc:AlternateContent></oleObjects></mc:Choice></mc:AlternateContent><controls><control shapeId="1026" r:id="rId5" name="Check Box 1"/></controls></worksheet>"#
     );
-    let sheet2 =
-        format!(r#"<?xml version="1.0"?><worksheet xmlns="{NS_MAIN}"><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData></worksheet>"#);
+    let sheet2 = if twin {
+        sheet1.clone()
+    } else {
+        format!(r#"<?xml version="1.0"?><worksheet xmlns="{NS_MAIN}"><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData></worksheet>"#)
+    };
     let root_rels = rels(&[("rId1", "officeDocument", "xl/workbook.xml"), ("rId2", "custom-properties", "docProps/custom.xml")]);
     let wb_rels = rels(&[
         ("rId1", "worksheet", "worksheets/sheet1.xml"),
@@ -74,8 +83,8 @@ fn rich_package() -> Vec<u8> {
     let link_rels = rels(&[("rId1", "externalLinkPath", "file:///C:/never/opened/Book2.xlsx")]);
     let vml_rels = rels(&[("rId1", "image", "../media/image1.emf")]);
     let item_props = r#"<?xml version="1.0"?><ds:datastoreItem ds:itemID="{11111111-2222-3333-4444-555555555555}" xmlns:ds="http://schemas.openxmlformats.org/officeDocument/2006/customXml"/>"#;
-    make_zip(&[
-        ("[Content_Types].xml", CONTENT_TYPES.as_bytes()),
+    let mut files: Vec<(&str, &[u8])> = vec![
+        ("[Content_Types].xml", content_types.as_bytes()),
         ("_rels/.rels", root_rels.as_bytes()),
         ("docProps/custom.xml", CUSTOM_PROPS.as_bytes()),
         ("xl/workbook.xml", workbook.as_bytes()),
@@ -97,7 +106,11 @@ fn rich_package() -> Vec<u8> {
         ("xl/externalLinks/externalLink1.xml", EXTERNAL_LINK.as_bytes()),
         ("xl/externalLinks/_rels/externalLink1.xml.rels", link_rels.as_bytes()),
         ("xl/connections.xml", CONNECTIONS.as_bytes()),
-    ])
+    ];
+    if twin {
+        files.push(("xl/worksheets/_rels/sheet2.xml.rels", sheet1_rels.as_bytes()));
+    }
+    make_zip(&files)
 }
 
 /// An unpacked package: parts by name, content types, resolved relationships.
@@ -427,4 +440,46 @@ fn oversized_kept_parts_are_dropped() {
     let (wb, rep) = read_xlsx(&bytes).unwrap();
     assert!(wb.preserved.is_none());
     assert!(rep.warnings.iter().any(|w| w.contains("customXml") && w.contains("dropped")), "{:?}", rep.warnings);
+}
+
+#[test]
+fn kept_content_types_are_escaped_on_save() {
+    // A content type holding `"` and `<` (legal once unescaped by the XML reader) must not break
+    // out of the attribute in the saved [Content_Types].xml.
+    let hostile = r#"application/x-test&quot; PartName=&quot;/x&quot;/&gt;&lt;Default Extension=&quot;evil"#;
+    let ct = CONTENT_TYPES.replace("application/vnd.openxmlformats-officedocument.customXmlProperties+xml", hostile);
+    let (wb, rep) = read_xlsx(&rich_package_with(&ct, false)).unwrap();
+    assert!(wb.preserved.is_some(), "{:?}", rep.warnings);
+    let u = Unpacked::new(&write_xlsx(&wb).unwrap());
+    let types = xml::parse(u.text("[Content_Types].xml").as_bytes()).unwrap();
+    assert!(!types.kids("Default").any(|d| d.attr("Extension") == Some("evil")));
+    let item = types.kids("Override").find(|o| o.attr("PartName") == Some("/customXml/itemProps1.xml")).unwrap();
+    assert_eq!(item.attr("ContentType"), Some(r#"application/x-test" PartName="/x"/><Default Extension="evil"#));
+    // And the saved file reads back.
+    read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+}
+
+#[test]
+fn kept_vml_drawings_are_charged_to_the_kept_total() {
+    // How much one sheet's kept content costs, with the default allowance.
+    let one = {
+        let (wb, rep) = read_xlsx(&rich_package()).unwrap();
+        assert!(!rep.warnings.iter().any(|w| w.contains("dropped")), "{:?}", rep.warnings);
+        wb.preserved.as_ref().map_or(0, |p| p.byte_len()) + wb.sheets.iter().filter_map(|s| s.preserved.as_ref()).map(|p| p.byte_len()).sum::<usize>()
+    };
+    // Two sheets share one VML drawing: each would keep its own copy. With room for one sheet's
+    // content only, the second sheet's VML (and the controls drawn from it) is dropped.
+    crate::passthrough::KEPT_TOTAL_FOR_TEST.with(|c| c.set(one + VML.len() / 2));
+    let read = read_xlsx(&rich_package_with(CONTENT_TYPES, true));
+    crate::passthrough::KEPT_TOTAL_FOR_TEST.with(|c| c.set(crate::passthrough::MAX_KEPT_TOTAL));
+    let (wb, rep) = read.unwrap();
+    let kept = wb.preserved.as_ref().map_or(0, |p| p.byte_len())
+        + wb.sheets.iter().filter_map(|s| s.preserved.as_ref()).map(|p| p.byte_len()).sum::<usize>();
+    assert!(kept <= one + VML.len() / 2, "kept {kept} bytes");
+    assert!(wb.sheet(0).unwrap().preserved.as_ref().is_some_and(|p| p.vml.is_some()));
+    assert!(!wb.sheet(1).unwrap().preserved.as_ref().is_some_and(|p| p.vml.is_some()));
+    assert!(rep.warnings.iter().any(|w| w.contains("\"Other\"") && w.contains("too large")), "{:?}", rep.warnings);
+    // Both sheets keep their drawings when there is room.
+    let (wb, _) = read_xlsx(&rich_package_with(CONTENT_TYPES, true)).unwrap();
+    assert!(wb.sheets.iter().all(|s| s.preserved.as_ref().is_some_and(|p| p.vml.is_some())));
 }

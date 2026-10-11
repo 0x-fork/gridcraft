@@ -375,10 +375,11 @@ pub fn write_xlsx(wb: &Workbook) -> Result<Vec<u8>, IoError> {
     // Content types first, then the parts in creation order.
     let mut ct = format!("{XML_DECL}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">");
     for (ext, t) in &out.defaults {
-        let _ = write!(ct, "<Default Extension=\"{ext}\" ContentType=\"{t}\"/>");
+        // Kept parts bring their content types (and extensions) from the input file: escape them.
+        let _ = write!(ct, "<Default Extension=\"{}\" ContentType=\"{}\"/>", esc_attr(ext), esc_attr(t));
     }
     for (part, t) in &out.overrides {
-        let _ = write!(ct, "<Override PartName=\"{}\" ContentType=\"{t}\"/>", esc_attr(part));
+        let _ = write!(ct, "<Override PartName=\"{}\" ContentType=\"{}\"/>", esc_attr(part), esc_attr(t));
     }
     ct.push_str("</Types>");
     let mut zip = ZipOut::new();
