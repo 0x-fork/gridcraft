@@ -40,6 +40,11 @@ pub enum Drag {
     Fill {
         target: Option<RangeRef>,
     },
+    /// Dragging a freeze handle: `cols` for the column bar, `to` the line count it would freeze.
+    Freeze {
+        cols: bool,
+        to: Option<u32>,
+    },
     /// Moving the selection by its border (cut & paste).
     Move {
         grab: CellRef,
@@ -441,6 +446,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     // Headers.
     if sh.show_headings {
         paint_headers(&painter, &geo, sh, &sel, &t, &quads);
+        paint_freeze_handles(&painter, &geo, sh, &app.grid.drag, &t);
     }
     // Interaction.
     let previous_popups = (app.grid.filter_menu, app.grid.list_picker, app.grid.header_menu);
@@ -1135,8 +1141,22 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
     let on_handle = |p: Pos2| handle.contains(p) && handle_panes.iter().any(|r| r.contains(p));
     let on_cur_border = |p: Pos2| on_border(cur_rect, p) && border_panes.iter().any(|r| r.contains(p));
 
+    let (freeze_cols, freeze_rows) = freeze_handles(geo);
     // Hover cursors.
     if resp.hovered()
+        && let Some(p) = pos
+        && (freeze_cols.contains(p) || freeze_rows.contains(p) || matches!(app.grid.drag, Drag::Freeze { .. }))
+    {
+        let cols = match app.grid.drag {
+            Drag::Freeze { cols, .. } => cols,
+            _ => freeze_cols.contains(p),
+        };
+        ctx.set_cursor_icon(if cols { CursorIcon::ResizeHorizontal } else { CursorIcon::ResizeVertical });
+        if app.grid.drag == Drag::None && !pointer.any_down() {
+            let tip = if cols { "Drag to freeze columns" } else { "Drag to freeze rows" };
+            resp.clone().on_hover_text_at_pointer(crate::i18n::current(&ctx).tr(tip));
+        }
+    } else if resp.hovered()
         && let Some(p) = pos
     {
         let near_col_edge = in_col_header && col_edge(geo, sh, p.x).is_some();
@@ -1268,6 +1288,11 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
     if resp.drag_started() || (primary_clicked && app.grid.drag == Drag::None) {
         // Where the press began (a drag is only recognised after the pointer has moved).
         let Some(p) = pointer.press_origin().or(pos) else { return };
+        // Freeze handles sit on the header edges (and the corner's edges when nothing is frozen).
+        if freeze_cols.contains(p) || freeze_rows.contains(p) {
+            app.grid.drag = Drag::Freeze { cols: freeze_cols.contains(p), to: None };
+            return;
+        }
         if in_corner {
             let _ = app.session.run("selection.set", json!({"range": RangeRef::all().a1()}));
             return;
@@ -1461,6 +1486,9 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                 let _ = app.session.run("home.rowHeight", json!({"rows": rows, "height": h.round()}));
                 coalesce_last_undo(app);
             }
+            Drag::Freeze { cols, .. } => {
+                app.grid.drag = Drag::Freeze { cols, to: Some(freeze_boundary(geo, sh, p, cols)) };
+            }
             Drag::Fill { .. } => {
                 let src = sel.current();
                 let target = fill_target(src, pc);
@@ -1509,6 +1537,14 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                     if let Err(e) = app.run("edit.autoFill", json!({"source": src.a1(), "target": t.a1(), "mode": mode})) {
                         app.message = Some(("GridCraft".into(), crate::clean_error(&e)));
                     }
+                }
+            }
+            Drag::Freeze { cols, to: Some(to) } => {
+                let (rows_now, cols_now) = (geo.fr, geo.fc);
+                let (rows, cols) = if cols { (rows_now, to) } else { (to, cols_now) };
+                if (rows, cols) != (rows_now, cols_now) {
+                    // A1 (nothing left frozen) unfreezes.
+                    app.run_or_alert("view.freezePanes", json!({"cell": CellRef::new(rows, cols).a1()}));
                 }
             }
             Drag::Move { to: Some(to), .. } => {
@@ -1650,6 +1686,60 @@ fn on_border(r: Rect, p: Pos2) -> bool {
     let outer = r.expand(3.0);
     let inner = r.shrink(3.0);
     outer.contains(p) && !inner.contains(p)
+}
+
+/// The freeze handles, as in Excel for the web: a bar in the upper part of the column-header strip
+/// on the frozen columns' right edge, and one in the left part of the row-header strip on the
+/// frozen rows' bottom edge. With nothing frozen they sit on the corner's edges. The rest of the
+/// header edge keeps resizing the column or row.
+pub fn freeze_handles(geo: &Geo) -> (Rect, Rect) {
+    let x = geo.cells.left() + geo.frozen_w;
+    let y = geo.cells.top() + geo.frozen_h;
+    let cols = Rect::from_min_max(pos2(x - 3.0, geo.rect.top()), pos2(x + 3.0, geo.rect.top() + geo.header_h * 0.4));
+    let rows = Rect::from_min_max(pos2(geo.rect.left(), y - 3.0), pos2(geo.rect.left() + geo.header_w * 0.4, y + 3.0));
+    (cols, rows)
+}
+
+/// How many columns (or rows) a freeze handle dropped at `p` freezes: the line boundary nearest
+/// the pointer, limited so the frozen pane leaves room for the scrolling one.
+fn freeze_boundary(geo: &Geo, sh: &Sheet, p: Pos2, cols: bool) -> u32 {
+    if cols {
+        if p.x <= geo.cells.left() {
+            return 0;
+        }
+        let c = geo.col_at(sh, p.x);
+        let (l, r) = (geo.x(sh, c), geo.x(sh, c.saturating_add(1).min(MAX_COLS - 1)));
+        let b = if p.x - l > r - p.x { c.saturating_add(1) } else { c };
+        let room = geo.ci.at((((geo.cells.width() - 40.0) / geo.z).max(0.0)) as f64);
+        b.min(room).min(MAX_COLS - 1)
+    } else {
+        if p.y <= geo.cells.top() {
+            return 0;
+        }
+        let rr = geo.row_at(sh, p.y);
+        let (t, b2) = (geo.y(sh, rr), geo.y(sh, rr.saturating_add(1).min(MAX_ROWS - 1)));
+        let b = if p.y - t > b2 - p.y { rr.saturating_add(1) } else { rr };
+        let room = geo.ri.at((((geo.cells.height() - 40.0) / geo.z).max(0.0)) as f64);
+        b.min(room).min(MAX_ROWS - 1)
+    }
+}
+
+/// Paints the freeze handles and, while one is dragged, where the freeze line will go.
+fn paint_freeze_handles(p: &Painter, geo: &Geo, sh: &Sheet, drag: &Drag, t: &Tokens) {
+    let (cols, rows) = freeze_handles(geo);
+    let bar = Color32::from_gray(150);
+    p.rect_filled(Rect::from_center_size(cols.center(), vec2(3.0, cols.height())), 1.0, bar);
+    p.rect_filled(Rect::from_center_size(rows.center(), vec2(rows.width(), 3.0)), 1.0, bar);
+    if let Drag::Freeze { cols, to: Some(to) } = *drag {
+        let stroke = Stroke::new(2.0, t.accent);
+        if cols {
+            let x = geo.cells.left() + sh.col_left(to) as f32 * geo.z;
+            p.line_segment([pos2(x, geo.rect.top()), pos2(x, geo.cells.bottom())], stroke);
+        } else {
+            let y = geo.cells.top() + sh.row_top(to) as f32 * geo.z;
+            p.line_segment([pos2(geo.rect.left(), y), pos2(geo.cells.right(), y)], stroke);
+        }
+    }
 }
 
 fn col_edge(geo: &Geo, sh: &Sheet, x: f32) -> Option<(u32, f32)> {

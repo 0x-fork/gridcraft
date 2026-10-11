@@ -194,6 +194,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Interface language" => "인터페이스 언어",
         "Interface size" => "인터페이스 크기",
         "Auto" => "자동",
+        "Drag to freeze columns" => "끌어서 열 고정",
+        "Drag to freeze rows" => "끌어서 행 고정",
         "Command\nPalette" => "명령\n팔레트",
         "Agent\nControl" => "에이전트\n제어",
         "Action\nJournal" => "작업\n기록",

@@ -194,6 +194,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Interface language" => "Язык интерфейса",
         "Interface size" => "Размер интерфейса",
         "Auto" => "Авто",
+        "Drag to freeze columns" => "Перетащите, чтобы закрепить столбцы",
+        "Drag to freeze rows" => "Перетащите, чтобы закрепить строки",
         "Command\nPalette" => "Палитра\nкоманд",
         "Agent\nControl" => "Управление\nагентом",
         "Action\nJournal" => "Журнал\nдействий",
