@@ -416,6 +416,20 @@ pub fn font_definitions_with(language: crate::i18n::Language, used: &[String]) -
     for family in crate::fonts::installed_among(used) {
         bound.extend(crate::fonts::bind_family(&mut fonts, &family));
     }
+    // Interface text (formula bar, name box, dialogs) falls back to the cell font before the
+    // script faces: whatever a cell can draw, the formula bar can draw too, even where no script
+    // fallback face was found (#349: macOS UI font without Hebrew, cells in Arial with it).
+    let cell_key = format!("sys-{CELL}");
+    if fonts.font_data.contains_key(&cell_key) {
+        for role in [UI, UI_BOLD, SERIF, MONO] {
+            if let Some(chain) = fonts.families.get_mut(&FontFamily::Name(role.into()))
+                && !chain.contains(&cell_key)
+            {
+                let at = chain.iter().position(|k| fallback.contains(k)).unwrap_or(chain.len());
+                chain.insert(at, cell_key.clone());
+            }
+        }
+    }
     // Default proportional text in widgets uses the UI font.
     if let Some(ui) = fonts.families.get(&FontFamily::Name(UI.into())).cloned() {
         fonts.families.insert(FontFamily::Proportional, ui);
@@ -594,8 +608,11 @@ fn hebrew() -> Vec<(String, u32)> {
     v.push((format!("{win}\\david.ttf"), 0)); // David
     v.push((format!("{win}\\frank.ttf"), 0)); // FrankRuehl
     v.push((format!("{win}\\tahoma.ttf"), 0)); // Tahoma
+    v.push((format!("{mac_sys}/ArialHB.ttc"), 0)); // Arial Hebrew
+    v.push((format!("{mac_sys}/SFHebrew.ttf"), 0));
     v.push((format!("{mac_sup}/Arial Hebrew.ttf"), 0));
     v.push((format!("{mac_sup}/David.ttf"), 0));
+    v.push((format!("{mac_sys}/LucidaGrande.ttc"), 0));
     v.push((format!("{mac_sys}/Lucida Grande.ttc"), 0));
     for d in lin {
         v.push((format!("{d}/NotoSansHebrew-Regular.ttf"), 0));
@@ -771,6 +788,25 @@ mod tests {
                 let tail = &chain[chain.len() - fb_keys.len()..];
                 assert_eq!(tail, fb_keys.as_slice(), "{role} must end its chain with the fallback faces");
             }
+        }
+    }
+
+    #[test]
+    fn interface_families_fall_back_to_the_cell_font() {
+        // Structural (#349): the formula bar, name box and dialogs draw every script the cells can,
+        // so each interface chain carries the cell face, ahead of the script fallback faces.
+        let fonts = font_definitions_for_language(Language::En);
+        let cell = format!("sys-{CELL}");
+        if !fonts.font_data.contains_key(&cell) {
+            return; // no system cell font on this machine
+        }
+        let fb: Vec<String> = fallback_faces(HanOrder::Chinese).into_iter().map(|(k, _)| k.to_string()).collect();
+        for family in [FontFamily::Proportional, FontFamily::Name(UI.into()), FontFamily::Name(UI_BOLD.into()), FontFamily::Name(MONO.into())] {
+            let chain = fonts.families.get(&family).cloned().unwrap_or_default();
+            let at = chain.iter().position(|k| *k == cell);
+            assert!(at.is_some(), "{family:?} lacks the cell face: {chain:?}");
+            let first_fb = chain.iter().position(|k| fb.contains(k)).unwrap_or(chain.len());
+            assert!(at.unwrap_or(usize::MAX) < first_fb, "{family:?}: cell face must precede the script faces");
         }
     }
 
