@@ -80,6 +80,7 @@ pub enum Icon {
     TextBox,
     Symbol,
     Sparkline,
+    Checkbox,
     Function,
     Name,
     Trace,
@@ -415,6 +416,10 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, c: Color32) {
             g.line(&[(12.0, 4.0), (4.0, 12.0)], c, 1.3);
         }
         Icon::Check => g.line(&[(3.0, 8.5), (6.5, 12.0), (13.0, 4.5)], c, 1.3),
+        Icon::Checkbox => {
+            g.rect(2.0, 2.0, 12.0, 12.0, None, Some(c));
+            g.line(&[(4.5, 8.0), (7.0, 10.5), (11.5, 5.0)], c, 1.4);
+        }
         Icon::Fx => g.text(8.0, 8.0, "fx", 10.5, c, false, true),
         Icon::Plus => {
             g.line(&[(8.0, 3.0), (8.0, 13.0)], c, 1.3);

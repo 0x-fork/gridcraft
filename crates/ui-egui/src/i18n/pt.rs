@@ -109,6 +109,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Link" => "Vínculo",
         "Symbol" => "Símbolo",
         "Sparklines" => "Minigráficos",
+        "Checkbox" => "Caixa de Seleção",
+        "Insert checkboxes in the selected cells" => "Inserir caixas de seleção nas células selecionadas",
         "Header & Footer" => "Cabeçalho e Rodapé",
         "Draw with ink" => "Desenhar com Tinta",
         "Eraser" => "Borracha",

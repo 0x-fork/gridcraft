@@ -1036,6 +1036,58 @@ fn every_command_survives_empty_params() {
     }
 }
 
+fn fmt_of(s: &Session, a: &str) -> String {
+    let wb = &s.doc().unwrap().wb;
+    let sh = wb.active().unwrap();
+    wb.styles.get(sh.style_id(CellRef::parse(a).unwrap())).num_fmt.as_str().to_string()
+}
+
+#[test]
+fn checkboxes_keep_values_toggle_and_delete_in_two_passes() {
+    // Issue #196.
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "B1", "input": "hi"})).unwrap();
+    s.execute("cell.set", json!({"cell": "C1", "input": "TRUE"})).unwrap();
+    s.execute("insert.checkbox", json!({"range": "A1:B2"})).unwrap();
+    assert_eq!(v(&s, "A1"), Value::Bool(false), "an empty cell starts unchecked");
+    assert_eq!(v(&s, "B1"), Value::from("hi"), "other values stay");
+    s.execute("cell.toggleCheckbox", json!({"cell": "A1"})).unwrap();
+    assert_eq!(v(&s, "A1"), Value::Bool(true));
+    // Space over a selection toggles only checkbox cells; an emptied checkbox counts as FALSE.
+    s.execute("cell.set", json!({"cell": "A2", "input": ""})).unwrap();
+    s.execute("selection.set", json!({"range": "A2:C2"})).unwrap();
+    s.execute("cell.toggleCheckbox", json!({})).unwrap();
+    assert_eq!(v(&s, "A2"), Value::Bool(true));
+    s.execute("selection.set", json!({"range": "C1"})).unwrap();
+    s.execute("cell.toggleCheckbox", json!({})).unwrap();
+    assert_eq!(v(&s, "C1"), Value::Bool(true), "a plain TRUE is not a checkbox");
+    // Delete: checked boxes are unchecked first, then the boxes go.
+    s.execute("edit.clearContents", json!({"range": "A1:A2"})).unwrap();
+    assert_eq!((v(&s, "A1"), v(&s, "A2")), (Value::Bool(false), Value::Bool(false)));
+    assert_eq!(fmt_of(&s, "A1"), "checkbox");
+    s.execute("edit.clearContents", json!({"range": "A1:A2"})).unwrap();
+    assert_eq!(v(&s, "A1"), Value::Empty);
+    assert_ne!(fmt_of(&s, "A1"), "checkbox");
+    // Clear Formats removes the box and keeps the value (B2 was checked by the selection toggle).
+    s.execute("edit.clearFormats", json!({"range": "B2"})).unwrap();
+    assert_eq!(v(&s, "B2"), Value::Bool(true));
+    assert_ne!(fmt_of(&s, "B2"), "checkbox");
+}
+
+#[test]
+fn checkboxes_survive_xlsx_as_cell_controls() {
+    let mut s = s();
+    s.execute("insert.checkbox", json!({"range": "A1:A2"})).unwrap();
+    s.execute("cell.toggleCheckbox", json!({"cell": "A1"})).unwrap();
+    s.execute("cell.set", json!({"cell": "B1", "input": "0.5"})).unwrap();
+    reopen(&mut s);
+    assert_eq!(fmt_of(&s, "A1"), "checkbox");
+    assert_eq!(fmt_of(&s, "A2"), "checkbox");
+    assert_eq!(fmt_of(&s, "B1"), "General");
+    assert_eq!(v(&s, "A1"), Value::Bool(true));
+    assert_eq!(v(&s, "A2"), Value::Bool(false));
+}
+
 fn reopen(s: &mut Session) {
     let r = s.execute("file.saveBytes", json!({"format": "xlsx"})).unwrap();
     let b64 = r["base64"].as_str().unwrap().to_string();

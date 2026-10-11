@@ -274,6 +274,11 @@ pub fn write_xlsx(wb: &Workbook) -> Result<Vec<u8>, IoError> {
     pivots.finish(wb, &mut out, &|code: &str| crate::tables::builtin_id(code).or_else(|| fmt_ids.get(code).copied()));
     out.part("xl/styles.xml", Some("application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"), styles.into_bytes());
     wb_rels.add("styles", "styles.xml");
+    if wb.styles.iter().any(|(_, st)| st.num_fmt.as_str() == "checkbox") {
+        use crate::feature_bags as fpb;
+        out.part(fpb::PART, Some(fpb::CONTENT_TYPE), fpb::checkbox_part().into_bytes());
+        wb_rels.add_uri(fpb::REL, "featurePropertyBag/featurePropertyBag.xml");
+    }
     out.part(
         "xl/theme/theme1.xml",
         Some("application/vnd.openxmlformats-officedocument.theme+xml"),

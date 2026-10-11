@@ -108,6 +108,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Link" => "Ссылка",
         "Symbol" => "Символ",
         "Sparklines" => "Спарклайны",
+        "Checkbox" => "Флажок",
+        "Insert checkboxes in the selected cells" => "Вставить флажки в выбранные ячейки",
         "Header & Footer" => "Верхний и нижний колонтитулы",
         "Draw with ink" => "Рисование от руки",
         "Eraser" => "Ластик",

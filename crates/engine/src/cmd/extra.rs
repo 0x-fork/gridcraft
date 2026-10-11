@@ -181,7 +181,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Checkbox",
             ["Insert", "Cell Controls"],
             None,
-            "{range?} (cells hold TRUE/FALSE and draw as checkboxes; Space toggles)",
+            "{range?} (TRUE/FALSE and empty cells draw as checkboxes, empty ones become FALSE, other values show as they are; click or Space toggles; Delete unchecks, then removes; Clear Formats removes and keeps the values)",
             has_doc,
             checkbox
         ),
@@ -828,6 +828,11 @@ fn delete_script(s: &mut Session, p: &Json) -> Result<Json> {
 /// Number format that marks checkbox cells (TRUE/FALSE values drawn as boxes).
 pub const CHECKBOX_FORMAT: &str = "\"☐\";\"☐\";\"☐\";[=1]\"☑\"";
 
+/// Whether `c` has checkbox formatting.
+pub(crate) fn is_checkbox_cell(wb: &gridcraft_model::Workbook, sh: &gridcraft_model::Sheet, c: CellRef) -> bool {
+    wb.styles.get(sh.style_id(c)).num_fmt.as_str() == "checkbox"
+}
+
 fn checkbox(s: &mut Session, p: &Json) -> Result<Json> {
     let ranges = target_ranges(s, p)?;
     let si = target_sheet(s, p)?;
@@ -843,9 +848,14 @@ fn checkbox(s: &mut Session, p: &Json) -> Result<Json> {
                     s.align.h = HAlign::Center;
                 });
                 let sh = cx.sheet_mut(si)?;
-                let v = sh.value(c);
-                let value = if matches!(v, Value::Bool(_)) { v } else { Value::Bool(false) };
-                sh.set_cell(c, Cell { value, formula: None, style: new });
+                // Values and formulas already there stay (only TRUE/FALSE draw as a box); an empty
+                // cell starts unchecked.
+                let mut cell = sh.cell(c).cloned().unwrap_or_default();
+                if cell.value.is_empty() && cell.formula.is_none() {
+                    cell.value = Value::Bool(false);
+                }
+                cell.style = new;
+                sh.set_cell(c, cell);
                 cx.touch(si, c);
             }
         }
@@ -862,12 +872,18 @@ fn toggle_checkbox(s: &mut Session, p: &Json) -> Result<Json> {
     };
     edit(s, |cx| {
         for c in cells {
+            let checkbox = cx.wb.sheet(si).is_some_and(|sh| is_checkbox_cell(&cx.wb, sh, c));
             let sh = cx.sheet_mut(si)?;
             if let Some(cell) = sh.cells.get_mut(c)
-                && let Value::Bool(b) = cell.value
                 && cell.formula.is_none()
             {
-                cell.value = Value::Bool(!b);
+                // An empty checkbox cell counts as FALSE.
+                let next = match cell.value {
+                    Value::Bool(b) if checkbox => Value::Bool(!b),
+                    Value::Empty if checkbox => Value::Bool(true),
+                    _ => continue,
+                };
+                cell.value = next;
                 cx.changed.push((si, c));
             }
         }

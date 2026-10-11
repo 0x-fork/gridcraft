@@ -257,6 +257,8 @@ const JAPANESE: &[(&str, &str)] = &[
     ("Link", "リンク"),
     ("Symbol", "記号"),
     ("Sparklines", "スパークライン"),
+    ("Checkbox", "チェックボックス"),
+    ("Insert checkboxes in the selected cells", "選択したセルにチェックボックスを挿入"),
     ("Header & Footer", "ヘッダーとフッター"),
     ("Draw with ink", "インクで描画"),
     ("Eraser", "消しゴム"),
