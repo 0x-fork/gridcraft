@@ -107,6 +107,24 @@ fn long_chain() {
 }
 
 #[test]
+fn index_with_arrays_of_positions() {
+    let mut t = T::new();
+    for (i, row) in [[1, 2, 3], [4, 5, 6], [7, 8, 9]].iter().enumerate() {
+        for (j, v) in row.iter().enumerate() {
+            t.set(&format!("{}{}", ["A", "B", "C"][j], i + 1), &v.to_string());
+        }
+    }
+    t.set("E1", "=INDEX(A1:C3,{1;3},{1,3})");
+    assert_eq!([t.num("E1"), t.num("F1"), t.num("E2"), t.num("F2")], [1.0, 3.0, 7.0, 9.0]);
+    t.set("E4", "=SUM(INDEX(A1:C3,{1,2,3},2))");
+    assert_eq!(t.num("E4"), 15.0);
+    t.set("E5", "=INDEX({10,20,30},{3,1})");
+    assert_eq!([t.num("E5"), t.num("F5")], [30.0, 10.0]);
+    t.set("E7", "=INDEX(A1:C3,2,3)");
+    assert_eq!(t.num("E7"), 6.0);
+}
+
+#[test]
 fn errors_and_cycles() {
     let mut t = T::new();
     t.set("A1", "=1/0");

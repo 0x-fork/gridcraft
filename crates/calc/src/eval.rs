@@ -1092,18 +1092,57 @@ impl<'h> Evaluator<'h> {
             return err(CellError::Value);
         }
         let src = self.eval(&args[0]);
-        let row = match self.arg_num(args, 1, 0.0) {
-            Ok(n) => n.trunc() as i64,
-            Err(e) => return err(e),
+        let mut arg = |i: usize| match args.get(i) {
+            None | Some(Expr::Missing) => None,
+            Some(e) => Some(self.value(e)),
         };
-        let col = match self.arg_num(args, 2, 0.0) {
-            Ok(n) => n.trunc() as i64,
-            Err(e) => return err(e),
-        };
+        let (rows, cols) = (arg(1), arg(2));
         let area_n = match self.arg_num(args, 3, 1.0) {
             Ok(n) => n.trunc() as i64,
             Err(e) => return err(e),
         };
+        let two = args.len() == 2;
+        let num = |v: &Option<Value>| v.as_ref().map_or(Ok(0.0), |v| v.to_number()).map(|n| n.trunc() as i64);
+        // Arrays of positions pick a value for each: INDEX(A1:C10,{1;2},{1,3}) is 2×2.
+        if let (Some(Value::Array(_)), _) | (_, Some(Value::Array(_))) = (&rows, &cols) {
+            let as_array = |v: &Option<Value>| match v {
+                Some(Value::Array(a)) => Arc::clone(a),
+                Some(v) => Arc::new(Array::scalar(v.clone())),
+                None => Arc::new(Array::scalar(Value::Number(0.0))),
+            };
+            let (ra, ca) = (as_array(&rows), as_array(&cols));
+            let (h, w) = (ra.rows.max(ca.rows), ra.cols.max(ca.cols));
+            if (h as u64).saturating_mul(w as u64) > MAX_CELLS {
+                return err(CellError::Num);
+            }
+            let mut out = Vec::with_capacity(h * w);
+            for r in 0..h {
+                for c in 0..w {
+                    let pos = (num(&Some(ra.get_broadcast(r, c))), num(&Some(ca.get_broadcast(r, c))));
+                    let v = match pos {
+                        (Ok(row), Ok(col)) => {
+                            let one = self.index_one(src.clone(), row, col, area_n, two);
+                            match self.deref(one) {
+                                Value::Array(a) if a.rows * a.cols > 1 => Value::Error(CellError::Calc),
+                                v => v.scalar(),
+                            }
+                        }
+                        (Err(e), _) | (_, Err(e)) => Value::Error(e),
+                    };
+                    out.push(v);
+                }
+            }
+            return Ev::V(Array::new(h, w, out).map(Value::from).unwrap_or(Value::Error(CellError::Value)));
+        }
+        let (row, col) = match (num(&rows), num(&cols)) {
+            (Ok(r), Ok(c)) => (r, c),
+            (Err(e), _) | (_, Err(e)) => return err(e),
+        };
+        self.index_one(src, row, col, area_n, two)
+    }
+
+    /// INDEX for one row and column position (0 = the whole column or row).
+    fn index_one(&mut self, src: Ev, row: i64, col: i64, area_n: i64, two_args: bool) -> Ev {
         if row < 0 || col < 0 {
             return err(CellError::Value);
         }
@@ -1112,7 +1151,7 @@ impl<'h> Evaluator<'h> {
                 let Some(a) = areas.get((area_n - 1).max(0) as usize).copied() else { return err(CellError::Ref) };
                 let r = a.range;
                 // A single row or column with one index picks along it.
-                let (row, col) = if args.len() == 2 && r.height() == 1 { (1, row) } else { (row, col) };
+                let (row, col) = if two_args && r.height() == 1 { (1, row) } else { (row, col) };
                 if row as u64 > r.height() as u64 || col as u64 > r.width() as u64 {
                     return err(CellError::Ref);
                 }
@@ -1121,7 +1160,7 @@ impl<'h> Evaluator<'h> {
                 Ev::R(vec![Area { sheet: a.sheet, range: RangeRef::new(CellRef::new(r0, c0), CellRef::new(r1, c1)) }])
             }
             Ev::V(Value::Array(arr)) => {
-                let (row, col) = if args.len() == 2 && arr.rows == 1 { (1, row) } else { (row, col) };
+                let (row, col) = if two_args && arr.rows == 1 { (1, row) } else { (row, col) };
                 if row as usize > arr.rows || col as usize > arr.cols {
                     return err(CellError::Ref);
                 }
