@@ -559,7 +559,20 @@ impl<'h> Evaluator<'h> {
                 if args.len() < 2 {
                     return err(CellError::Value);
                 }
-                let i = match self.arg_num(args, 0, 0.0) {
+                let index = self.value(&args[0]);
+                if let Value::Array(_) = index {
+                    // An array of indexes picks element by element: `CHOOSE({1,2},A1:A3,B1:B3)`
+                    // is a two-column array. The library CHOOSE lifts over its arguments.
+                    let Some(spec) = gridcraft_functions::lookup(name) else { return err(CellError::Name) };
+                    let mut evaluated = vec![Arg { value: index, from_ref: false }];
+                    for a in &args[1..] {
+                        let value = self.value(a);
+                        evaluated.push(Arg { value, from_ref: false });
+                    }
+                    let mut ctx = FnCtx { ev: self };
+                    return gridcraft_functions::call(spec, &evaluated, &mut ctx).pipe(Ev::V);
+                }
+                let i = match index.to_number() {
                     Ok(n) => n.trunc() as i64,
                     Err(e) => return err(e),
                 };
@@ -669,6 +682,7 @@ impl<'h> Evaluator<'h> {
             "INDIRECT" => self.indirect(args),
             "INDEX" => self.index(args),
             "CELL" => self.cell_info(args),
+            "TRIMRANGE" => self.trimrange(args),
             "SUBTOTAL" | "AGGREGATE" => self.subtotal(name, args),
             "TEXT" => {
                 if args.len() != 2 {
@@ -1578,6 +1592,7 @@ fn is_special(n: &str) -> bool {
             | "INDIRECT"
             | "INDEX"
             | "CELL"
+            | "TRIMRANGE"
             | "SUBTOTAL"
             | "AGGREGATE"
             | "TEXT"
@@ -1615,6 +1630,7 @@ pub const SPECIAL_FUNCTIONS: &[&str] = &[
     "INDIRECT",
     "INDEX",
     "CELL",
+    "TRIMRANGE",
     "SUBTOTAL",
     "AGGREGATE",
     "TEXT",

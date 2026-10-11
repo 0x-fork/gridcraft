@@ -83,3 +83,17 @@ fn programmatic_copy_does_not_write_to_the_system_clipboard() {
     assert_eq!(*calls.borrow(), 0);
     assert!(!h.output().platform_output.commands.iter().any(|c| matches!(c, OutputCommand::CopyText(_))));
 }
+
+#[test]
+fn pasting_reads_the_clipboard_html_for_the_numbers_behind_the_text() {
+    // #257: currency text from another spreadsheet stays a number when the host offers the HTML.
+    let mut h = harness(Services {
+        paste_html: Some(Box::new(|| Some(r#"<table><tr><td x:num="10000">Rp10,000.00</td></tr></table>"#.to_string()))),
+        ..Default::default()
+    });
+    h.state_mut().run("selection.set", json!({"cell": "D5"})).unwrap();
+    h.input_mut().events.push(Event::Paste("Rp10,000.00".into()));
+    h.run_steps(2);
+    let value = h.state().session.active().and_then(|d| d.wb.active().map(|s| s.value(gridcraft_engine::core::CellRef::new(4, 3))));
+    assert_eq!(value, Some(gridcraft_engine::core::Value::number(10000.0)));
+}

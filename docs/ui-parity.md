@@ -1,10 +1,10 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (created from a source audit and the issue tracker) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (selected objects can be deleted from the keyboard) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Interaction, controls and feel, against Excel. Part of [target-app-parity.md](target-app-parity.md).
 **UI/UX fidelity: ~55% ready, 50–80 h** (estimated). Ribbon command coverage is measured
-separately in [parity-checklist.md](parity-checklist.md) (258 / 290).
+separately in [parity-checklist.md](parity-checklist.md) (260 / 290).
 
 Sources: `crates/ui-egui/src` (ribbon, grid, editor, formula bar, dialogs, panes),
 `crates/engine/src/cmd` (shortcuts in command specs), the owner's black-box notes
@@ -32,11 +32,11 @@ Sources: `crates/ui-egui/src` (ribbon, grid, editor, formula bar, dialogs, panes
 | Behaviour | Status |
 |---|---|
 | Click/drag/Shift/Ctrl selection, multi-area selection | rectangular drag works in one direction only in some cases (#28) |
-| Fill handle: drag to fill series, double-click to fill down, right-drag menu | fill done; right-drag menu missing |
+| Fill handle: drag to fill series, double-click to fill down, right-drag menu | fill done (Ctrl+drag swaps copy and series); right-drag menu missing |
 | Drag-move and drag-copy cells (border drag, Ctrl/Option, Shift to insert) | done (M3) |
 | In-cell editing, Enter/Tab movement, Alt/Option+Enter line breaks | done |
 | Point mode (click/drag/arrow references), reference colouring, F4 | done |
-| AutoComplete in columns, function autocomplete and argument tips | done |
+| AutoComplete in columns, function autocomplete and argument tips | done; cell helpers clip to the worksheet and hide when the editor scrolls out (#200) |
 | Header resize and double-click AutoFit | done (#42, #88 for header dividers) |
 | Freeze panes, split panes | freeze done; split to verify |
 | Copy as HTML table for other apps | done (#36, 10-10) |
@@ -56,6 +56,7 @@ Sources: `crates/ui-egui/src` (ribbon, grid, editor, formula bar, dialogs, panes
 | Ctrl+1, Ctrl+; and Ctrl+Shift+; , Ctrl+D/R, Ctrl+E, Ctrl+T, Ctrl+K, Ctrl+Shift+L | yes | most done; audit pending |
 | F2, F4, F5, F9 family, Shift+F3, F11 | yes | most; F11 chart sheet missing (no chart sheets) |
 | Mac-specific (Cmd variants, Fn keys) | yes | Cmd mapping done |
+| Delete selected charts, pictures and shapes | yes | done (#213) |
 | Requests | — | #110 (more shortcuts and hot keys), #33 (sequential Alt; initial support landed in #43) |
 
 Work: a shortcut table generated from the command catalog checked against Microsoft's published
@@ -91,5 +92,7 @@ scrollbar bugs 2–4 · pixel/feel pass against observed Excel 7–12.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Delete and Backspace now remove the selected chart, picture or shape (#213) |
+| 2026-10-10 | minor | Keep formula helpers inside the worksheet when scrolling (#200) |
 | 2026-10-10 | minor | Chart resize bug (#190) |
 | 2026-10-10 | major | Created: chrome, grid, keyboard, dialogs, accessibility; key tips, Page Layout view and accessibility tree flagged |

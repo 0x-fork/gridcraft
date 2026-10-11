@@ -193,6 +193,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Unfreeze Panes" => "Descongelar Painéis",
         "Dark Mode" => "Modo Escuro",
         "Interface language" => "Idioma da interface",
+        "Interface size" => "Tamanho da interface",
+        "Auto" => "Automático",
         "Command\nPalette" => "Paleta de\nComandos",
         "Agent\nControl" => "Controle\ndo Agente",
         "Action\nJournal" => "Registro\nde Ações",
