@@ -522,6 +522,71 @@ fn insert_delete_rows_adjust() {
 }
 
 #[test]
+fn insert_copied_cells_inserts_rows_columns_and_blocks() {
+    // Issue #21: Insert Copied Cells.
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [[1], [2], [3], [4], [5]]})).unwrap();
+    s.execute("cell.set", json!({"cell": "B2", "input": "=A2*10"})).unwrap();
+    s.execute("edit.copy", json!({"range": "2:2"})).unwrap();
+    s.execute("selection.set", json!({"range": "C4"})).unwrap();
+    s.execute("home.insertCopiedCells", json!({})).unwrap();
+    assert_eq!(v(&s, "A4"), Value::Number(2.0));
+    assert_eq!(v(&s, "B4"), Value::Number(20.0), "the formula follows its new row");
+    assert_eq!(v(&s, "A5"), Value::Number(4.0));
+    assert_eq!(v(&s, "A6"), Value::Number(5.0));
+    assert_eq!(s.doc().unwrap().selection.current(), gridcraft_core::RangeRef::rows(3, 3));
+    // One undo step puts everything back.
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(v(&s, "A4"), Value::Number(4.0));
+    assert_eq!(v(&s, "A6"), Value::Empty);
+    // Whole columns.
+    s.execute("edit.copy", json!({"range": "A:A"})).unwrap();
+    s.execute("home.insertCopiedCells", json!({"at": "A1"})).unwrap();
+    assert_eq!(v(&s, "A3"), Value::Number(3.0));
+    assert_eq!(v(&s, "B3"), Value::Number(3.0));
+    assert_eq!(v(&s, "C2"), Value::Number(20.0), "the old column B moved right");
+    // A block shifts cells right.
+    s.execute("cell.set", json!({"cell": "F1", "input": "x"})).unwrap();
+    s.execute("cell.set", json!({"cell": "G1", "input": "y"})).unwrap();
+    s.execute("edit.copy", json!({"range": "F1"})).unwrap();
+    s.execute("home.insertCopiedCells", json!({"at": "G1", "shift": "right"})).unwrap();
+    assert_eq!(v(&s, "G1"), Value::from("x"));
+    assert_eq!(v(&s, "H1"), Value::from("y"));
+    assert!(s.clipboard.is_none(), "inserting ends copy mode");
+    s.execute("edit.copy", json!({"range": "F1"})).unwrap();
+    assert!(s.execute("home.insertCopiedCells", json!({"shift": "up"})).is_err());
+}
+
+#[test]
+fn insert_cut_cells_moves_whole_rows() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [[1], [2], [3], [4], [5]]})).unwrap();
+    s.execute("cell.set", json!({"cell": "C1", "input": "=A5"})).unwrap();
+    // Up: row 5 goes above row 2.
+    s.execute("edit.cut", json!({"range": "5:5"})).unwrap();
+    s.execute("home.insertCopiedCells", json!({"at": "A2"})).unwrap();
+    let col: Vec<Value> = (1..=6).map(|r| v(&s, &format!("A{r}"))).collect();
+    assert_eq!(col, [1.0, 5.0, 2.0, 3.0, 4.0].map(Value::Number).into_iter().chain([Value::Empty]).collect::<Vec<_>>());
+    assert_eq!(v(&s, "C1"), Value::Number(5.0), "references follow the moved cells");
+    assert!(s.clipboard.is_none());
+    // Down: row 1 goes above row 4.
+    s.execute("edit.cut", json!({"range": "1:1"})).unwrap();
+    s.execute("home.insertCopiedCells", json!({"at": "A4"})).unwrap();
+    let col: Vec<Value> = (1..=5).map(|r| v(&s, &format!("A{r}"))).collect();
+    assert_eq!(col, [5.0, 2.0, 1.0, 3.0, 4.0].map(Value::Number).to_vec());
+    assert_eq!(s.doc().unwrap().selection.current(), gridcraft_core::RangeRef::rows(2, 2));
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(v(&s, "A1"), Value::Number(1.0));
+    // Inside itself, and a cut block, are refused without changing anything.
+    s.execute("edit.cut", json!({"range": "2:4"})).unwrap();
+    assert!(s.execute("home.insertCopiedCells", json!({"at": "A3"})).is_err());
+    s.execute("edit.cut", json!({"range": "A1:A2"})).unwrap();
+    assert!(s.execute("home.insertCopiedCells", json!({"at": "B5"})).is_err());
+    assert_eq!(v(&s, "A1"), Value::Number(1.0));
+    assert_eq!(v(&s, "B5"), Value::Empty);
+}
+
+#[test]
 fn inserting_or_deleting_cells_cancels_copy_mode() {
     let mut s = s();
     s.execute("range.setValues", json!({"range": "A1", "values": [[1], [2], [3]]})).unwrap();

@@ -100,6 +100,13 @@ impl Dialog {
                 }],
                 json!({"shift": "down"}),
             ),
+            "insertPaste" => Dialog::form(
+                "insertPaste",
+                "Insert Paste",
+                "home.insertCopiedCells",
+                vec![Choice { key: "shift", label: "Insert", options: vec![("right", "Shift cells right"), ("down", "Shift cells down")] }],
+                json!({"shift": "down"}),
+            ),
             "deleteCells" => Dialog::form(
                 "deleteCells",
                 "Delete",

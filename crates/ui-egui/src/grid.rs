@@ -2172,7 +2172,8 @@ fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
     let resp = egui::Area::new(egui::Id::new("cell_context")).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
         egui::Frame::popup(ui.style()).show(ui, |ui| {
             ui.set_min_width(200.0);
-            let items: &[(&str, &str)] = &[
+            let insert_copied = insert_copied_item(app);
+            let mut items: Vec<(&str, &str)> = vec![
                 ("Cut", "edit.cut"),
                 ("Copy", "edit.copy"),
                 ("Paste", "edit.paste"),
@@ -2194,15 +2195,20 @@ fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
                 ("Define Name…", "ui:defineName"),
                 ("Link…", "ui:insertLink"),
             ];
+            if let Some(item) = insert_copied {
+                items.insert(6, item);
+            }
+            let lang = crate::i18n::current(ui.ctx());
             for (label, id) in items {
-                if *label == "-" {
+                if label == "-" {
                     ui.separator();
                     continue;
                 }
-                if ui.add(egui::Button::new(*label).frame(false).min_size(vec2(190.0, 20.0))).clicked() {
+                if ui.add(egui::Button::new(lang.tr(label)).frame(false).min_size(vec2(190.0, 20.0))).clicked() {
                     close = true;
-                    match *id {
+                    match id {
                         "ui:pasteSpecial" => app.open_dialog("pasteSpecial", json!({})),
+                        "ui:insertPaste" => app.open_dialog("insertPaste", json!({})),
                         "ui:insertCells" => app.open_dialog("insertCells", json!({})),
                         "ui:deleteCells" => app.open_dialog("deleteCells", json!({})),
                         "ui:formatCells" => app.open_dialog("formatCells", json!({})),
@@ -2414,7 +2420,8 @@ fn header_menu(app: &mut SheetApp, ui: &mut egui::Ui, was_open: bool) {
     let response = egui::Area::new(egui::Id::new("header_menu")).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
         egui::Frame::popup(ui.style()).show(ui, |ui| {
             ui.set_min_width(190.0);
-            let items: Vec<(&str, &str)> = if rows {
+            let insert_copied = insert_copied_item(app);
+            let mut items: Vec<(&str, &str)> = if rows {
                 vec![
                     ("Cut", "edit.cut"),
                     ("Copy", "edit.copy"),
@@ -2448,14 +2455,19 @@ fn header_menu(app: &mut SheetApp, ui: &mut egui::Ui, was_open: bool) {
                     ("Group", "data.group"),
                 ]
             };
+            if let Some(item) = insert_copied {
+                items.insert(5, item);
+            }
+            let lang = crate::i18n::current(ui.ctx());
             for (label, id) in items {
                 if label == "-" {
                     ui.separator();
                     continue;
                 }
-                if ui.add(egui::Button::new(label).frame(false).min_size(vec2(180.0, 20.0))).clicked() {
+                if ui.add(egui::Button::new(lang.tr(label)).frame(false).min_size(vec2(180.0, 20.0))).clicked() {
                     close = true;
                     match id {
+                        "ui:insertPaste" => app.open_dialog("insertPaste", json!({})),
                         "ui:rowHeight" => app.open_dialog("rowHeight", json!({})),
                         "ui:columnWidth" => app.open_dialog("columnWidth", json!({})),
                         "edit.copy" | "edit.cut" => {
@@ -2469,6 +2481,21 @@ fn header_menu(app: &mut SheetApp, ui: &mut egui::Ui, was_open: bool) {
     });
     if close || popup_dismissed(&response.response, was_open) {
         app.grid.header_menu = None;
+    }
+}
+
+/// The context-menu entry for Insert Copied Cells / Insert Cut Cells, when the clipboard holds a
+/// copy or cut of this app: whole rows or columns insert at once, a block asks which way to shift
+/// (Insert Paste). A cut block can only be pasted, so it gets no entry.
+fn insert_copied_item(app: &SheetApp) -> Option<(&'static str, &'static str)> {
+    let clip = app.session.clipboard.as_ref()?;
+    let lines = clip.selected.is_full_rows() != clip.selected.is_full_cols();
+    let cut = clip.cut && app.session.active().is_some_and(|d| d.uid == clip.doc_uid);
+    match (cut, lines) {
+        (true, true) => Some(("Insert Cut Cells", "home.insertCopiedCells")),
+        (true, false) => None,
+        (false, true) => Some(("Insert Copied Cells", "home.insertCopiedCells")),
+        (false, false) => Some(("Insert Copied Cells…", "ui:insertPaste")),
     }
 }
 

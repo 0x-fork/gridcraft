@@ -616,6 +616,8 @@ fn copy_impl(s: &mut Session, p: &Json, cut: bool) -> Result<Json> {
     if ranges.len() > 1 && cut {
         return Err(multiple());
     }
+    // The selection as made (untrimmed), for Insert Copied Cells.
+    let selected = ranges.first().copied().unwrap_or_default();
     let d = s.doc()?;
     let Some(sh) = d.wb.sheet(sheet) else { return Err(EngineError::NoDocument) };
     let trim = |range: RangeRef| {
@@ -637,7 +639,7 @@ fn copy_impl(s: &mut Session, p: &Json, cut: bool) -> Result<Json> {
     // The HTML rendering is for the host clipboard (UI); it can reach 4 MB, so agents and
     // scripts get it only when they ask for it.
     let html = if p.get("html").and_then(Json::as_bool) == Some(true) { crate::io::range_html(&wb, sheet, range, &text) } else { None };
-    let clip = Clipboard { wb, sheet, range, cut, doc_uid: d.uid, text: text.clone(), areas };
+    let clip = Clipboard { wb, sheet, range, cut, doc_uid: d.uid, text: text.clone(), areas, selected };
     s.clipboard = Some(clip);
     let mut result = json!({"range": range.a1(), "text": text});
     if let Some(html) = html {

@@ -67,6 +67,9 @@ pub struct Clipboard {
     pub wb: Arc<Workbook>,
     pub sheet: usize,
     pub range: RangeRef,
+    /// The range as copied, before whole rows/columns were trimmed to the used range
+    /// (Insert Copied Cells inserts whole lines for a row or column copy).
+    pub selected: RangeRef,
     pub cut: bool,
     /// Document uid of the source (a cut only moves within the same workbook).
     pub doc_uid: u64,

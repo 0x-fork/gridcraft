@@ -42,7 +42,7 @@ Sources: `crates/ui-egui/src` (ribbon, grid, editor, formula bar, dialogs, panes
 | Header resize and double-click AutoFit | done (#42, #88 for header dividers) |
 | Freeze panes, split panes | freeze done; split to verify |
 | Copy as HTML table for other apps | done (#36, 10-10) |
-| Context menu on cells | 16 items (Cut, Copy, Paste, Paste Special, Insert, Delete, Clear Contents, Filter by value, Sort, New Comment, New Note, Format Cells, Pick From Drop-down List, Define Name, Link). Missing: Insert Copied/Cut Cells (#21), paste-option icons, Quick Analysis, Get Data from Table, Show Changes, Smart Lookup |
+| Context menu on cells | 16 items (Cut, Copy, Paste, Paste Special, Insert, Delete, Clear Contents, Filter by value, Sort, New Comment, New Note, Format Cells, Pick From Drop-down List, Define Name, Link). Insert Copied Cells (Insert Cut Cells for whole rows/columns) while the clipboard holds a copy (#21). Missing: Insert Cut Cells for a cell block, paste-option icons, Quick Analysis, Get Data from Table, Show Changes, Smart Lookup |
 | Move and resize charts, pictures and shapes | charts can't be resized (#190) |
 | Context menus on row/column headers, sheet tabs, charts, shapes | headers and tabs done; objects partial |
 | Quick Analysis (Ctrl+Q) | missing |
