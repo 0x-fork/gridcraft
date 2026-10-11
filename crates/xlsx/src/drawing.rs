@@ -433,7 +433,6 @@ pub fn write_drawing(sheet: &Sheet, theme: &Theme, objs: &[Obj<'_>]) -> String {
     s
 }
 
-/// File extension for an image MIME type.
 /// A text run's `a:rPr` attributes (size, bold, italic) and children in schema order (outline,
 /// fill, typeface).
 fn run_props(f: &ShapeFormat, theme: &Theme) -> (String, String) {
@@ -463,6 +462,7 @@ fn run_props(f: &ShapeFormat, theme: &Theme) -> (String, String) {
     (attrs, body)
 }
 
+/// File extension for an image MIME type.
 pub fn image_ext(mime: &str, data: &[u8]) -> &'static str {
     match mime.to_ascii_lowercase().as_str() {
         "image/png" => "png",
