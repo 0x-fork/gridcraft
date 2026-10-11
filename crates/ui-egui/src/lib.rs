@@ -624,15 +624,23 @@ impl SheetApp {
 
     pub fn open_path(&mut self, path: &str) {
         match self.run("file.open", json!({"path": path})) {
-            Ok(r) => {
-                self.ui.recent.retain(|p| p != path);
-                self.ui.recent.insert(0, path.to_string());
-                self.ui.recent.truncate(20);
-                self.show_open_warnings(&r);
-            }
+            Ok(r) => self.after_open(Some(path), &r),
+            // A password-protected workbook: ask for the password; the dialog opens it.
+            Err(e) if e.contains(gridcraft_engine::io::PASSWORD_REQUIRED) => self.open_dialog("openPassword", json!({"path": path})),
             Err(e) => self.message = Some(("GridCraft".into(), clean_error(&e))),
         }
         self.after_engine();
+    }
+
+    /// What follows a successful `file.open`: the Recent list (for a file on disk) and the open
+    /// warnings notice. Shared by File › Open and the password dialog.
+    pub fn after_open(&mut self, path: Option<&str>, r: &Json) {
+        if let Some(path) = path {
+            self.ui.recent.retain(|p| p != path);
+            self.ui.recent.insert(0, path.to_string());
+            self.ui.recent.truncate(20);
+        }
+        self.show_open_warnings(r);
     }
 
     /// Turns the `warnings` a `file.open` result carries into an info-bar notice, choosing the
@@ -893,11 +901,15 @@ impl SheetApp {
             .unwrap_or_default();
         for (name, bytes) in arrived {
             let b64 = gridcraft_engine::io::base64_encode(&bytes);
-            match self.run("file.open", json!({"name": name, "base64": b64})) {
+            match self.run("file.open", json!({"name": &name, "base64": &b64})) {
                 // A file picked from File › Open (web) arrives here: show it, not the Backstage.
                 Ok(r) => {
                     self.backstage = None;
                     self.show_open_warnings(&r);
+                }
+                Err(e) if e.contains(gridcraft_engine::io::PASSWORD_REQUIRED) => {
+                    self.backstage = None;
+                    self.open_dialog("openPassword", json!({"name": name, "base64": b64}));
                 }
                 Err(e) => self.message = Some(("GridCraft".into(), clean_error(&e))),
             }
