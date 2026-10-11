@@ -1524,10 +1524,10 @@ fn formulas(app: &mut SheetApp, ui: &mut Ui) {
         if small_button(ui, Icon::Calc, "Evaluate Formula", "Evaluate Formula", false).clicked() {
             app.open_dialog("evaluateFormula", json!({}));
         }
-        if small_button(ui, Icon::Search, "Watch Window", "Watch Window", false).clicked() {
-            app.grid.pane = Some("watch".into());
-        }
     });
+    if big_button(ui, Icon::Search, "Watch\nWindow", "Watch Window", false).clicked() {
+        app.grid.pane = Some("watch".into());
+    }
     sep(ui);
     let co = big_button(ui, Icon::Calc, "Calculation\nOptions", "Calculation Options", true);
     egui::Popup::menu(&co).show(|ui| {
