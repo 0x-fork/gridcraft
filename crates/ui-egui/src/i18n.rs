@@ -440,6 +440,7 @@ mod tests {
             assert!(ko::translate(english).is_some_and(|text| !text.is_empty()), "missing Korean: {english}");
             assert!(ru::translate(english).is_some_and(|text| !text.is_empty()), "missing Russian: {english}");
             assert!(pt::translate(english).is_some_and(|text| !text.is_empty()), "missing Portuguese: {english}");
+            assert!(cs::translate(english).is_some_and(|text| !text.is_empty()), "missing Czech: {english}");
         }
         assert_eq!(Language::Ja.tr("Data"), "データ");
         assert_eq!(Language::Zh.tr("Data"), "数据");
@@ -452,10 +453,16 @@ mod tests {
         assert_eq!(Language::Zh.tr("Sheet1!A1"), "Sheet1!A1");
         assert_eq!(Language::Ko.tr("Sheet1!A1"), "Sheet1!A1");
         assert_eq!(Language::Ru.tr("Sheet1!A1"), "Sheet1!A1");
+        // Czech "Data" is spelled as in English, so probe it with a label that differs.
+        assert_eq!(Language::Cs.tr("Data"), "Data");
+        assert_eq!(Language::Cs.tr("Formulas"), "Vzorce");
+        assert_eq!(Language::Cs.tr("Sheet1!A1"), "Sheet1!A1");
         // A `context|label` key shows only its label in English and splits the translation.
         assert_eq!(Language::En.tr("Page Layout|Orientation"), "Orientation");
         assert_eq!(Language::Ja.tr("Page Layout|Orientation"), "印刷の向き");
         assert_eq!(Language::Ja.tr("Orientation"), "方向");
+        assert_eq!(Language::Cs.tr("Page Layout|Orientation"), "Orientace");
+        assert_eq!(Language::Cs.tr("Orientation"), "Orientace textu");
         assert_eq!(Language::parse("xx"), None);
     }
 
@@ -486,6 +493,9 @@ mod tests {
         assert_eq!(Language::from_tag("pt-BR"), Some(Language::PtBr));
         assert_eq!(Language::parse("pt"), Some(Language::PtBr));
         assert_eq!(Language::parse("pt-br"), Some(Language::PtBr));
+        assert_eq!(Language::from_tag("cs-CZ"), Some(Language::Cs));
+        assert_eq!(Language::from_tag("cs_CZ.UTF-8"), Some(Language::Cs));
+        assert_eq!(Language::parse("cs"), Some(Language::Cs));
     }
 
     #[test]
