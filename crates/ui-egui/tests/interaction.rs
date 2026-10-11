@@ -336,6 +336,32 @@ fn recommended_charts_dialog_inserts_the_chosen_chart() {
 }
 
 #[test]
+fn select_data_dialog_sets_the_category_axis_labels() {
+    // #287: Chart Design › Select Data edits the Horizontal (Category) Axis Labels and removes the
+    // series the X values were plotted as.
+    let mut s = blank();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Year", "Sales"], [2020, 5], [2021, 7], [2022, 9]]})).unwrap();
+    let id = s.execute("insert.chart", json!({"range": "A1:B4", "type": "line"})).unwrap()["chart"].as_u64().unwrap();
+    let mut h = harness(s);
+    h.state_mut().selected_chart = Some(id as u32);
+    h.state_mut().open_dialog("selectData", json!({"chart": id}));
+    h.run_steps(2);
+    let d = h.state_mut().dialog.as_mut().unwrap();
+    assert_eq!(d.title, "Select Data Source");
+    assert_eq!(d.values["names"], json!(["Year", "Sales"]));
+    d.values.insert("categories".into(), json!("=A2:A4"));
+    d.values.insert("remove".into(), json!([0]));
+    h.run_steps(1);
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    h.run_steps(2);
+    assert!(h.state().dialog.is_none());
+    let chart = h.state().session.active().unwrap().wb.active().unwrap().charts[0].clone();
+    assert_eq!(chart.series.len(), 1);
+    assert_eq!(chart.series[0].categories.as_deref(), Some("Sheet1!$A$2:$A$4"));
+    assert_eq!(chart.series[0].values, "Sheet1!$B$2:$B$4");
+}
+
+#[test]
 fn dialogs_open_and_close() {
     let mut h = harness(blank());
     for name in [

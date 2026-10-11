@@ -34,7 +34,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Select Data…",
             ["Chart Design", "Data"],
             None,
-            "{chart?, range: \"Sheet1!A1:D7\", byRows?: bool}",
+            "{chart?, range?: \"Sheet1!A1:D7\", byRows?: bool, categories?: \"Sheet1!A2:A7\" (Horizontal (Category) Axis Labels for every series; \"\" clears), removeSeries?: [index…]}",
             has_doc,
             select_data
         ),
@@ -350,22 +350,70 @@ fn change_colors(s: &mut Session, p: &Json) -> Result<Json> {
 }
 
 fn select_data(s: &mut Session, p: &Json) -> Result<Json> {
-    let range = str_param(p, "range").ok_or_else(|| bad("chart.selectData", "missing `range`"))?.to_string();
-    let (sheet_name, body) = split_sheet(&range);
     let d = s.doc()?;
-    let src_si = match sheet_name {
-        Some(n) => d.wb.sheet_index(&n).ok_or_else(|| bad("chart.selectData", "no such sheet"))?,
-        None => d.wb.active_sheet,
+    // A new data range rebuilds the series, as in Excel's Select Data › Chart data range.
+    let rebuilt = match str_param(p, "range") {
+        Some(range) => {
+            let range = range.trim_start_matches('=');
+            let (sheet_name, body) = split_sheet(range);
+            let src_si = match sheet_name {
+                Some(n) => d.wb.sheet_index(&n).ok_or_else(|| bad("chart.selectData", "no such sheet"))?,
+                None => d.wb.active_sheet,
+            };
+            let r = RangeRef::parse(body).ok_or_else(|| bad("chart.selectData", "not a range"))?;
+            if r.count() > 1_000_000 {
+                return Err(bad("chart.selectData", "range too large for a chart"));
+            }
+            let src = d.wb.sheet(src_si).ok_or(EngineError::NoDocument)?;
+            let by_rows = bool_param(p, "byRows").unwrap_or(r.width() > r.height() + 1);
+            let series = super::insert::series_from_range(src, r, by_rows);
+            Some((series, format!("{}!{}", gridcraft_formula::quote_sheet(&src.name), r.a1()), by_rows))
+        }
+        None => None,
     };
-    let r = RangeRef::parse(body).ok_or_else(|| bad("chart.selectData", "not a range"))?;
-    let src = d.wb.sheet(src_si).ok_or(EngineError::NoDocument)?;
-    let by_rows = bool_param(p, "byRows").unwrap_or(r.width() > r.height() + 1);
-    let series = super::insert::series_from_range(src, r, by_rows);
-    let source = format!("{}!{}", gridcraft_formula::quote_sheet(&src.name), r.a1());
+    // Horizontal (Category) Axis Labels › Edit: one labels range for every series ("" clears).
+    let categories = match str_param(p, "categories") {
+        None => None,
+        Some(t) if t.trim().trim_start_matches('=').is_empty() => Some(None),
+        Some(t) => {
+            let t = t.trim().trim_start_matches('=');
+            let (sheet_name, body) = split_sheet(t);
+            let si = match sheet_name {
+                Some(n) => d.wb.sheet_index(&n).ok_or_else(|| bad("chart.selectData", "no such sheet"))?,
+                None => d.wb.active_sheet,
+            };
+            let r = RangeRef::parse(body).ok_or_else(|| bad("chart.selectData", "`categories` is not a range"))?;
+            let name = d.wb.sheet(si).map(|sh| sh.name.clone()).ok_or(EngineError::NoDocument)?;
+            let abs = |c: CellRef| format!("${}${}", gridcraft_core::col_to_letters(c.col), c.row + 1);
+            Some(Some(format!("{}!{}:{}", gridcraft_formula::quote_sheet(&name), abs(r.start), abs(r.end))))
+        }
+    };
+    let mut remove: Vec<usize> = p
+        .get("removeSeries")
+        .and_then(Json::as_array)
+        .map(|a| a.iter().filter_map(Json::as_u64).filter_map(|i| usize::try_from(i).ok()).collect())
+        .unwrap_or_default();
+    remove.sort_unstable();
+    remove.dedup();
+    if rebuilt.is_none() && categories.is_none() && remove.is_empty() {
+        return Err(bad("chart.selectData", "missing `range`, `categories` or `removeSeries`"));
+    }
     with_chart(s, p, move |c| {
-        c.series = series;
-        c.source = Some(source);
-        c.by_rows = by_rows;
+        if let Some((series, source, by_rows)) = rebuilt {
+            c.series = series;
+            c.source = Some(source);
+            c.by_rows = by_rows;
+        }
+        for i in remove.iter().rev() {
+            if *i < c.series.len() && c.series.len() > 1 {
+                c.series.remove(*i);
+            }
+        }
+        if let Some(cats) = categories {
+            for se in &mut c.series {
+                se.categories = cats.clone();
+            }
+        }
         Ok(())
     })
 }

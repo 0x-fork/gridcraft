@@ -1883,6 +1883,9 @@ fn chart_design(app: &mut SheetApp, ui: &mut Ui) {
     if big_button(ui, Icon::Redo, "Switch\nRow/Column", "Switch Row/Column", false).clicked() {
         act(app, "chart.switchRowColumn", json!({"chart": id}));
     }
+    if big_button(ui, Icon::Table, "Select\nData", "Select Data", false).clicked() {
+        app.open_dialog("selectData", json!({"chart": id}));
+    }
     let ct = big_button(ui, Icon::ChartBar, "Change\nChart Type", "Change Chart Type", true);
     egui::Popup::menu(&ct).show(|ui| {
         for (label, k, s) in [

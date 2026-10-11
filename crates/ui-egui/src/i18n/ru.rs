@@ -210,6 +210,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Add Chart\nElement" => "Добавить элемент\nдиаграммы",
         "Change\nChart Type" => "Изменить тип\nдиаграммы",
         "Switch\nRow/Column" => "Поменять\nстроки/столбцы",
+        "Select\nData" => "Выбрать\nданные",
         "Data Labels: None" => "Подписи данных: нет",
         "Data Labels: Show" => "Подписи данных: показать",
         "Legend: None" => "Легенда: нет",

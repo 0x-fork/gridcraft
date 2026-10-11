@@ -211,6 +211,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Add Chart\nElement" => "Adicionar\nElemento de Gráfico",
         "Change\nChart Type" => "Alterar\nTipo de Gráfico",
         "Switch\nRow/Column" => "Alternar\nLinha/Coluna",
+        "Select\nData" => "Selecionar\nDados",
         "Data Labels: None" => "Rótulos de Dados: Nenhum",
         "Data Labels: Show" => "Rótulos de Dados: Exibir",
         "Legend: None" => "Legenda: Nenhuma",

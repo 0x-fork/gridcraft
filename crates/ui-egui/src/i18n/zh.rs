@@ -210,6 +210,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Add Chart\nElement" => "添加图表\n元素",
         "Change\nChart Type" => "更改\n图表类型",
         "Switch\nRow/Column" => "切换\n行/列",
+        "Select\nData" => "选择\n数据",
         "Data Labels: None" => "数据标签：无",
         "Data Labels: Show" => "数据标签：显示",
         "Legend: None" => "图例：无",

@@ -532,7 +532,12 @@ pub fn series_from_range(sh: &Sheet, r: RangeRef, by_rows: bool) -> Vec<Series> 
     let header_row = r.height() > 1
         && (r.start.col..=r.end.col).any(|c| sh.value(CellRef::new(r.start.row, c)).is_text())
         && (r.start.col..=r.end.col).filter(|c| *c != r.start.col).all(|c| is_text(CellRef::new(r.start.row, c)));
-    let label_col = r.width() > 1 && (r.start.row + header_row as u32..=r.end.row).all(|row| is_text(CellRef::new(row, r.start.col)));
+    // A blank top-left cell above a header row marks the first column as the category labels even
+    // when it holds numbers (years, X values), the usual spreadsheet convention, so it isn't
+    // plotted as a series of its own (#287).
+    let blank_corner = header_row && sh.value(r.start).is_empty();
+    let label_col =
+        r.width() > 1 && (blank_corner || (r.start.row + header_row as u32..=r.end.row).all(|row| is_text(CellRef::new(row, r.start.col))));
     let data = RangeRef::new(CellRef::new(r.start.row + header_row as u32, r.start.col + label_col as u32), r.end);
     let mut out = Vec::new();
     if !by_rows {
