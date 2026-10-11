@@ -1500,7 +1500,9 @@ dependencies = [
  "gridcraft-engine",
  "gridcraft-mcp",
  "log",
+ "quick-xml",
  "serde_json",
+ "zip",
 ]
 
 [[package]]
