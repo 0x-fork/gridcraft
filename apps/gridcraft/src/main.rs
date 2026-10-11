@@ -205,13 +205,29 @@ fn open_with_system(target: &str) {
 }
 
 /// Writes a print PDF into `dir` under a fresh name (an earlier print may still be open in the
-/// viewer) and returns its path.
+/// viewer) and returns its path. The temp folder is shared, so the file is created exclusively
+/// (an existing file or a planted symlink is never followed or overwritten) and, on Unix, readable
+/// only by the user.
 fn write_print_pdf(dir: &std::path::Path, bytes: &[u8]) -> std::io::Result<std::path::PathBuf> {
+    use std::io::Write;
     static PRINTS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let n = PRINTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed).wrapping_add(1);
-    let path = dir.join(format!("GridCraft print {}-{n}.pdf", std::process::id()));
-    std::fs::write(&path, bytes)?;
-    Ok(path)
+    for _ in 0..64 {
+        let n = PRINTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed).wrapping_add(1);
+        let path = dir.join(format!("GridCraft print {}-{n}.pdf", std::process::id()));
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        match options.open(&path) {
+            Ok(mut file) => {
+                file.write_all(bytes)?;
+                return Ok(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "no free print file name"))
 }
 
 fn icon() -> Option<egui::IconData> {
@@ -389,6 +405,20 @@ mod print_tests {
         assert!(a.starts_with(&dir) && a.extension().is_some_and(|e| e == "pdf"));
         assert_eq!(std::fs::read(&b).unwrap(), b"%PDF-1.4 b");
         assert!(super::write_print_pdf(&dir.join("missing"), b"x").is_err());
+        // A file (or symlink) already at the next name is skipped, never overwritten.
+        let pid = std::process::id();
+        let taken: Vec<_> = (1..=200).map(|n| dir.join(format!("GridCraft print {pid}-{n}.pdf"))).filter(|p| !p.exists()).take(3).collect();
+        for p in &taken {
+            std::fs::write(p, b"keep").unwrap();
+        }
+        let c = super::write_print_pdf(&dir, b"%PDF-1.4 c").unwrap();
+        assert!(taken.iter().all(|p| std::fs::read(p).unwrap() == b"keep"));
+        assert_eq!(std::fs::read(&c).unwrap(), b"%PDF-1.4 c");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&c).unwrap().permissions().mode() & 0o077, 0, "only the user can read it");
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
