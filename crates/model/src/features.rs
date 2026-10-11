@@ -388,6 +388,65 @@ pub struct Series {
     /// Draw line segments as a smoothed (spline) curve.
     #[serde(default)]
     pub smooth: bool,
+    /// Trendlines fitted to this series (Excel allows several per series).
+    #[serde(default)]
+    pub trendlines: Vec<Trendline>,
+}
+
+/// Regression a trendline fits (`c:trendlineType`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TrendlineKind {
+    #[default]
+    Linear,
+    /// `y = c·e^(b·x)`.
+    Exponential,
+    /// `y = c·ln(x) + b`.
+    Logarithmic,
+    /// Polynomial of this order (2..=6).
+    Polynomial(u8),
+    /// `y = c·x^b`.
+    Power,
+    /// Average of this many consecutive points (2..=255).
+    MovingAverage(u32),
+}
+
+/// DrawingML preset line dash (`a:prstDash`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LineDash {
+    #[default]
+    Solid,
+    Dot,
+    Dash,
+    LgDash,
+    DashDot,
+    LgDashDot,
+    LgDashDotDot,
+    SysDash,
+    SysDot,
+    SysDashDot,
+    SysDashDotDot,
+}
+
+/// A chart trendline (Add Chart Element ▸ Trendline, Format Trendline pane).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Trendline {
+    pub kind: TrendlineKind,
+    /// Custom name shown in the legend; `None` = automatic ("Linear (Sales)").
+    pub name: Option<String>,
+    /// Forecast past the last point, in x units (categories on a category axis).
+    pub forward: f64,
+    /// Forecast before the first point, in x units.
+    pub backward: f64,
+    /// Set Intercept: fixed y at x = 0 (linear, exponential, polynomial).
+    pub intercept: Option<f64>,
+    pub display_equation: bool,
+    pub display_r_squared: bool,
+    /// Line colour; `None` = the series colour.
+    pub color: Option<Color>,
+    /// Line width in points; `None` = default.
+    pub width: Option<f32>,
+    /// Line dash; `None` = default.
+    pub dash: Option<LineDash>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -332,6 +332,7 @@ fn sample() -> Workbook {
             secondary: false,
             kind: None,
             smooth: false,
+            trendlines: Vec::new(),
         }],
         legend: LegendPos::Bottom,
         data_labels: true,
