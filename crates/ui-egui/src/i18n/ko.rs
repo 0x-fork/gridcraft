@@ -123,6 +123,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Remove Page Break" => "페이지 나누기 제거",
         "Reset All Page Breaks" => "모든 페이지 나누기 다시 설정",
         "Print\nTitles" => "인쇄\n제목",
+        "Sheet\nRight-to-Left" => "시트\n오른쪽에서 왼쪽으로",
+        "Sheet Right-to-Left" => "시트 오른쪽에서 왼쪽으로",
         "Narrow" => "좁게",
         "Wide" => "넓게",
         "Normal" => "보통",

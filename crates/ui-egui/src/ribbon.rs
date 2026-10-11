@@ -1440,6 +1440,15 @@ fn page_layout(app: &mut SheetApp, ui: &mut Ui) {
             act(app, "pageLayout.printHeadings", json!({"on": p}));
         }
     });
+    let rtl = app.session.active().and_then(|d| d.wb.active()).is_some_and(|s| s.right_to_left);
+    let r = big_button(ui, Icon::SheetRtl, "Sheet\nRight-to-Left", "Sheet Right-to-Left", false);
+    if rtl {
+        let t = Tokens::get(ui.ctx());
+        ui.painter().rect_stroke(r.rect, 5.0, egui::Stroke::new(1.0, t.separator), egui::StrokeKind::Inside);
+    }
+    if r.clicked() {
+        act(app, "view.rightToLeft", json!({"on": !rtl}));
+    }
 }
 
 fn formulas(app: &mut SheetApp, ui: &mut Ui) {

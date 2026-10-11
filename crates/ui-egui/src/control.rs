@@ -121,7 +121,7 @@ fn cell_center(app: &SheetApp, c: CellRef) -> Option<egui::Pos2> {
     let sh = d.wb.active()?;
     let rect = app.grid.rect?;
     let geo = crate::grid::Geo::new(sh, rect, app.view().scroll);
-    Some(geo.cell_rect(sh, c).center())
+    Some(geo.screen_cell_rect(sh, c).center())
 }
 
 fn push_click(app: &mut SheetApp, pos: egui::Pos2, button: egui::PointerButton, count: u32, m: egui::Modifiers) {

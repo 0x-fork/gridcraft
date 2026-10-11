@@ -123,6 +123,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Remove Page Break" => "删除分页符",
         "Reset All Page Breaks" => "重置所有分页符",
         "Print\nTitles" => "打印\n标题",
+        "Sheet\nRight-to-Left" => "工作表\n从右到左",
+        "Sheet Right-to-Left" => "工作表从右到左",
         "Narrow" => "窄",
         "Wide" => "宽",
         "Normal" => "普通",

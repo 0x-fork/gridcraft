@@ -123,6 +123,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Remove Page Break" => "Удалить разрыв страницы",
         "Reset All Page Breaks" => "Сбросить все разрывы страниц",
         "Print\nTitles" => "Печатать\nзаголовки",
+        "Sheet\nRight-to-Left" => "Лист\nсправа налево",
+        "Sheet Right-to-Left" => "Лист справа налево",
         "Narrow" => "Узкие",
         "Wide" => "Широкие",
         "Normal" => "Обычные",

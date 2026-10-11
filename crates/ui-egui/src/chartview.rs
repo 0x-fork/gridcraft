@@ -188,12 +188,23 @@ pub(crate) fn anchor_rect(geo: &Geo, sh: &Sheet, a: &Anchor) -> Rect {
 
 static TEXTURES: std::sync::LazyLock<Mutex<HashMap<(u32, usize), egui::TextureHandle>>> = std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
-pub fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workbook, si: usize, sh: &Sheet) {
+/// The shapes one floating object painted (indices into the painter's layer) and its logical
+/// rectangle, so a right-to-left sheet can move it as a whole instead of mirroring it.
+pub(crate) struct PaintedObject {
+    pub shapes: std::ops::Range<usize>,
+    pub rect: Rect,
+}
+
+pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workbook, si: usize, sh: &Sheet) -> Vec<PaintedObject> {
+    let mut painted = Vec::new();
+    let mut done = |start: egui::layers::ShapeIdx, rect: Rect| painted.push(PaintedObject { shapes: start.0..p.add(egui::Shape::Noop).0, rect });
     for sp in &sh.shapes {
         let r = anchor_rect(geo, sh, &sp.anchor);
         if !r.intersects(p.clip_rect()) {
             continue;
         }
+        let start = p.add(egui::Shape::Noop);
+        let mut label = true;
         let fill = sp.fill.resolve(&wb.theme).map(theme::color32).unwrap_or(Color32::TRANSPARENT);
         let line = sp.line.resolve(&wb.theme).map(theme::color32).unwrap_or(Color32::DARK_GRAY);
         match sp.kind {
@@ -225,13 +236,13 @@ pub fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workbook, si: 
                     let col = if w > 8.0 { line.gamma_multiply(0.45) } else { line };
                     p.add(PathShape::line(pts, PathStroke::new(w, col)));
                 }
-                continue;
+                label = false;
             }
             ShapeKind::Icon => {
                 if let Some(icon) = crate::icons::from_name(&sp.text) {
                     crate::icons::paint(p, r, icon, if fill == Color32::TRANSPARENT { Color32::BLACK } else { fill });
                 }
-                continue;
+                label = false;
             }
             ShapeKind::Line | ShapeKind::Arrow => {
                 p.line_segment([r.left_top(), r.right_bottom()], Stroke::new(2.0, line));
@@ -243,7 +254,7 @@ pub fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workbook, si: 
                 }
             }
         }
-        if !sp.text.is_empty() && !app.editing_text_box(sp.id) {
+        if label && !sp.text.is_empty() && !app.editing_text_box(sp.id) {
             let job = egui::text::LayoutJob::simple(
                 sp.text.clone(),
                 FontId::new(14.0 * geo.z, egui::FontFamily::Name(theme::CELL.into())),
@@ -254,15 +265,17 @@ pub fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workbook, si: 
             let pos = if sp.kind == ShapeKind::TextBox { r.min + vec2(4.0, 4.0) } else { r.center() - g.size() / 2.0 };
             p.galley(pos, g, Color32::BLACK);
         }
-        if sp.kind == ShapeKind::TextBox && app.selected_chart == Some(sp.id) {
+        if label && sp.kind == ShapeKind::TextBox && app.selected_chart == Some(sp.id) {
             selection_frame(p, r);
         }
+        done(start, r);
     }
     for im in &sh.images {
         let r = anchor_rect(geo, sh, &im.anchor);
         if !r.intersects(p.clip_rect()) {
             continue;
         }
+        let start = p.add(egui::Shape::Noop);
         let key = (im.id, im.data.len());
         let mut cache = TEXTURES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if !cache.contains_key(&key)
@@ -282,12 +295,14 @@ pub fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workbook, si: 
         if app.selected_chart == Some(im.id) {
             selection_frame(p, r);
         }
+        done(start, r);
     }
     for ch in &sh.charts {
         let r = anchor_rect(geo, sh, &ch.anchor);
         if !r.intersects(p.clip_rect()) {
             continue;
         }
+        let start = p.add(egui::Shape::Noop);
         // Soft shadow + white card.
         p.rect_filled(r.translate(vec2(0.0, 1.5)), 2.0, Color32::from_black_alpha(18));
         p.rect_filled(r, 0.0, Color32::WHITE);
@@ -297,6 +312,10 @@ pub fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workbook, si: 
         paint_prims(&p.with_clip_rect(r.intersect(p.clip_rect())), r.min, &prims, geo.z);
         if app.selected_chart == Some(ch.id) {
             selection_frame(p, r);
+        }
+        // The source-data highlight below is in cell space: mirrored with the cells.
+        done(start, r);
+        if app.selected_chart == Some(ch.id) {
             // Highlight the source data like Excel does.
             for s in &ch.series {
                 if let Ok(gridcraft_engine::formula::Expr::Ref(rf)) = gridcraft_engine::formula::parse(&s.values)
@@ -311,6 +330,7 @@ pub fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workbook, si: 
             }
         }
     }
+    painted
 }
 
 fn selection_frame(p: &Painter, r: Rect) {

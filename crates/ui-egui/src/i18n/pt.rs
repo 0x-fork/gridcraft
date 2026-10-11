@@ -124,6 +124,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Remove Page Break" => "Remover Quebra de Página",
         "Reset All Page Breaks" => "Redefinir Todas as Quebras de Página",
         "Print\nTitles" => "Imprimir\nTítulos",
+        "Sheet\nRight-to-Left" => "Planilha da Direita\npara a Esquerda",
+        "Sheet Right-to-Left" => "Planilha da Direita para a Esquerda",
         "Narrow" => "Estreita",
         "Wide" => "Ampla",
         "Normal" => "Normal",
