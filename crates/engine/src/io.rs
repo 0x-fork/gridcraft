@@ -113,6 +113,13 @@ fn rename_first_sheet(wb: &mut Workbook, path: &str) {
 pub fn save_bytes(wb: &Workbook, path: &str) -> Result<Vec<u8>> {
     let sheet = wb.active_sheet;
     match FileKind::from_path(path).unwrap_or(FileKind::Xlsx) {
+        // A macro-free .xlsx can't hold a VBA project (Excel refuses such a file), so only a .xlsm
+        // keeps the macros; any other name saves without them, as Excel does.
+        FileKind::Xlsx if wb.vba_project.is_some() && !path.to_ascii_lowercase().ends_with(".xlsm") => {
+            let mut plain = wb.clone();
+            plain.vba_project = None;
+            gridcraft_xlsx::write_xlsx(&plain).map_err(|e| EngineError::Other(e.to_string()))
+        }
         FileKind::Xlsx => gridcraft_xlsx::write_xlsx(wb).map_err(|e| EngineError::Other(e.to_string())),
         FileKind::Xls => {
             Err(EngineError::Other("Excel 97-2003 (.xls) is supported for import only. Save as .xlsx or another supported export format.".into()))
@@ -365,6 +372,20 @@ pub fn image_size(data: &[u8]) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn macros_are_saved_only_into_xlsm() {
+        let mut wb = Workbook::new();
+        wb.vba_project = Some(b"vba".to_vec());
+        let has_macros = |path: &str| {
+            let bytes = save_bytes(&wb, path).unwrap();
+            gridcraft_xlsx::read_xlsx(&bytes).unwrap().0.vba_project.is_some()
+        };
+        assert!(has_macros("book.xlsm"));
+        assert!(has_macros("BOOK.XLSM"));
+        assert!(!has_macros("book.xlsx"), "an .xlsx never carries a VBA project");
+        assert!(wb.vba_project.is_some(), "the open workbook keeps its macros");
+    }
 
     /// A minimal compound (CFB/OLE2) file — FAT in sector 0, directory in sector 1 — holding a
     /// root entry and the given stream names.

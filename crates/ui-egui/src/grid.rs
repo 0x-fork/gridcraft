@@ -2272,6 +2272,9 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
                     Key::Space if !cmd && !shift && is_checkbox(sh, app) => app.run_or_alert("cell.toggleCheckbox", json!({})),
                     Key::Space if cmd && !shift => app.run_or_alert("selection.column", json!({})),
                     Key::Space if shift && !cmd => app.run_or_alert("selection.row", json!({})),
+                    Key::F8 if m.alt => {
+                        app.open_dialog("macros", json!({}));
+                    }
                     Key::F9 => app.run_or_alert("formulas.calculateNow", json!({})),
                     Key::F4 if !cmd => {}
                     _ if cmd => crate::ribbon::shortcut(app, key, m),
@@ -2335,7 +2338,12 @@ fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_open: bool)
     let Some(sh) = wb.sheet(si) else { return };
     let _ = geo;
     // Tables get an autofilter on demand.
-    let table_range = sh.tables.first().filter(|t| col >= t.range.start.col && col <= t.range.end.col).map(|t| t.range);
+    let table_range = sh
+        .tables
+        .iter()
+        .find(|t| t.range.start.row <= at.y as u32 || true)
+        .filter(|t| col >= t.range.start.col && col <= t.range.end.col)
+        .map(|t| t.range);
     if sh.autofilter.is_none()
         && let Some(r) = table_range
     {
