@@ -46,11 +46,53 @@ fn parse_ref(wb: &Workbook, sheet: usize, formula: &str) -> Option<(usize, Range
     Some((sh, r))
 }
 
-/// Evaluates a series formula to a flat list of values (row-major), capped.
+/// The parts of a union reference `(Sheet1!$A$1:$A$3,Sheet1!$A$5)`, or `None`.
+fn union_parts(f: &str) -> Option<Vec<&str>> {
+    let inner = f.strip_prefix('(')?.strip_suffix(')')?;
+    let mut parts = Vec::new();
+    let (mut depth, mut quoted, mut start) = (0i32, false, 0usize);
+    for (i, c) in inner.char_indices() {
+        match c {
+            '\'' => quoted = !quoted,
+            '(' if !quoted => depth += 1,
+            ')' if !quoted => depth -= 1,
+            ',' if !quoted && depth == 0 => {
+                parts.push(inner.get(start..i)?);
+                start = i + 1;
+            }
+            _ => {}
+        }
+        if depth < 0 {
+            return None;
+        }
+    }
+    parts.push(inner.get(start..)?);
+    (parts.len() > 1).then_some(parts)
+}
+
+/// Evaluates a series formula to a flat list of values (row-major), capped. A union of
+/// references (`(A1:A3,A5)`, as PivotCharts use) is read part by part.
 fn eval_list(wb: &Workbook, sheet: usize, formula: &str) -> Vec<Value> {
+    eval_list_in(wb, sheet, formula, 0)
+}
+
+fn eval_list_in(wb: &Workbook, sheet: usize, formula: &str, depth: u32) -> Vec<Value> {
     let f = formula.trim();
     if f.is_empty() {
         return vec![];
+    }
+    if depth < 4
+        && let Some(parts) = union_parts(f)
+    {
+        let mut out = Vec::new();
+        for p in parts {
+            if out.len() >= MAX_POINTS {
+                break;
+            }
+            let rest = MAX_POINTS - out.len();
+            out.extend(eval_list_in(wb, sheet, p, depth + 1).into_iter().take(rest));
+        }
+        return out;
     }
     match evaluate(wb, sheet, CellRef::default(), f) {
         Value::Array(a) => a.iter().take(MAX_POINTS).cloned().collect(),
