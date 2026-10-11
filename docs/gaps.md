@@ -98,8 +98,10 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   data model (`data.fromWeb`, `data.relationships` missing). **Estimate:** 60–100 h.
 
 ### 13. Analysis tools: Solver, Analysis ToolPak, Forecast Sheet (F)
-- `data.solver`, `data.analysisToolPak`, `data.forecastSheet` missing; FORECAST.ETS family missing.
-  **Estimate:** 22–35 h.
+- `data.analysisToolPak`, `data.forecastSheet` missing; FORECAST.ETS family missing. Solver
+  (`data.solver`) has Simplex LP with integer/binary branch and bound and a local nonlinear method
+  (augmented Lagrangian, not GRG); Evolutionary, AllDifferent constraints, Solver options and
+  reports remain. **Estimate:** 16–28 h.
 
 ### 14. Page Layout view and print polish (U, F)
 - No paper view with rulers and in-place header/footer editing; web print exports only (#141, PR

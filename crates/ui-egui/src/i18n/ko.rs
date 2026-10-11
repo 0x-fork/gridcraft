@@ -164,6 +164,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Group" => "그룹",
         "Ungroup" => "그룹 해제",
         "Subtotal" => "부분합",
+        "Solver" => "해 찾기",
         "What-If\nAnalysis" => "가상 분석",
         "Data Table…" => "데이터 표…",
         "Scenario Manager…" => "시나리오 관리자…",

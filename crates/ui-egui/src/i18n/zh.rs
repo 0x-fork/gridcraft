@@ -164,6 +164,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Group" => "组合",
         "Ungroup" => "取消组合",
         "Subtotal" => "分类汇总",
+        "Solver" => "规划求解",
         "What-If\nAnalysis" => "假设分析",
         "Data Table…" => "数据表…",
         "Scenario Manager…" => "方案管理器…",

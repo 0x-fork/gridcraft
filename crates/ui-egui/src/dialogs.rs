@@ -317,6 +317,23 @@ impl Dialog {
                 json!({"header": true}),
             ),
             "goalSeek" => Dialog::custom("goalSeek", "Goal Seek", json!({"set": active, "to": "0", "changing": ""})),
+            "solver" => {
+                // Starts from the sheet's saved model, else the active cell as objective.
+                let saved = app.session.active().and_then(|doc| gridcraft_engine::cmd::solver::saved_model(&doc.wb, doc.wb.active_sheet));
+                let mut values = json!({"objective": active, "goal": "max", "value": "0", "variables": "", "constraints": [], "nonNegative": true, "method": "grg"});
+                if let (Some(m), Some(v)) = (saved.as_ref().and_then(Json::as_object), values.as_object_mut()) {
+                    for (k, x) in m {
+                        v.insert(k.clone(), if k == "value" { json!(x.to_string()) } else { x.clone() });
+                    }
+                }
+                if let Some(v) = values.as_object_mut() {
+                    v.insert("newOp".into(), json!("<="));
+                }
+                let mut d = Dialog::custom("solver", "Solver Parameters", values);
+                d.command = Some("data.solver");
+                d
+            }
+            "solverResults" => Dialog::custom("solverResults", "Solver Results", params.clone()),
             "subtotal" => Dialog::form(
                 "subtotal",
                 "Subtotal",
@@ -659,6 +676,7 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
         "formatCells" => 560.0,
         "about" => 660.0,
         "insertFunction" | "commandSearch" | "nameManager" | "manageRules" | "journal" | "agents" => 520.0,
+        "solver" => 460.0,
         _ => 380.0,
     };
     let window = egui::Window::new(d.title.clone())
@@ -681,6 +699,8 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
                 "manageRules" => manage_rules(app, ui),
                 "commandSearch" => command_search(app, ui, &mut d, &mut confirm),
                 "goalSeek" => goal_seek(app, ui, &mut d, &mut confirm),
+                "solver" => solver(ui, &mut d, &mut confirm, &mut open),
+                "solverResults" => solver_results(app, ui, &mut d, &mut open),
                 "spelling" => spelling(app, ui, &mut d, &mut open),
                 "agents" => {
                     ui.label("GridCraft is fully drivable by agents. Every menu item, button and gesture is a command:");
@@ -877,7 +897,12 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
     if confirm && let Some(cmd) = d.command {
         let params = build_params(&d);
         match app.run(cmd, params) {
-            Ok(_) => open = false,
+            Ok(r) => {
+                open = false;
+                if d.name == "solver" {
+                    app.open_dialog("solverResults", r);
+                }
+            }
             Err(e) => app.message = Some((d.title.clone(), crate::clean_error(&e))),
         }
     } else if confirm {
@@ -1604,6 +1629,144 @@ fn goal_seek(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mu
     }
     if !open {
         *confirm = true;
+    }
+}
+
+/// Data › Solver: the Solver Parameters form. Solve runs `data.solver` through the dialog's
+/// command; the result opens Solver Results.
+fn solver(ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, open: &mut bool) {
+    let text = |d: &Dialog, k: &str| d.values.get(k).map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string())).unwrap_or_default();
+    let edit = |ui: &mut egui::Ui, d: &mut Dialog, k: &str, width: f32| {
+        let mut t = text(d, k);
+        if ui.add(egui::TextEdit::singleline(&mut t).desired_width(width)).changed() {
+            d.values.insert(k.into(), json!(t));
+        }
+    };
+    ui.horizontal(|ui| {
+        ui.label("Set Objective:");
+        edit(ui, d, "objective", 200.0);
+    });
+    let goal = text(d, "goal");
+    ui.horizontal(|ui| {
+        ui.label("To:");
+        for (g, label) in [("max", "Max"), ("min", "Min"), ("value", "Value Of:")] {
+            if ui.radio(goal == g, label).clicked() {
+                d.values.insert("goal".into(), json!(g));
+            }
+        }
+        edit(ui, d, "value", 80.0);
+    });
+    ui.label("By Changing Variable Cells:");
+    edit(ui, d, "variables", 420.0);
+    ui.label("Subject to the Constraints:");
+    let list: Vec<String> = d
+        .values
+        .get("constraints")
+        .and_then(Json::as_array)
+        .map(|a| a.iter().map(|c| c.as_str().map(str::to_string).unwrap_or_else(|| c.to_string())).collect())
+        .unwrap_or_default();
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.set_min_size(vec2(420.0, 90.0));
+        egui::ScrollArea::vertical().max_height(110.0).show(ui, |ui| {
+            for (i, c) in list.iter().enumerate() {
+                if ui.selectable_label(d.list_index == i, c).clicked() {
+                    d.list_index = i;
+                }
+            }
+        });
+    });
+    ui.horizontal(|ui| {
+        edit(ui, d, "newLhs", 110.0);
+        let op = text(d, "newOp");
+        egui::ComboBox::from_id_salt("solverOp").selected_text(op.clone()).width(60.0).show_ui(ui, |ui| {
+            for o in ["<=", "=", ">=", "int", "bin"] {
+                if ui.selectable_label(op == o, o).clicked() {
+                    d.values.insert("newOp".into(), json!(o));
+                }
+            }
+        });
+        if !matches!(op.as_str(), "int" | "bin") {
+            edit(ui, d, "newRhs", 110.0);
+        }
+        if ui.button("Add").clicked() {
+            let lhs = text(d, "newLhs");
+            if !lhs.trim().is_empty() {
+                let rhs = if matches!(op.as_str(), "int" | "bin") { String::new() } else { format!(" {}", text(d, "newRhs").trim()) };
+                let mut list = list.clone();
+                list.push(format!("{} {op}{rhs}", lhs.trim()));
+                d.values.insert("constraints".into(), json!(list));
+                d.values.insert("newLhs".into(), json!(""));
+                d.values.insert("newRhs".into(), json!(""));
+            }
+        }
+        if ui.add_enabled(d.list_index < list.len(), egui::Button::new("Delete")).clicked() {
+            let mut list = list.clone();
+            if d.list_index < list.len() {
+                list.remove(d.list_index);
+            }
+            d.values.insert("constraints".into(), json!(list));
+        }
+    });
+    let mut nonneg = d.values.get("nonNegative").and_then(Json::as_bool).unwrap_or(true);
+    if ui.checkbox(&mut nonneg, "Make Unconstrained Variables Non-Negative").changed() {
+        d.values.insert("nonNegative".into(), json!(nonneg));
+    }
+    let method = text(d, "method");
+    ui.horizontal(|ui| {
+        ui.label("Select a Solving Method:");
+        let label = |m: &str| if m == "simplex" { "Simplex LP" } else { "GRG Nonlinear" };
+        egui::ComboBox::from_id_salt("solverMethod").selected_text(label(&method)).show_ui(ui, |ui| {
+            for m in ["grg", "simplex"] {
+                if ui.selectable_label(method == m, label(m)).clicked() {
+                    d.values.insert("method".into(), json!(m));
+                }
+            }
+        });
+    });
+    ui.label(
+        egui::RichText::new(if method == "simplex" {
+            "Simplex LP: for linear models; integer and binary constraints by branch and bound."
+        } else {
+            "GRG Nonlinear: a local optimum of a smooth model, from the current values."
+        })
+        .small(),
+    );
+    ui.add_space(8.0);
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        let solve =
+            ui.add(egui::Button::new(egui::RichText::new("  Solve  ").color(Color32::WHITE)).fill(crate::theme::Tokens::get(ui.ctx()).accent));
+        if solve.clicked() && !text(d, "objective").trim().is_empty() {
+            *confirm = true;
+        }
+        if ui.button(" Close ").clicked() {
+            *open = false;
+        }
+    });
+}
+
+/// Solver Results: the outcome, and keeping or restoring the variable cells.
+fn solver_results(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, open: &mut bool) {
+    let message = d.values.get("message").and_then(Json::as_str).unwrap_or("").to_string();
+    ui.label(message);
+    let changed = d.values.get("changed").and_then(Json::as_bool).unwrap_or(false);
+    let restore = d.values.get("restore").and_then(Json::as_bool).unwrap_or(false);
+    if changed {
+        ui.add_space(4.0);
+        if ui.radio(!restore, "Keep Solver Solution").clicked() {
+            d.values.insert("restore".into(), json!(false));
+        }
+        if ui.radio(restore, "Restore Original Values").clicked() {
+            d.values.insert("restore".into(), json!(true));
+        }
+    }
+    let mut confirm = false;
+    ok_cancel(ui, &mut confirm, open);
+    if confirm {
+        // The solution (and the saved model) is one undo step.
+        if changed && restore {
+            app.run_or_alert("edit.undo", json!({}));
+        }
+        *open = false;
     }
 }
 

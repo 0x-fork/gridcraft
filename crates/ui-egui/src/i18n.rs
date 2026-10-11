@@ -313,6 +313,7 @@ const JAPANESE: &[(&str, &str)] = &[
     ("Group", "グループ化"),
     ("Ungroup", "グループ解除"),
     ("Subtotal", "小計"),
+    ("Solver", "ソルバー"),
     ("What-If\nAnalysis", "What-If 分析"),
     ("Data Table…", "データ テーブル…"),
     ("Scenario Manager…", "シナリオ マネージャー…"),
