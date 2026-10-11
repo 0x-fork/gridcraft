@@ -291,6 +291,10 @@ pub struct Comment {
     pub threaded: bool,
     pub resolved: bool,
     pub visible: bool,
+    /// Threaded comments: when the thread (first entry) and each reply were written, ISO 8601 as
+    /// read from the file (`dT`); empty when unknown, e.g. for comments made here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dates: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

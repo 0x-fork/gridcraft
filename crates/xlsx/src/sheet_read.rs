@@ -198,6 +198,15 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
             read_threaded(cx, &x, &mut sheet);
         }
     }
+    // Which notes are displayed lives in the VML shapes (`<x:Visible/>`). Best effort: the VML is
+    // only read for that flag, so a part that doesn't parse is skipped without a warning.
+    if !sheet.comments.is_empty() {
+        for rel in rels.iter().filter(|r| r.kind == "vmlDrawing") {
+            if let Ok(Some(x)) = cx.pkg.read_xml(&rel.target) {
+                read_note_visibility(&x, &mut sheet, 0);
+            }
+        }
+    }
     Ok(sheet)
 }
 
@@ -785,33 +794,68 @@ fn read_comments(x: &El, sheet: &mut Sheet) {
         {
             text = rest.strip_prefix('\n').unwrap_or(rest).to_string();
         }
-        sheet.comments.insert(cell, Comment { author, text, replies: vec![], threaded: false, resolved: false, visible: false });
+        sheet.comments.insert(cell, Comment { author, text, replies: vec![], threaded: false, resolved: false, visible: false, dates: vec![] });
+    }
+}
+
+/// Marks the notes whose VML shape carries `<x:Visible/>` as shown. Shapes may sit in groups.
+fn read_note_visibility(x: &El, sheet: &mut Sheet, depth: usize) {
+    if depth > xml::MAX_DEPTH {
+        return;
+    }
+    for e in &x.children {
+        if e.name != "shape" {
+            read_note_visibility(e, sheet, depth + 1);
+            continue;
+        }
+        let Some(cd) = e.child("ClientData").filter(|cd| cd.attr("ObjectType") == Some("Note")) else { continue };
+        if cd.child("Visible").is_none() {
+            continue;
+        }
+        let num = |k: &str| cd.child(k).and_then(|v| v.text.trim().parse::<u32>().ok());
+        if let (Some(row), Some(col)) = (num("Row"), num("Column"))
+            && let Some(c) = sheet.comments.get_mut(&CellRef::new(row, col))
+            && !c.threaded
+        {
+            c.visible = true;
+        }
     }
 }
 
 fn read_threaded(cx: &Ctx<'_>, x: &El, sheet: &mut Sheet) {
     let mut by_id: HashMap<String, CellRef> = HashMap::new();
-    let mut replies: Vec<(String, String, String)> = vec![];
+    let mut replies: Vec<(String, String, String, String)> = vec![];
     for t in x.kids("threadedComment") {
         let Some(cell) = t.attr("ref").and_then(CellRef::parse) else { continue };
         let author = t.attr("personId").and_then(|p| cx.persons.get(p)).cloned().unwrap_or_default();
         let text = t.child("text").map(|e| e.text.clone()).unwrap_or_default();
+        let date = t.attr("dT").unwrap_or("").to_string();
         match t.attr("parentId") {
-            Some(p) => replies.push((p.to_string(), author, text)),
+            Some(p) => replies.push((p.to_string(), author, text, date)),
             None => {
                 if let Some(id) = t.attr("id") {
                     by_id.insert(id.to_string(), cell);
                 }
+                let dates = if date.is_empty() { vec![] } else { vec![date] };
                 sheet
                     .comments
-                    .insert(cell, Comment { author, text, replies: vec![], threaded: true, resolved: t.flag("done", false), visible: false });
+                    .insert(cell, Comment { author, text, replies: vec![], threaded: true, resolved: t.flag("done", false), visible: false, dates });
             }
         }
     }
-    for (parent, author, text) in replies {
+    // Replies in file order; ones whose thread is missing are dropped.
+    for (parent, author, text, date) in replies {
         if let Some(c) = by_id.get(&parent)
             && let Some(cm) = sheet.comments.get_mut(c)
         {
+            if !date.is_empty() {
+                // `dates[0]` is the thread, `dates[i + 1]` reply i; unknown dates stay empty.
+                let at = cm.replies.len() + 1;
+                if cm.dates.len() < at {
+                    cm.dates.resize(at, String::new());
+                }
+                cm.dates.push(date);
+            }
             cm.replies.push((author, text));
         }
     }
