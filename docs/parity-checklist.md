@@ -4,27 +4,27 @@
 
 Each entry is an Excel ribbon or menu command (feature names only). It counts as implemented when GridCraft registers a command with the same id. This measures breadth only; the overall assessment (depth, fidelity, effort) is in [target-app-parity.md](target-app-parity.md).
 
-**Overall: 263 / 290 commands implemented (90.7%).**
+**Overall: 271 / 290 commands implemented (93.4%).**
 
 | Tab | Implemented | Total | Parity |
 |---|---|---|---|
-| File | 10 | 11 | 91% |
+| File | 11 | 11 | 100% |
 | Home | 94 | 94 | 100% |
-| Insert | 15 | 25 | 60% |
+| Insert | 16 | 25 | 64% |
 | Draw | 4 | 4 | 100% |
 | Page Layout | 23 | 23 | 100% |
 | Formulas | 23 | 23 | 100% |
-| Data | 20 | 28 | 71% |
-| Review | 14 | 18 | 78% |
-| View | 18 | 20 | 90% |
+| Data | 22 | 28 | 79% |
+| Review | 15 | 18 | 83% |
+| View | 20 | 20 | 100% |
 | Automate | 3 | 3 | 100% |
 | Table Design | 12 | 13 | 92% |
 | Chart Design | 8 | 8 | 100% |
 | Format | 3 | 3 | 100% |
-| PivotTable Analyze | 12 | 13 | 92% |
+| PivotTable Analyze | 13 | 13 | 100% |
 | PivotTable Design | 4 | 4 | 100% |
 
-## File (10 / 11, 91%)
+## File (11 / 11, 100%)
 
 Implemented:
 
@@ -38,9 +38,6 @@ Implemented:
 - `file.exportCsv` CSV (Export)
 - `file.exportHtml` Web Page (Export)
 - `file.properties` Properties (Info)
-
-Missing:
-
 - `file.options` Options (Options)
 
 ## Home (94 / 94, 100%)
@@ -142,7 +139,7 @@ Implemented:
 - `edit.goToSpecial` Go To Special (Editing)
 - `home.addIns` Add-ins (Add-ins)
 
-## Insert (15 / 25, 60%)
+## Insert (16 / 25, 64%)
 
 Implemented:
 
@@ -154,6 +151,7 @@ Implemented:
 - `insert.icons` Icons (Illustrations)
 - `insert.recommendedCharts` Recommended Charts (Charts)
 - `insert.chart` Charts (Charts)
+- `insert.pivotChart` PivotChart (Charts)
 - `insert.sparkline` Sparklines (Sparklines)
 - `insert.link` Link (Links)
 - `review.newComment` Comment (Comments)
@@ -166,7 +164,6 @@ Missing:
 
 - `insert.smartArt` SmartArt (Illustrations)
 - `insert.screenshot` Screenshot (Illustrations)
-- `insert.pivotChart` PivotChart (Charts)
 - `insert.map` Maps (Charts)
 - `insert.slicer` Slicer (Filters)
 - `insert.timeline` Timeline (Filters)
@@ -240,7 +237,7 @@ Implemented:
 - `formulas.calculateNow` Calculate Now (Calculation)
 - `formulas.calculateSheet` Calculate Sheet (Calculation)
 
-## Data (20 / 28, 71%)
+## Data (22 / 28, 79%)
 
 Implemented:
 
@@ -264,6 +261,8 @@ Implemented:
 - `data.subtotal` Subtotal (Outline)
 - `data.showDetail` Show Detail (Outline)
 - `data.hideDetail` Hide Detail (Outline)
+- `data.solver` Solver (Analysis)
+- `data.analysisToolPak` Data Analysis (Analysis)
 
 Missing:
 
@@ -273,10 +272,8 @@ Missing:
 - `data.relationships` Relationships (Data Tools)
 - `data.forecastSheet` Forecast Sheet (Forecast)
 - `data.analyzeData` Analyze Data (Analysis)
-- `data.solver` Solver (Analysis)
-- `data.analysisToolPak` Data Analysis (Analysis)
 
-## Review (14 / 18, 78%)
+## Review (15 / 18, 83%)
 
 Implemented:
 
@@ -294,15 +291,15 @@ Implemented:
 - `review.convertToComments` Convert to Comments (Notes)
 - `review.unprotectSheet` Unprotect Sheet (Protect)
 - `review.protectWorkbook` Protect Workbook (Protect)
+- `review.allowEditRanges` Allow Edit Ranges (Protect)
 
 Missing:
 
 - `review.smartLookup` Smart Lookup (Insights)
 - `review.translate` Translate (Language)
-- `review.allowEditRanges` Allow Edit Ranges (Protect)
 - `review.showChanges` Show Changes (Changes)
 
-## View (18 / 20, 90%)
+## View (20 / 20, 100%)
 
 Implemented:
 
@@ -311,7 +308,9 @@ Implemented:
 - `view.pageLayout` Page Layout (Workbook Views)
 - `view.customViews` Custom Views (Workbook Views)
 - `view.ruler` Ruler (Show)
+- `view.formulaBar` Formula Bar (Show)
 - `view.zoom` Zoom (Zoom)
+- `view.zoom100` 100% (Zoom)
 - `view.zoomToSelection` Zoom to Selection (Zoom)
 - `view.newWindow` New Window (Window)
 - `view.arrangeAll` Arrange All (Window)
@@ -324,11 +323,6 @@ Implemented:
 - `view.unhideWindow` Unhide (Window)
 - `view.switchWindows` Switch Windows (Window)
 - `view.macros` Macros (Macros)
-
-Missing:
-
-- `view.formulaBar` Formula Bar (Show)
-- `view.zoom100` 100% (Zoom)
 
 ## Automate (3 / 3, 100%)
 
@@ -380,13 +374,14 @@ Implemented:
 - `chart.shapeFill` Shape Fill (Shape Styles)
 - `chart.shapeOutline` Shape Outline (Shape Styles)
 
-## PivotTable Analyze (12 / 13, 92%)
+## PivotTable Analyze (13 / 13, 100%)
 
 Implemented:
 
 - `pivot.fieldList` Field List (Show)
 - `pivot.refresh` Refresh (Data)
 - `pivot.changeSource` Change Data Source (Data)
+- `pivot.calculatedField` Fields, Items & Sets (Calculations)
 - `pivot.addField` Add Field (Fields)
 - `pivot.removeField` Remove Field (Fields)
 - `pivot.moveField` Move Field (Fields)
@@ -396,10 +391,6 @@ Implemented:
 - `pivot.group` Group Field (Group)
 - `pivot.collapse` Collapse Field (Active Field)
 - `pivot.delete` Clear All (Actions)
-
-Missing:
-
-- `pivot.calculatedField` Fields, Items & Sets (Calculations)
 
 ## PivotTable Design (4 / 4, 100%)
 

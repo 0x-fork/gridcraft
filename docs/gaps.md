@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (comment navigation, Show All Notes and Convert to Comments landed, #281) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (§15: the ODD* bond functions landed) · **Target:** Microsoft Excel (Microsoft 365)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -70,9 +70,9 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   routine in business.
 - **Estimate:** 28–42 h (`.xls` read 20–30, encryption 8–12). [file-format-parity.md](file-format-parity.md)
 
-### 8. PivotTables: no slicers, calculated fields, PivotCharts; unverified in Excel (F)
+### 8. PivotTables: no slicers, calculated items, PivotCharts; unverified in Excel (F)
 - **Evidence:** `parity-checklist.md` missing `insert.slicer`, `insert.timeline`,
-  `insert.pivotChart`, `pivot.calculatedField`, `table.insertSlicer`; GETPIVOTDATA missing.
+  `insert.pivotChart`, `table.insertSlicer`; calculated items and GETPIVOTDATA missing (calculated fields done).
 - **Impact:** pivots are the analyst's main tool.
 - **Estimate:** 20–30 h for beta (25–40 h full).
 
@@ -98,20 +98,24 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   data model (`data.fromWeb`, `data.relationships` missing). **Estimate:** 60–100 h.
 
 ### 13. Analysis tools: Solver, Analysis ToolPak, Forecast Sheet (F)
-- `data.solver`, `data.analysisToolPak`, `data.forecastSheet` missing; FORECAST.ETS family missing.
-  **Estimate:** 22–35 h.
+- `data.solver`, `data.analysisToolPak`, `data.forecastSheet` missing (the FORECAST.ETS family the
+  Forecast Sheet builds on is in). **Estimate:** 18–30 h.
 
 ### 14. Page Layout view and print polish (U, F)
 - No paper view with rulers and in-place header/footer editing; web print exports only (#141, PR
   #143). **Estimate:** 12–20 h.
 
 ### 15. Remaining functions and an oracle suite (F)
-- 22 missing, 9 stubs; no Excel-computed oracle corpus; #137, #138. **Estimate:** 18–30 h.
+- 18 missing, 9 stubs; no Excel-computed oracle corpus; #137, #138. **Estimate:** 16–26 h.
+- 20 missing, 9 stubs; no Excel-computed oracle corpus; #137, #138. **Estimate:** 17–29 h.
+- 21 missing, 9 stubs; no Excel-computed oracle corpus; #137, #138. **Estimate:** 18–30 h.
+- 21 missing, 9 stubs; trim-reference operators (`A1:.E10`) not parsed; no Excel-computed oracle corpus; #137, #138. **Estimate:** 18–30 h.
+- 18 missing, 9 stubs; no Excel-computed oracle corpus; #137, #138. **Estimate:** 18–30 h.
   [function-parity.md](function-parity.md)
 
 ### 16. Collaboration and review (F)
-- No co-authoring, Show Changes, Allow Edit Ranges; threaded comments are saved to XLSX as notes
-  (no `threadedComments` part yet); cloud storage requested (#86). **Estimate:** 35–55 h (co-authoring scope needs the owner).
+- No co-authoring, Show Changes, comment navigation, notes ↔ comments
+  conversion; cloud storage requested (#86). **Estimate:** 35–55 h (co-authoring scope needs the owner).
 
 ### 17. Insert objects (F)
 - SmartArt, WordArt, equations, signature line, objects, 3-D models, screenshot; 8 shape kinds vs
@@ -150,6 +154,14 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-11 | minor | §16: comment navigation, Show Comments, Show All Notes and Convert to Comments landed (#281) |
+| 2026-10-11 | minor | §15: ODDFPRICE, ODDFYIELD, ODDLPRICE, ODDLYIELD added (18 functions missing) |
+| 2026-10-11 | minor | §15: PERCENTOF and EUROCONVERT added (20 functions missing) |
+| 2026-10-11 | minor | §15: BAHTTEXT added (21 functions missing) |
+| 2026-10-11 | minor | §15: TRIMRANGE added (21 functions missing; trim-reference operators still missing) |
+| 2026-10-11 | minor | §16: Allow Edit Ranges landed (#307) |
+| 2026-10-11 | minor | §8: calculated fields added |
+| 2026-10-11 | minor | §8: PivotCharts added |
+| 2026-10-11 | minor | §13, §15: FORECAST.ETS family landed (#314) |
 | 2026-10-10 | minor | Updated for the 10-10 merges (#17, #31, #38, #62, #82, #104, #116) and the new chart resize bug (#190) |
 | 2026-10-10 | minor | Noted that no gap blocks the alpha gate |
 | 2026-10-10 | major | Created: 24 ranked gaps with evidence, from the full re-measure and the 60 open issues |

@@ -9,6 +9,9 @@
 
 use serde::{Deserialize, Serialize};
 
+mod cs;
+mod de;
+mod es;
 mod ko;
 mod pt;
 mod ru;
@@ -26,10 +29,12 @@ pub enum Language {
     Ru,
     #[serde(rename = "pt")]
     PtBr,
+    De,
+    Cs,
 }
 
 impl Language {
-    pub const ALL: [Self; 7] = [Self::En, Self::Es, Self::Zh, Self::Ja, Self::Ko, Self::Ru, Self::PtBr];
+    pub const ALL: [Self; 9] = [Self::En, Self::Es, Self::Zh, Self::Ja, Self::Ko, Self::Ru, Self::PtBr, Self::De, Self::Cs];
 
     /// The language's own name, shown in the switcher.
     pub fn name(self) -> &'static str {
@@ -41,6 +46,8 @@ impl Language {
             Self::Ko => "한국어",
             Self::Ru => "Русский",
             Self::PtBr => "Português (Brasil)",
+            Self::De => "Deutsch",
+            Self::Cs => "Čeština",
         }
     }
 
@@ -54,6 +61,8 @@ impl Language {
             Self::Ko => "ko",
             Self::Ru => "ru",
             Self::PtBr => "pt",
+            Self::De => "de",
+            Self::Cs => "cs",
         }
     }
 
@@ -70,6 +79,8 @@ impl Language {
             "ko" => Some(Self::Ko),
             "ru" => Some(Self::Ru),
             "pt" => Some(Self::PtBr),
+            "de" => Some(Self::De),
+            "cs" => Some(Self::Cs),
             _ => None,
         }
     }
@@ -97,12 +108,15 @@ impl Language {
     /// "Orientation") is keyed `context|label`: English shows only the part after the `|`.
     pub fn tr(self, text: &str) -> &str {
         let translated = match self {
-            Self::En | Self::Es => None,
+            Self::En => None,
+            Self::Es => es::translate(text),
             Self::Ja => JAPANESE.iter().find(|(english, _)| *english == text).map(|(_, translated)| *translated),
             Self::Zh => zh::translate(text),
             Self::Ko => ko::translate(text),
             Self::Ru => ru::translate(text),
             Self::PtBr => pt::translate(text),
+            Self::De => de::translate(text),
+            Self::Cs => cs::translate(text),
         };
         translated.unwrap_or_else(|| text.rsplit_once('|').map_or(text, |(_, label)| label))
     }
@@ -257,6 +271,8 @@ const JAPANESE: &[(&str, &str)] = &[
     ("Link", "リンク"),
     ("Symbol", "記号"),
     ("Sparklines", "スパークライン"),
+    ("Checkbox", "チェックボックス"),
+    ("Insert checkboxes in the selected cells", "選択したセルにチェックボックスを挿入"),
     ("Header & Footer", "ヘッダーとフッター"),
     ("Draw with ink", "インクで描画"),
     ("Eraser", "消しゴム"),
@@ -272,6 +288,8 @@ const JAPANESE: &[(&str, &str)] = &[
     ("Remove Page Break", "改ページの解除"),
     ("Reset All Page Breaks", "すべての改ページを解除"),
     ("Print\nTitles", "印刷タイトル"),
+    ("Sheet\nRight-to-Left", "シートを右から左へ"),
+    ("Sheet Right-to-Left", "シートを右から左へ"),
     ("Narrow", "狭い"),
     ("Wide", "広い"),
     ("Normal", "標準"),
@@ -313,6 +331,9 @@ const JAPANESE: &[(&str, &str)] = &[
     ("Group", "グループ化"),
     ("Ungroup", "グループ解除"),
     ("Subtotal", "小計"),
+    ("Data\nAnalysis", "データ分析"),
+    ("Data Analysis", "データ分析"),
+    ("Solver", "ソルバー"),
     ("What-If\nAnalysis", "What-If 分析"),
     ("Data Table…", "データ テーブル…"),
     ("Scenario Manager…", "シナリオ マネージャー…"),
@@ -328,6 +349,8 @@ const JAPANESE: &[(&str, &str)] = &[
     ("Show All Notes", "すべてのメモを表示"),
     ("Convert to Comments", "コメントに変換"),
     ("Protect\nWorkbook", "ブックの保護"),
+    ("Allow Edit\nRanges", "範囲の編集を許可"),
+    ("Allow Edit Ranges", "範囲の編集を許可"),
     ("Unprotect\nSheet", "シート保護の解除"),
     ("Protect Sheet…", "シートの保護…"),
     ("Comments", "コメント"),
@@ -351,6 +374,10 @@ const JAPANESE: &[(&str, &str)] = &[
     ("Light", "ライト"),
     ("Dark", "ダーク"),
     ("Interface language", "表示言語"),
+    ("Interface size", "表示サイズ"),
+    ("Auto", "自動"),
+    ("Drag to freeze columns", "ドラッグして列を固定"),
+    ("Drag to freeze rows", "ドラッグして行を固定"),
     ("Command\nPalette", "コマンド パレット"),
     ("Agent\nControl", "エージェント制御"),
     ("Action\nJournal", "操作ジャーナル"),
@@ -359,6 +386,7 @@ const JAPANESE: &[(&str, &str)] = &[
     ("Add Chart\nElement", "グラフ要素を追加"),
     ("Change\nChart Type", "グラフの種類の変更"),
     ("Switch\nRow/Column", "行/列の切り替え"),
+    ("Select\nData", "データの選択"),
     ("Data Labels: None", "データ ラベル: なし"),
     ("Data Labels: Show", "データ ラベル: 表示"),
     ("Legend: None", "凡例: なし"),
@@ -422,6 +450,67 @@ const JAPANESE: &[(&str, &str)] = &[
     ("More\nFunctions", "その他の関数"),
     ("Sheet Options|View", "画面"),
     ("Print", "印刷"),
+    // File › Backstage view.
+    ("File", "ファイル"),
+    ("Back", "戻る"),
+    ("New", "新規"),
+    ("Open", "開く"),
+    ("Info", "情報"),
+    ("Save", "上書き保存"),
+    ("Save As", "名前を付けて保存"),
+    ("Export", "エクスポート"),
+    ("Close", "閉じる"),
+    ("Options", "オプション"),
+    ("Blank workbook", "空白のブック"),
+    ("Recent", "最近使ったアイテム"),
+    ("No recent workbooks yet.", "最近使ったブックはまだありません。"),
+    ("More workbooks", "その他のブック"),
+    ("Browse…", "参照…"),
+    ("Not saved yet", "まだ保存されていません"),
+    ("Location", "場所"),
+    ("Sheets", "シート"),
+    ("Protect Workbook", "ブックの保護"),
+    (
+        "Sheet structure is locked: sheets can't be added, moved, renamed or deleted.",
+        "シートの構成はロックされています。シートの追加、移動、名前の変更、削除はできません。",
+    ),
+    (
+        "Lock the sheet structure so sheets can't be added, moved, renamed or deleted.",
+        "シートの構成をロックして、シートの追加、移動、名前の変更、削除をできないようにします。",
+    ),
+    ("Properties", "プロパティ"),
+    ("Title", "タイトル"),
+    ("Subject", "件名"),
+    ("Author", "作成者"),
+    ("Company", "会社名"),
+    ("Keywords", "キーワード"),
+    ("Description", "説明"),
+    ("No workbook is open.", "ブックが開かれていません。"),
+    ("Save the workbook under another name or in another folder.", "ブックを別の名前または別のフォルダーに保存します。"),
+    ("Download (.xlsx)", "ダウンロード (.xlsx)"),
+    ("PDF, CSV and web pages are on the Export page.", "PDF、CSV、Web ページは [エクスポート] ページにあります。"),
+    ("Print Active Sheets", "作業中のシートを印刷"),
+    ("Print Entire Workbook", "ブック全体を印刷"),
+    ("Fit Sheet on One Page", "シートを 1 ページに印刷"),
+    ("Page Setup…", "ページ設定…"),
+    ("Page {page} of {pages}", "{page} / {pages} ページ"),
+    ("Nothing to print.", "印刷する内容がありません。"),
+    ("Previous page", "前のページ"),
+    ("Next page", "次のページ"),
+    ("Create PDF", "PDF の作成"),
+    ("Save the sheet as a PDF document that keeps its page layout.", "ページ レイアウトを保ったまま、シートを PDF ドキュメントとして保存します。"),
+    ("Change File Type", "ファイルの種類の変更"),
+    ("CSV (Comma delimited)", "CSV (コンマ区切り)"),
+    ("Save the active sheet as comma-separated text.", "作業中のシートをコンマ区切りのテキストとして保存します。"),
+    ("Web Page (.html)", "Web ページ (.html)"),
+    ("Save the workbook as a web page.", "ブックを Web ページとして保存します。"),
+    ("Options|General", "全般"),
+    ("Options|Save", "保存"),
+    ("Show formula bar", "数式バーを表示する"),
+    ("Save .xlsx workbooks automatically after every change", "変更のたびに .xlsx ブックを自動的に保存する"),
+    ("Workbook calculation", "ブックの計算"),
+    ("Enable iterative calculation", "反復計算を行う"),
+    ("Calculation settings are saved with the workbook.", "計算の設定はブックと共に保存されます。"),
 ];
 
 #[cfg(test)]
@@ -440,22 +529,36 @@ mod tests {
             assert!(ko::translate(english).is_some_and(|text| !text.is_empty()), "missing Korean: {english}");
             assert!(ru::translate(english).is_some_and(|text| !text.is_empty()), "missing Russian: {english}");
             assert!(pt::translate(english).is_some_and(|text| !text.is_empty()), "missing Portuguese: {english}");
+            assert!(es::translate(english).is_some_and(|text| !text.is_empty()), "missing Spanish: {english}");
+            assert!(de::translate(english).is_some_and(|text| !text.is_empty()), "missing German: {english}");
+            assert!(cs::translate(english).is_some_and(|text| !text.is_empty()), "missing Czech: {english}");
         }
         assert_eq!(Language::Ja.tr("Data"), "データ");
         assert_eq!(Language::Zh.tr("Data"), "数据");
         assert_eq!(Language::Ko.tr("Data"), "데이터");
         assert_eq!(Language::Ru.tr("Data"), "Данные");
         assert_eq!(Language::PtBr.tr("Data"), "Dados");
+        assert_eq!(Language::Es.tr("Data"), "Datos");
+        assert_eq!(Language::Es.tr("Freeze Panes"), "Inmovilizar paneles");
+        assert_eq!(Language::Es.tr("Sheet1!A1"), "Sheet1!A1");
+        assert_eq!(Language::De.tr("Data"), "Daten");
+        assert_eq!(Language::De.tr("Sheet1!A1"), "Sheet1!A1");
         assert_eq!(Language::PtBr.tr("Date"), "Data");
         assert_eq!(Language::PtBr.tr("Sheet1!A1"), "Sheet1!A1");
         assert_eq!(Language::Ja.tr("Sheet1!A1"), "Sheet1!A1");
         assert_eq!(Language::Zh.tr("Sheet1!A1"), "Sheet1!A1");
         assert_eq!(Language::Ko.tr("Sheet1!A1"), "Sheet1!A1");
         assert_eq!(Language::Ru.tr("Sheet1!A1"), "Sheet1!A1");
+        // Czech "Data" is spelled as in English, so probe it with a label that differs.
+        assert_eq!(Language::Cs.tr("Data"), "Data");
+        assert_eq!(Language::Cs.tr("Formulas"), "Vzorce");
+        assert_eq!(Language::Cs.tr("Sheet1!A1"), "Sheet1!A1");
         // A `context|label` key shows only its label in English and splits the translation.
         assert_eq!(Language::En.tr("Page Layout|Orientation"), "Orientation");
         assert_eq!(Language::Ja.tr("Page Layout|Orientation"), "印刷の向き");
         assert_eq!(Language::Ja.tr("Orientation"), "方向");
+        assert_eq!(Language::Cs.tr("Page Layout|Orientation"), "Orientace");
+        assert_eq!(Language::Cs.tr("Orientation"), "Orientace textu");
         assert_eq!(Language::parse("xx"), None);
     }
 
@@ -482,10 +585,15 @@ mod tests {
         assert_eq!(Language::from_tag("zh-Hans-CN"), Some(Language::Zh));
         assert_eq!(Language::from_tag("ko-KR"), Some(Language::Ko));
         assert_eq!(Language::from_tag("RU_ru"), Some(Language::Ru));
-        assert_eq!(Language::from_tag("de-DE"), None);
+        assert_eq!(Language::from_tag("de-DE"), Some(Language::De));
+        assert_eq!(Language::from_tag("de_AT"), Some(Language::De));
+        assert_eq!(Language::from_tag("de-CH"), Some(Language::De));
         assert_eq!(Language::from_tag("pt-BR"), Some(Language::PtBr));
         assert_eq!(Language::parse("pt"), Some(Language::PtBr));
         assert_eq!(Language::parse("pt-br"), Some(Language::PtBr));
+        assert_eq!(Language::from_tag("cs-CZ"), Some(Language::Cs));
+        assert_eq!(Language::from_tag("cs_CZ.UTF-8"), Some(Language::Cs));
+        assert_eq!(Language::parse("cs"), Some(Language::Cs));
     }
 
     #[test]

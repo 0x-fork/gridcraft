@@ -1,4 +1,4 @@
-//! File menu: new, open, save, close, export, properties.
+//! File menu: new, open, save, close, export, properties, options.
 
 use serde_json::{Value as Json, json};
 
@@ -16,6 +16,15 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "file.exportCsv", "Export as CSV", ["File", "Export"], None, "{path, sheet?}", has_doc, |s, p| export(s, p, "csv")),
         cmd!(noundo "file.exportHtml", "Save as Web Page", ["File", "Export"], None, "{path}", has_doc, |s, p| export(s, p, "html")),
         cmd!("file.properties", "Properties", ["File"], None, "{title?, subject?, author?, company?, keywords?, description?}", has_doc, properties),
+        cmd!(
+            query "file.options",
+            "Options",
+            ["File"],
+            None,
+            "{} → {calculation: {mode, iterative, maxIterations, maxChange}} for the active workbook (the interface opens File › Options; change settings with their own commands, e.g. formulas.calculationOptions, view.theme, app.language.set)",
+            always,
+            options
+        ),
         cmd!(noundo "window.activate", "Switch Window", ["Window"], None, "{index}", has_doc, activate_window),
     ]
 }
@@ -154,6 +163,22 @@ fn properties(s: &mut Session, p: &Json) -> Result<Json> {
         }
         Ok(serde_json::to_value(&cx.wb.props).unwrap_or_default())
     })
+}
+
+/// File › Options: reports the workbook-level settings and asks the interface to show its Options
+/// page. Nothing changes here; every setting has its own command.
+fn options(s: &mut Session, _: &Json) -> Result<Json> {
+    s.ui_requests.push(crate::UiRequest::Dialog("options".into(), json!({})));
+    let calculation = s.active().map(|d| {
+        let c = &d.wb.calc;
+        let mode = match c.mode {
+            gridcraft_model::CalcMode::Automatic => "automatic",
+            gridcraft_model::CalcMode::AutomaticExceptTables => "automaticExceptTables",
+            gridcraft_model::CalcMode::Manual => "manual",
+        };
+        json!({"mode": mode, "iterative": c.iterative, "maxIterations": c.max_iterations, "maxChange": c.max_change})
+    });
+    Ok(json!({"calculation": calculation}))
 }
 
 fn activate_window(s: &mut Session, p: &Json) -> Result<Json> {
