@@ -7,9 +7,9 @@ use gridcraft_core::RangeRef;
 use gridcraft_formula::quote_sheet;
 use gridcraft_model::{CalcMode, Style, Visibility, Workbook};
 
-use crate::IoError;
 use crate::package::ZipOut;
 use crate::xml::{esc, esc_attr};
+use crate::{IoError, XlsxKind};
 
 pub const NS_MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 pub const NS_REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -20,10 +20,6 @@ pub const CT_DRAWING: &str = "application/vnd.openxmlformats-officedocument.draw
 pub const CT_CHART: &str = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
 pub const CT_TABLE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
 pub const CT_COMMENTS: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml";
-/// Main workbook part: macro-free and macro-enabled variants (Excel refuses a `.xlsm` whose main
-/// part uses the macro-free content type, and vice versa).
-pub const CT_WORKBOOK_MAIN: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml";
-pub const CT_WORKBOOK_MAIN_MACRO: &str = "application/vnd.ms-excel.sheet.macroEnabled.main+xml";
 pub const CT_VBA: &str = "application/vnd.ms-office.vbaProject";
 pub const CT_THREADED_COMMENTS: &str = "application/vnd.ms-excel.threadedcomments+xml";
 pub const CT_PERSONS: &str = "application/vnd.ms-excel.person+xml";
@@ -165,7 +161,7 @@ pub fn abs_range(r: &RangeRef) -> String {
     format!("${}${}:${}${}", c(r.start.col), r.start.row + 1, c(r.end.col), r.end.row + 1)
 }
 
-pub fn write_xlsx(wb: &Workbook) -> Result<Vec<u8>, IoError> {
+pub fn write_xlsx(wb: &Workbook, kind: XlsxKind) -> Result<Vec<u8>, IoError> {
     if wb.sheets.is_empty() {
         return Err(IoError::Format("a workbook needs at least one sheet".into()));
     }
@@ -346,8 +342,9 @@ pub fn write_xlsx(wb: &Workbook) -> Result<Vec<u8>, IoError> {
         out.part("xl/persons/person.xml", Some(CT_PERSONS), x.into_bytes());
         wb_rels.add_uri(REL_PERSON, "persons/person.xml");
     }
-    out.part("xl/workbook.xml", Some(if wb.vba_project.is_some() { CT_WORKBOOK_MAIN_MACRO } else { CT_WORKBOOK_MAIN }), w.into_bytes());
-    if let Some(data) = &wb.vba_project {
+    out.part("xl/workbook.xml", Some(kind.main_content_type()), w.into_bytes());
+    // A macro-free package can't hold a VBA project (Excel refuses such a file).
+    if let Some(data) = wb.vba_project.as_ref().filter(|_| kind.is_macro_enabled()) {
         wb_rels.add("vbaProject", "vbaProject.bin");
         out.part("xl/vbaProject.bin", Some(CT_VBA), data.clone());
     }

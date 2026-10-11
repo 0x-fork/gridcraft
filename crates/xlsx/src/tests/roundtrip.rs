@@ -925,3 +925,30 @@ fn table_newline_column_and_backslash_name_survive() {
     assert_eq!(s.cell(at("D1")).and_then(|c| c.formula.as_ref()).map(|f| f.text.as_str()), Some("COUNTA(\\_Prime.1[Name])"));
     assert!(gridcraft_formula::parse("COUNTA(\\_Prime.1[Name])").is_ok(), "backslash table name parses as a structured reference");
 }
+
+/// Templates and macro-enabled files differ from `.xlsx` only in the workbook part's content
+/// type; a template saved with the workbook type is rejected by Excel.
+#[test]
+fn package_kind_sets_workbook_content_type() {
+    let mut wb = Workbook::new();
+    wb.sheet_mut(0).unwrap().set_value(at("A1"), Value::Number(7.0));
+    for (path, kind, ct) in [
+        ("a.xlsx", crate::XlsxKind::Workbook, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"),
+        ("a.XLTX", crate::XlsxKind::Template, "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml"),
+        ("a.xlsm", crate::XlsxKind::MacroWorkbook, "application/vnd.ms-excel.sheet.macroEnabled.main+xml"),
+        ("dir.x/a.xltm", crate::XlsxKind::MacroTemplate, "application/vnd.ms-excel.template.macroEnabled.main+xml"),
+    ] {
+        assert_eq!(crate::XlsxKind::from_path(path), kind);
+        let bytes = crate::write_xlsx_as(&wb, kind).unwrap();
+        let mut pkg = Package::open(&bytes).unwrap();
+        let types = pkg.read_xml("[Content_Types].xml").unwrap().unwrap();
+        let main: Vec<_> =
+            types.kids("Override").filter(|e| e.attr("PartName") == Some("/xl/workbook.xml")).filter_map(|e| e.attr("ContentType")).collect();
+        assert_eq!(main, [ct], "{path}");
+        // Every kind reads back.
+        let (back, report) = read_xlsx(&bytes).unwrap();
+        assert!(report.warnings.is_empty(), "{path}: {:?}", report.warnings);
+        assert_eq!(back.sheet(0).unwrap().value(at("A1")), Value::Number(7.0));
+    }
+    assert_eq!(crate::XlsxKind::from_path("noext"), crate::XlsxKind::Workbook);
+}

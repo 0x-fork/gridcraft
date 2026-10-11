@@ -19,8 +19,8 @@ support comes from `crates/engine/src/io.rs` (`FileKind`), `crates/xlsx/src` and
 | `.xlsx` Excel Workbook (transitional) | R/W, native | yes | yes | Cells, shared/array/dynamic formulas, styles, themes, merges, CF, validation, tables, notes (with their shown/hidden state) and threaded comments with replies, resolved state and timestamps (`threadedComments` and `persons` parts, #300), hyperlinks, names, freeze panes, outline, print settings, pictures, shapes, charts (simplified, see [chart-parity.md](chart-parity.md)), sparklines, PivotTables (caches and tables), protection, calc settings. **Not preserved:** unmodelled parts and extensions (form controls, slicer caches, timelines, external links, OLE objects, custom XML, data model, query tables, chart details). Never checked in Excel across a corpus: repair prompts unknown. 100 MB files fail (#175) | `roundtrip.rs`, `fixtures.rs`, `malformed.rs`, `pivot_tests.rs` |
 | `.xlsx` Excel Workbook (transitional) | R/W, native | yes | yes | Cells, shared/array/dynamic formulas, styles, themes, merges, CF, validation, tables, comments and notes, hyperlinks, names, freeze panes, outline, print settings, pictures, shapes, charts (simplified, see [chart-parity.md](chart-parity.md)), sparklines, PivotTables (caches and tables), protection, Allow Edit Ranges (`protectedRanges` with their password hashes, #307), calc settings. **Not preserved:** unmodelled parts and extensions (form controls, slicer caches, timelines, external links, OLE objects, custom XML, data model, query tables, chart details). Never checked in Excel across a corpus: repair prompts unknown. 100 MB files fail (#175) | `roundtrip.rs`, `fixtures.rs`, `malformed.rs`, `pivot_tests.rs` |
 | `.xlsx` Strict Open XML | R/W | yes | no (writes transitional) | Excel also saves transitional by default | fixtures |
-| `.xlsm` Macro-Enabled Workbook | R/W | yes | yes, **without macros** | VBA project dropped with a warning; saving as `.xlsm` loses the macros (#6) | — |
-| `.xltx` / `.xltm` templates | R/W | yes | partial | Saved with the workbook content type, not the template one; "new from template" behaviour missing | — |
+| `.xlsm` Macro-Enabled Workbook | R/W | yes | yes, macros kept, not run | The VBA project is kept byte-for-byte and written back only into `.xlsm`/`.xltm` (#6); macros never run. Saved with the macro-enabled workbook content type | `roundtrip.rs` (`vba_project_roundtrip`, `package_kind_sets_workbook_content_type`), engine `io.rs` (`macros_are_saved_only_into_xlsm`) |
+| `.xltx` / `.xltm` templates | R/W | yes | partial | Saved with the template (and macro-enabled template) content type, chosen by extension; `.xltm` keeps a VBA project, `.xltx` drops it; "new from template" behaviour missing | `roundtrip.rs` (`package_kind_sets_workbook_content_type`), engine `io.rs` |
 | `.xlsb` Binary Workbook | R/W | **values only** (#101) | no | Names, visibility, numbers, text, booleans, errors, merges, cached formula results; no formulas, formatting, charts, names | `xlsb_tests.rs` |
 | `.xls` Excel 97-2003 (BIFF8) | R/W | **yes, partial** (#121) | no (Save As `.xlsx`) | Clean-room from [MS-CFB] and [MS-XLS]. Read: worksheets and visibility, shared strings, numbers, text, booleans, errors, formulas (text for the common tokens, shared and array formulas, 3-D refs, names, newer functions called by name) with cached results, number formats (dates display as dates), 1904 date system, merges, column widths, row heights, defined names, print area and titles. Not read: fonts, fills, borders, alignment, charts, pictures, comments, CF, validation, hyperlinks, freeze panes, external links (formula kept as its value). Chart and macro sheets skipped with a warning; encrypted (FILEPASS) and BIFF5 (Excel 5.0/95) files refused with a message. Opens as a new unsaved workbook. Unverified on a real-world corpus | `xls_tests.rs` |
 | `.xlt` Excel 97-2003 template | R/W | yes (read as `.xls`) | no | | — |
@@ -36,6 +36,8 @@ support comes from `crates/engine/src/io.rs` (`FileKind`), `crates/xlsx/src` and
 |---|---|---|---|---|
 | `.csv` UTF-8 / Windows / Mac / MS-DOS | R/W | yes (UTF-8 and UTF-16 BOMs, UTF-8, Windows-1252 fallback; delimiter detection) | yes (UTF-8 without BOM, CRLF; a file opened as CSV is saved with the separator it was read with, so a `;` file stays `;`; otherwise `,`) | Excel writes the **displayed** values; we write raw values. No encoding choice on save. Re-import of a single-column export splits text (#127) |
 | `.txt` tab-delimited, Unicode text | R/W | yes (`.txt`, `.tsv`, `.tab`) | yes | Text Import Wizard options partly via Text to Columns |
+| `.csv` UTF-8 / Windows / Mac / MS-DOS | R/W | yes (UTF-8 and UTF-16 BOMs, UTF-8, Windows-1252 fallback; delimiter detection) | yes (UTF-8 without BOM, CRLF) | Writes the **displayed** values like Excel (number formats applied, formula results, never column-width `#####`). No encoding choice on save. Re-import of a single-column export splits text (#127) |
+| `.txt` tab-delimited, Unicode text | R/W | yes (`.txt`, `.tsv`, `.tab`) | yes (displayed values) | Text Import Wizard options partly via Text to Columns |
 | `.prn` formatted text (space-delimited) | R/W | no | no | |
 | `.dif`, `.slk` (SYLK) | R/W | no | no | Small, legacy |
 | `.htm` / `.html` web page | R/W (Windows) | yes, via Get Data ▸ From HTML | yes (one sheet as a table) | Formatting not exported |
@@ -69,7 +71,7 @@ refresh. Counted under features (Get & Transform, ~10% ready), not here.
 | Legacy `.xls` (BIFF8): styles (fonts, fills, borders, alignment), comments, CF, validation, pictures and charts on import; corpus run; then write | 10–15 |
 | Encrypted workbooks: open with password prompt, save with password (#11) | 8–12 |
 | XLSB and ODS: formulas and formatting on import; then write | 10–15 |
-| CSV/text: displayed-value export, encoding choice, `.prn`, `.dif`, `.slk`, XML Spreadsheet 2003 | 5–8 |
+| CSV/text: encoding choice, `.prn`, `.dif`, `.slk`, XML Spreadsheet 2003 | 4–7 |
 | PDF: embed subsetted system fonts so every script exports | (counted in [localization](localization-parity.md) script work) |
 
 ## Revision history
@@ -78,6 +80,7 @@ refresh. Counted under features (Get & Transform, ~10% ready), not here.
 |---|---|---|
 | 2026-10-12 | minor | CSV: saving a file opened as CSV keeps its detected separator (`;` files were rewritten with `,`) |
 | 2026-10-11 | minor | XLSX: cell/shared/array formulas read through the file→model conversion (`_xlpm.` LET/LAMBDA parameter prefixes stripped); table column names keep line breaks; table names may start with `\` |
+| 2026-10-11 | minor | CSV/TSV export writes displayed values (number formats applied, no `#####`); `.xltx`, `.xltm` and `.xlsm` saved with their own workbook content types |
 | 2026-10-11 | minor | `.xls` (BIFF8) import: values, formulas, number formats, merges, sizes, names (#121) |
 | 2026-10-11 | minor | XLSX pass-through: custom XML, external links, connections, query tables, printer settings, form/ActiveX controls, OLE objects, sheet backgrounds kept on save (#330, #324) |
 | 2026-10-11 | minor | XLSX: threaded comments and persons parts written (they came back as notes before); note visibility read from VML (#300) |
