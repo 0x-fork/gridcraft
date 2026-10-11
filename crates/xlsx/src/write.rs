@@ -49,6 +49,12 @@ impl Rels {
         self.items.push((id.clone(), ty.to_string(), target.to_string(), false));
         id
     }
+    /// Adds a relationship with its complete type URI, internal or external (kept content).
+    pub fn add_raw(&mut self, ty: &str, target: &str, external: bool) -> String {
+        let id = format!("rId{}", self.items.len() + 1);
+        self.items.push((id.clone(), crate::xml::esc_attr(ty), target.to_string(), external));
+        id
+    }
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
@@ -106,6 +112,8 @@ pub struct Out {
     pub dynamic_arrays: bool,
     pub needs_calc: bool,
     pub cell_pictures: crate::richdata::PicturesOut,
+    /// Kept (pass-through) parts written so far.
+    pub kept: crate::passthrough::KeptOut,
 }
 
 impl Out {
@@ -158,6 +166,7 @@ pub fn write_xlsx(wb: &Workbook) -> Result<Vec<u8>, IoError> {
         dynamic_arrays: false,
         needs_calc: false,
         cell_pictures: Default::default(),
+        kept: Default::default(),
     };
     out.default_type("rels", "application/vnd.openxmlformats-package.relationships+xml");
     out.default_type("xml", "application/xml");
@@ -247,6 +256,7 @@ pub fn write_xlsx(wb: &Workbook) -> Result<Vec<u8>, IoError> {
         w.push_str("<workbookProtection lockStructure=\"1\"/>");
     }
     let _ = write!(w, "<bookViews><workbookView activeTab=\"{active}\"/></bookViews><sheets>{sheets_xml}</sheets>");
+    w.push_str(&crate::passthrough::write_workbook(wb, &mut wb_rels, &mut out));
     if !names.is_empty() {
         let _ = write!(w, "<definedNames>{names}</definedNames>");
     }
@@ -329,6 +339,7 @@ pub fn write_xlsx(wb: &Workbook) -> Result<Vec<u8>, IoError> {
     root.add("officeDocument", "xl/workbook.xml");
     root.add("core-properties", "docProps/core.xml");
     root.add("extended-properties", "docProps/app.xml");
+    crate::passthrough::write_package_rels(&mut root, &mut out);
     out.part("_rels/.rels", None, root.xml().into_bytes());
 
     // Content types first, then the parts in creation order.

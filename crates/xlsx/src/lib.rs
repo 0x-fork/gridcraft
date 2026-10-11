@@ -19,6 +19,7 @@ mod drawing;
 mod fmla;
 mod ods;
 mod package;
+mod passthrough;
 mod pivot;
 mod read;
 mod richdata;

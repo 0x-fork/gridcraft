@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (created from the full re-measure against Excel for Mac 16.113.4 and the issue tracker) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (§3 narrowed by XLSX pass-through, #330) · **Target:** Microsoft Excel (Microsoft 365)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -33,12 +33,14 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 - **Impact:** finance and data users routinely have big workbooks.
 - **Estimate:** 25–40 h. [target-app-parity.md](target-app-parity.md#performance), [hardware-parity.md](hardware-parity.md)
 
-### 3. Unmodelled XLSX content is dropped on save (FF)
-- **Missing:** pass-through of parts and extensions we don't model (form controls, slicers,
-  timelines, external links, OLE objects, custom XML, query tables, data model, chart details).
-- **Evidence:** reader warns and skips (`crates/xlsx/src/read.rs`); external links "not supported".
-- **Impact:** open-edit-save silently simplifies colleagues' workbooks.
-- **Estimate:** 10–15 h. [file-format-parity.md](file-format-parity.md)
+### 3. Some unmodelled XLSX content is dropped on save (FF)
+- **Missing:** slicers and their caches, timelines, the data model, query tables attached to
+  tables, unmodelled `extLst` entries, chart details. Pass-through (#330) keeps custom XML,
+  external links, connections, sheet query tables, printer settings, form and ActiveX controls,
+  OLE objects and sheet backgrounds; never checked in Excel (repair prompts unknown).
+- **Evidence:** `crates/xlsx/src/passthrough.rs` (what is kept, and why the rest isn't).
+- **Impact:** open-edit-save still simplifies workbooks with slicers, timelines or Power Pivot.
+- **Estimate:** 6–10 h. [file-format-parity.md](file-format-parity.md)
 
 ### 4. Charts lose type and options on round trip; shallow chart model (F, FF)
 - **Missing:** kinds that survive XLSX (stock, combo, histogram, box, waterfall, funnel, treemap,
@@ -149,6 +151,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | §3: XLSX pass-through keeps custom XML, external links, connections, query tables, printer settings, controls and OLE objects (#330, #324) |
 | 2026-10-10 | minor | Updated for the 10-10 merges (#17, #31, #38, #62, #82, #104, #116) and the new chart resize bug (#190) |
 | 2026-10-10 | minor | Noted that no gap blocks the alpha gate |
 | 2026-10-10 | major | Created: 24 ranked gaps with evidence, from the full re-measure and the 60 open issues |
