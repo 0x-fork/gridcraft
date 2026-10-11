@@ -121,6 +121,12 @@ pub struct Geo {
     pub z: f32,
     pub header_w: f32,
     pub header_h: f32,
+    /// The outline bands (grouped rows / columns): left of the row headers and above the column
+    /// headers; 0 without an outline (see `outline`).
+    pub band_w: f32,
+    pub band_h: f32,
+    pub row_outline: Arc<crate::outline::Axis>,
+    pub col_outline: Arc<crate::outline::Axis>,
     pub fr: u32,
     pub fc: u32,
     pub frozen_w: f32,
@@ -151,8 +157,46 @@ impl Geo {
         let (fr, fc) = sh.freeze.unwrap_or((0, 0));
         let frozen_w = (ci.start(fc) as f32) * z;
         let frozen_h = (ri.start(fr) as f32) * z;
-        let cells = Rect::from_min_max(pos2(rect.left() + header_w, rect.top() + header_h), rect.max);
-        Geo { rect, cells, z, header_w, header_h, fr, fc, frozen_w, frozen_h, scroll, rtl: sh.right_to_left, ri, ci, paper: None }
+        let row_outline = Arc::new(crate::outline::Axis::new(&sh.rows));
+        let col_outline = Arc::new(crate::outline::Axis::new(&sh.cols));
+        let mut band_w = crate::outline::band(row_outline.levels, zoom);
+        let mut band_h = crate::outline::band(col_outline.levels, zoom);
+        // Without headings the level buttons still need a corner to sit in.
+        if row_outline.levels > 0 && header_h == 0.0 {
+            band_h = band_h.max(crate::outline::lane(zoom) + 3.0);
+        }
+        if col_outline.levels > 0 && header_w == 0.0 {
+            band_w = band_w.max(crate::outline::lane(zoom) + 3.0);
+        }
+        let cells = Rect::from_min_max(pos2(rect.left() + band_w + header_w, rect.top() + band_h + header_h), rect.max);
+        Geo {
+            rect,
+            cells,
+            z,
+            header_w,
+            header_h,
+            band_w,
+            band_h,
+            row_outline,
+            col_outline,
+            fr,
+            fc,
+            frozen_w,
+            frozen_h,
+            scroll,
+            rtl: sh.right_to_left,
+            ri,
+            ci,
+            paper: None,
+        }
+    }
+    /// Left edge of the row headers (right of the outline band).
+    pub fn head_left(&self) -> f32 {
+        self.cells.left() - self.header_w
+    }
+    /// Top edge of the column headers (below the outline band).
+    pub fn head_top(&self) -> f32 {
+        self.cells.top() - self.header_h
     }
     /// Page Layout view geometry: `rect` excludes the rulers; cells are drawn at the print scale
     /// on pages laid out by `grid`; frozen panes don't apply (as in Excel).
@@ -558,6 +602,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
         paint_headers(&painter, &geo, sh, &sel, &t, &quads);
         paint_freeze_handles(&painter, &geo, sh, &app.grid.drag, &t);
     }
+    crate::outline::paint(&painter, &geo, sh, &t);
     if geo.rtl {
         let mirror_to = painter.add(egui::Shape::Noop);
         mirror_painted(ui.ctx(), painter.layer_id(), mirror_from.0..mirror_to.0, &geo, &objects);
@@ -1401,7 +1446,8 @@ pub(crate) fn paint_headers(
     quads: &[((u32, u32), (u32, u32), Rect)],
 ) {
     let font = theme::ui_font((11.5 * (geo.z / DISPLAY_SCALE).max(0.75)).min(16.0));
-    let r = geo.rect;
+    // The headers' own area: inside the outline bands.
+    let r = Rect::from_min_max(pos2(geo.head_left(), geo.head_top()), geo.rect.max);
     let top = Rect::from_min_max(pos2(geo.cells.left(), r.top()), pos2(r.right(), geo.cells.top()));
     let left = Rect::from_min_max(pos2(r.left(), geo.cells.top()), pos2(geo.cells.left(), r.bottom()));
     p.rect_filled(top, 0.0, t.header_bg);
@@ -1489,9 +1535,9 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
     // Hit-testing works in logical coordinates (see `Geo::rtl`).
     let pos = pointer.interact_pos().or(pointer.hover_pos()).map(|p| geo.mirror_pos(p));
     let in_cells = pos.is_some_and(|p| geo.in_cells(p));
-    let in_col_header = pos.is_some_and(|p| p.y < geo.cells.top() && p.y >= geo.rect.top() && p.x >= geo.cells.left());
-    let in_row_header = pos.is_some_and(|p| p.x < geo.cells.left() && p.x >= geo.rect.left() && p.y >= geo.cells.top());
-    let in_corner = pos.is_some_and(|p| p.x < geo.cells.left() && p.y < geo.cells.top() && geo.rect.contains(p));
+    let in_col_header = pos.is_some_and(|p| p.y < geo.cells.top() && p.y >= geo.head_top() && p.x >= geo.cells.left());
+    let in_row_header = pos.is_some_and(|p| p.x < geo.cells.left() && p.x >= geo.head_left() && p.y >= geo.cells.top());
+    let in_corner = pos.is_some_and(|p| p.x < geo.cells.left() && p.y < geo.cells.top() && p.x >= geo.head_left() && p.y >= geo.head_top());
     let sel = app.session.active().map(|d| d.selection.clone()).unwrap_or_default();
     let cur_rect = geo.range_rect(sh, sel.current());
     let handle = Rect::from_center_size(cur_rect.right_bottom(), vec2(9.0, 9.0));
@@ -1672,6 +1718,14 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
     if resp.drag_started() || (primary_clicked && app.grid.drag == Drag::None) {
         // Where the press began (a drag is only recognised after the pointer has moved).
         let Some(p) = pointer.press_origin().map(|p| geo.mirror_pos(p)).or(pos) else { return };
+        // The outline band's − / + and level buttons act on release, like buttons.
+        if let Some(action) = crate::outline::hit(geo, sh, p) {
+            if primary_clicked {
+                let (command, params) = action.command();
+                app.run_or_alert(command, params);
+            }
+            return;
+        }
         // Freeze handles sit on the header edges (and the corner's edges when nothing is frozen).
         if freeze_cols.contains(p) || freeze_rows.contains(p) {
             app.grid.drag = Drag::Freeze { cols: freeze_cols.contains(p), to: None };
@@ -2099,8 +2153,8 @@ fn on_border(r: Rect, p: Pos2) -> bool {
 pub fn freeze_handles(geo: &Geo) -> (Rect, Rect) {
     let x = geo.cells.left() + geo.frozen_w;
     let y = geo.cells.top() + geo.frozen_h;
-    let cols = Rect::from_min_max(pos2(x - 3.0, geo.rect.top()), pos2(x + 3.0, geo.rect.top() + geo.header_h * 0.4));
-    let rows = Rect::from_min_max(pos2(geo.rect.left(), y - 3.0), pos2(geo.rect.left() + geo.header_w * 0.4, y + 3.0));
+    let cols = Rect::from_min_max(pos2(x - 3.0, geo.head_top()), pos2(x + 3.0, geo.head_top() + geo.header_h * 0.4));
+    let rows = Rect::from_min_max(pos2(geo.head_left(), y - 3.0), pos2(geo.head_left() + geo.header_w * 0.4, y + 3.0));
     (cols, rows)
 }
 
@@ -2138,10 +2192,10 @@ fn paint_freeze_handles(p: &Painter, geo: &Geo, sh: &Sheet, drag: &Drag, t: &Tok
         let stroke = Stroke::new(2.0, t.accent);
         if cols {
             let x = geo.cells.left() + sh.col_left(to) as f32 * geo.z;
-            p.line_segment([pos2(x, geo.rect.top()), pos2(x, geo.cells.bottom())], stroke);
+            p.line_segment([pos2(x, geo.head_top()), pos2(x, geo.cells.bottom())], stroke);
         } else {
             let y = geo.cells.top() + sh.row_top(to) as f32 * geo.z;
-            p.line_segment([pos2(geo.rect.left(), y), pos2(geo.cells.right(), y)], stroke);
+            p.line_segment([pos2(geo.head_left(), y), pos2(geo.cells.right(), y)], stroke);
         }
     }
 }

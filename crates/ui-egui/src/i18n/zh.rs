@@ -171,6 +171,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Clear Validation" => "清除验证",
         "Group" => "组合",
         "Ungroup" => "取消组合",
+        "Show Detail" => "显示明细数据",
+        "Hide Detail" => "隐藏明细数据",
         "Subtotal" => "分类汇总",
         "Data\nAnalysis" => "数据分析",
         "Data Analysis" => "数据分析",

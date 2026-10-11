@@ -102,6 +102,13 @@ fn windows_and_mac_variants() {
         lookup(Key::Exclamationmark, Some(Key::Num1), CTRL_SHIFT, false),
         Some(Shortcut::Run("home.numberFormat", json!({"code": "#,##0.00"})))
     );
+    // Navigation keys go by what they are, not where: the numpad's arrows and Page Down (Num
+    // Lock off) report Num6 / Num3 as their physical keys.
+    let alt_shift = Modifiers { alt: true, shift: true, ..Modifiers::NONE };
+    assert_eq!(lookup(Key::ArrowRight, Some(Key::Num6), alt_shift, false), run("data.group"));
+    assert_eq!(lookup(Key::ArrowLeft, Some(Key::Num4), alt_shift, false), run("data.ungroup"));
+    assert_eq!(lookup(Key::PageDown, Some(Key::Num3), Modifiers::ALT, false), Some(Shortcut::ScreenRight));
+    assert_eq!(lookup(Key::PageDown, Some(Key::Num3), CTRL_SHIFT, false), None);
     // Plain keys stay with the grid (typing, navigation).
     assert_eq!(lookup(Key::A, Some(Key::A), Modifiers::NONE, false), None);
     assert_eq!(lookup(Key::F2, Some(Key::F2), Modifiers::NONE, false), None);

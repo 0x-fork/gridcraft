@@ -171,6 +171,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Clear Validation" => "유효성 검사 지우기",
         "Group" => "그룹",
         "Ungroup" => "그룹 해제",
+        "Show Detail" => "세부 정보 표시",
+        "Hide Detail" => "세부 정보 숨기기",
         "Subtotal" => "부분합",
         "Data\nAnalysis" => "데이터 분석",
         "Data Analysis" => "데이터 분석",

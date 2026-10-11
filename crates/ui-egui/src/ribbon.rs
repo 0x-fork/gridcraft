@@ -1648,6 +1648,14 @@ fn data(app: &mut SheetApp, ui: &mut Ui) {
             app.open_dialog("subtotal", json!({}));
         }
     });
+    ui.vertical(|ui| {
+        if small_button(ui, Icon::Plus, "Show Detail", "Show Detail", false).clicked() {
+            act(app, "data.showDetail", json!({}));
+        }
+        if small_button(ui, Icon::Minus, "Hide Detail", "Hide Detail", false).clicked() {
+            act(app, "data.hideDetail", json!({}));
+        }
+    });
     sep(ui);
     if big_button(ui, Icon::ChartBar, "Data\nAnalysis", "Data Analysis", false).clicked() {
         app.open_dialog("analysisToolPak", json!({}));

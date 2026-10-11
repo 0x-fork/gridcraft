@@ -165,6 +165,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Clear Validation" => "Borrar círculos de validación",
         "Group" => "Agrupar",
         "Ungroup" => "Desagrupar",
+        "Show Detail" => "Mostrar detalle",
+        "Hide Detail" => "Ocultar detalle",
         "Subtotal" => "Subtotal",
         "What-If\nAnalysis" => "Análisis de\nhipótesis",
         "Data Table…" => "Tabla de datos…",

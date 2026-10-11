@@ -164,6 +164,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Clear Validation" => "Vymazat ověření",
         "Group" => "Seskupit",
         "Ungroup" => "Zrušit seskupení",
+        "Show Detail" => "Zobrazit podrobnosti",
+        "Hide Detail" => "Skrýt podrobnosti",
         "Subtotal" => "Mezisoučet",
         "What-If\nAnalysis" => "Citlivostní\nanalýza",
         "Data Table…" => "Tabulka dat…",
