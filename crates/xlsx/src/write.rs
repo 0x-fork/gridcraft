@@ -20,6 +20,12 @@ pub const CT_DRAWING: &str = "application/vnd.openxmlformats-officedocument.draw
 pub const CT_CHART: &str = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
 pub const CT_TABLE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
 pub const CT_COMMENTS: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml";
+pub const CT_THREADED_COMMENTS: &str = "application/vnd.ms-excel.threadedcomments+xml";
+pub const CT_PERSONS: &str = "application/vnd.ms-excel.person+xml";
+pub const REL_THREADED_COMMENT: &str = "http://schemas.microsoft.com/office/2017/10/relationships/threadedComment";
+pub const REL_PERSON: &str = "http://schemas.microsoft.com/office/2017/10/relationships/person";
+/// Namespace of the threaded comments and persons parts ([MS-XLSX]).
+pub const NS_THREADED: &str = "http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments";
 
 /// A part's relationships.
 #[derive(Default)]
@@ -47,6 +53,12 @@ impl Rels {
     pub fn add_uri(&mut self, ty: &str, target: &str) -> String {
         let id = format!("rId{}", self.items.len() + 1);
         self.items.push((id.clone(), ty.to_string(), target.to_string(), false));
+        id
+    }
+    /// Adds a relationship with its complete type URI, internal or external (kept content).
+    pub fn add_raw(&mut self, ty: &str, target: &str, external: bool) -> String {
+        let id = format!("rId{}", self.items.len() + 1);
+        self.items.push((id.clone(), crate::xml::esc_attr(ty), target.to_string(), external));
         id
     }
     pub fn is_empty(&self) -> bool {
@@ -102,10 +114,14 @@ pub struct Out {
     pub drawings: u32,
     pub tables: u32,
     pub comments: u32,
+    /// Authors of threaded comments, in first-use order; written to `xl/persons/person.xml`.
+    pub persons: Vec<String>,
     pub table_id: u32,
     pub dynamic_arrays: bool,
     pub needs_calc: bool,
     pub cell_pictures: crate::richdata::PicturesOut,
+    /// Kept (pass-through) parts written so far.
+    pub kept: crate::passthrough::KeptOut,
 }
 
 impl Out {
@@ -118,6 +134,12 @@ impl Out {
     pub fn default_type(&mut self, ext: &str, ct: &str) {
         self.defaults.entry(ext.to_string()).or_insert_with(|| ct.to_string());
     }
+}
+
+/// Id of the i-th person of `xl/persons/person.xml`: a GUID-shaped, deterministic id (the
+/// file only needs ids that are unique within it).
+pub fn person_guid(i: usize) -> String {
+    format!("{{00000000-0000-4000-8002-{:012X}}}", i as u64 & 0xFFFF_FFFF_FFFF)
 }
 
 /// `$A$1:$D$20` (or `$1:$3` / `$A:$C`).
@@ -154,10 +176,12 @@ pub fn write_xlsx(wb: &Workbook) -> Result<Vec<u8>, IoError> {
         drawings: 0,
         tables: 0,
         comments: 0,
+        persons: vec![],
         table_id: 0,
         dynamic_arrays: false,
         needs_calc: false,
         cell_pictures: Default::default(),
+        kept: Default::default(),
     };
     out.default_type("rels", "application/vnd.openxmlformats-package.relationships+xml");
     out.default_type("xml", "application/xml");
@@ -247,6 +271,7 @@ pub fn write_xlsx(wb: &Workbook) -> Result<Vec<u8>, IoError> {
         w.push_str("<workbookProtection lockStructure=\"1\"/>");
     }
     let _ = write!(w, "<bookViews><workbookView activeTab=\"{active}\"/></bookViews><sheets>{sheets_xml}</sheets>");
+    w.push_str(&crate::passthrough::write_workbook(wb, &mut wb_rels, &mut out));
     if !names.is_empty() {
         let _ = write!(w, "<definedNames>{names}</definedNames>");
     }
@@ -274,6 +299,11 @@ pub fn write_xlsx(wb: &Workbook) -> Result<Vec<u8>, IoError> {
     pivots.finish(wb, &mut out, &|code: &str| crate::tables::builtin_id(code).or_else(|| fmt_ids.get(code).copied()));
     out.part("xl/styles.xml", Some("application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"), styles.into_bytes());
     wb_rels.add("styles", "styles.xml");
+    if wb.styles.iter().any(|(_, st)| st.num_fmt.as_str() == "checkbox") {
+        use crate::feature_bags as fpb;
+        out.part(fpb::PART, Some(fpb::CONTENT_TYPE), fpb::checkbox_part().into_bytes());
+        wb_rels.add_uri(fpb::REL, "featurePropertyBag/featurePropertyBag.xml");
+    }
     out.part(
         "xl/theme/theme1.xml",
         Some("application/vnd.openxmlformats-officedocument.theme+xml"),
@@ -296,6 +326,16 @@ pub fn write_xlsx(wb: &Workbook) -> Result<Vec<u8>, IoError> {
             METADATA.as_bytes().to_vec(),
         );
         wb_rels.add("sheetMetadata", "metadata.xml");
+    }
+    if !out.persons.is_empty() {
+        let mut x = format!("{XML_DECL}<personList xmlns=\"{NS_THREADED}\" xmlns:x=\"{NS_MAIN}\">");
+        for (i, name) in out.persons.iter().enumerate() {
+            let n = esc_attr(name);
+            let _ = write!(x, "<person displayName=\"{n}\" id=\"{}\" userId=\"{n}\" providerId=\"None\"/>", person_guid(i));
+        }
+        x.push_str("</personList>");
+        out.part("xl/persons/person.xml", Some(CT_PERSONS), x.into_bytes());
+        wb_rels.add_uri(REL_PERSON, "persons/person.xml");
     }
     out.part("xl/workbook.xml", Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"), w.into_bytes());
     out.part("xl/_rels/workbook.xml.rels", None, wb_rels.xml().into_bytes());
@@ -329,15 +369,17 @@ pub fn write_xlsx(wb: &Workbook) -> Result<Vec<u8>, IoError> {
     root.add("officeDocument", "xl/workbook.xml");
     root.add("core-properties", "docProps/core.xml");
     root.add("extended-properties", "docProps/app.xml");
+    crate::passthrough::write_package_rels(&mut root, &mut out);
     out.part("_rels/.rels", None, root.xml().into_bytes());
 
     // Content types first, then the parts in creation order.
     let mut ct = format!("{XML_DECL}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">");
     for (ext, t) in &out.defaults {
-        let _ = write!(ct, "<Default Extension=\"{ext}\" ContentType=\"{t}\"/>");
+        // Kept parts bring their content types (and extensions) from the input file: escape them.
+        let _ = write!(ct, "<Default Extension=\"{}\" ContentType=\"{}\"/>", esc_attr(ext), esc_attr(t));
     }
     for (part, t) in &out.overrides {
-        let _ = write!(ct, "<Override PartName=\"{}\" ContentType=\"{t}\"/>", esc_attr(part));
+        let _ = write!(ct, "<Override PartName=\"{}\" ContentType=\"{}\"/>", esc_attr(part), esc_attr(t));
     }
     ct.push_str("</Types>");
     let mut zip = ZipOut::new();

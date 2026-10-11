@@ -118,6 +118,7 @@ fn sample() -> Workbook {
     s.show_zeros = false;
     s.right_to_left = true;
     s.zoom = 125;
+    s.view = gridcraft_model::SheetViewMode::PageLayout;
     s.view_active = at("C7");
 
     let red_b = Box::new(red.clone());
@@ -187,15 +188,56 @@ fn sample() -> Workbook {
         allow_blank: false,
         ..Default::default()
     });
+    s.edit_ranges = vec![
+        EditRange { title: "Open & <free>".into(), ranges: vec![rr("A1:B2"), rr("D4")], password: None, security_descriptor: None },
+        EditRange {
+            title: "Old".into(),
+            ranges: vec![rr("C1:C9")],
+            password: Some(PasswordHash::Legacy(0x83AF)),
+            security_descriptor: Some("O:WDG:WDD:(A;;CC;;;WD)".into()),
+        },
+        EditRange {
+            title: "New".into(),
+            ranges: vec![rr("E1")],
+            password: Some(PasswordHash::new_sha512("pw", b"0123456789abcdef")),
+            security_descriptor: None,
+        },
+    ];
     s.hyperlinks.insert(at("A2"), Hyperlink { target: "https://example.com/?a=1&b=2".into(), tooltip: Some("go".into()) });
     s.hyperlinks.insert(at("A3"), Hyperlink { target: "'Data & Stuff'!B2".into(), tooltip: None });
     s.hyperlinks.insert(at("A4"), Hyperlink { target: "mailto:me@example.com".into(), tooltip: None });
     s.comments.insert(
         at("B2"),
-        Comment { author: "Ann".into(), text: "Note & <stuff>\nline 2".into(), replies: vec![], threaded: false, resolved: false, visible: false },
+        Comment {
+            author: "Ann".into(),
+            text: "Note & <stuff>\nline 2".into(),
+            replies: vec![],
+            threaded: false,
+            resolved: false,
+            visible: false,
+            dates: vec![],
+        },
     );
-    s.comments
-        .insert(at("C3"), Comment { author: "Bob".into(), text: "second".into(), replies: vec![], threaded: false, resolved: false, visible: false });
+    s.comments.insert(
+        at("C3"),
+        Comment { author: "Bob".into(), text: "second".into(), replies: vec![], threaded: false, resolved: false, visible: true, dates: vec![] },
+    );
+    s.comments.insert(
+        at("D4"),
+        Comment {
+            author: "Ann & Co".into(),
+            text: "Threaded <one>\nsecond line".into(),
+            replies: vec![("Bob".into(), "first reply".into()), ("Ann & Co".into(), "second reply".into())],
+            threaded: true,
+            resolved: true,
+            visible: false,
+            dates: vec!["2026-10-11T09:30:00.00".into(), String::new(), "2026-10-11T10:15:00.00".into()],
+        },
+    );
+    s.comments.insert(
+        at("E5"),
+        Comment { author: "Cy".into(), text: "open thread".into(), replies: vec![], threaded: true, resolved: false, visible: false, dates: vec![] },
+    );
     s.autofilter = Some(AutoFilter {
         range: rr("K1:N20"),
         criteria: vec![
@@ -299,6 +341,7 @@ fn sample() -> Workbook {
         y_title: Some("Amount".into()),
         source: None,
         by_rows: false,
+        pivot: None,
     };
     for kind in [
         ChartKind::ColumnClustered,
@@ -340,6 +383,10 @@ fn sample() -> Workbook {
     wb.sheets.push(Arc::new(s2));
     let mut s3 = Sheet::new("2024");
     s3.visibility = Visibility::VeryHidden;
+    s3.comments.insert(
+        at("A1"),
+        Comment { author: "Bob".into(), text: "other sheet".into(), replies: vec![], threaded: true, resolved: false, visible: false, dates: vec![] },
+    );
     wb.sheets.push(Arc::new(s3));
     wb.names.push(DefinedName { name: "Rate".into(), scope: None, formula: "0.07".into(), comment: "c".into(), hidden: false });
     wb.names.push(DefinedName { name: "Local".into(), scope: Some(1), formula: "Hidden!$A$1".into(), comment: String::new(), hidden: true });
@@ -373,6 +420,7 @@ fn full_roundtrip() {
     assert_eq!(back.sheets[1].visibility, Visibility::Hidden);
     assert_eq!(back.sheets[2].visibility, Visibility::VeryHidden);
     assert_eq!(back.sheets[2].name, "2024");
+    assert_eq!(back.sheets[2].comments, wb.sheets[2].comments);
 
     let (a, b) = (wb.sheet(0).unwrap(), back.sheet(0).unwrap());
     assert_eq!(b.name, a.name);
@@ -398,12 +446,14 @@ fn full_roundtrip() {
     assert_eq!(b.tab_color, a.tab_color);
     assert_eq!((b.show_gridlines, b.show_headings, b.show_zeros, b.right_to_left, b.zoom), (false, false, false, true, 125));
     assert_eq!(b.view_active, a.view_active);
+    assert_eq!(b.view, gridcraft_model::SheetViewMode::PageLayout, "sheetView view=\"pageLayout\" round-trips");
     assert_eq!(b.cond_formats, a.cond_formats);
     assert_eq!(b.validations, a.validations);
     assert_eq!(b.hyperlinks, a.hyperlinks);
     assert_eq!(b.comments, a.comments);
     assert_eq!(b.autofilter, a.autofilter);
     assert_eq!(b.protection, a.protection);
+    assert_eq!(b.edit_ranges, a.edit_ranges);
     assert_eq!(b.print, a.print);
     let mut sp = a.sparklines.clone();
     sp[0].source = "'Data & Stuff'!B2:B3".into();
@@ -599,4 +649,117 @@ fn spill_and_calc_errors_are_cached_as_value_errors() {
         assert_eq!(cell.child("f").unwrap().text, text);
         assert_eq!(cell.child("v").unwrap().text, value);
     }
+}
+
+/// `CT_IconSet` needs one `cfvo` per icon (at least two); a rule without stored thresholds
+/// gets Excel's defaults, one without the lower bound gets it prepended (#235).
+#[test]
+fn icon_sets_always_write_one_cfvo_per_icon() {
+    let mut wb = Workbook::new();
+    let s = wb.sheet_mut(0).unwrap();
+    for (i, (set, thresholds)) in [
+        ("3Arrows", vec![]),
+        ("4Rating", vec![CfValueKind::Number(2.0), CfValueKind::Number(5.0), CfValueKind::Number(8.0)]),
+        ("9Bogus", vec![CfValueKind::Percent(50.0)]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        s.cond_formats.push(CondFormat {
+            ranges: vec![rr(&format!("A{}", i + 1))],
+            rule: CfRule::IconSet { set: set.into(), thresholds, reverse: false, show_value: true },
+            priority: i as u32 + 1,
+            stop_if_true: false,
+        });
+    }
+    let bytes = write_xlsx(&wb).unwrap();
+    let (xml, _) = sheet1_xml(&bytes);
+    assert!(
+        xml.contains(
+            "<iconSet iconSet=\"3Arrows\"><cfvo type=\"percent\" val=\"0\"/><cfvo type=\"percent\" val=\"33\"/><cfvo type=\"percent\" val=\"67\"/></iconSet>"
+        ),
+        "{xml}"
+    );
+    assert!(
+        xml.contains("<iconSet iconSet=\"4Rating\"><cfvo type=\"percent\" val=\"0\"/><cfvo type=\"num\" val=\"2\"/><cfvo type=\"num\" val=\"5\"/><cfvo type=\"num\" val=\"8\"/></iconSet>"),
+        "{xml}"
+    );
+    assert!(xml.contains("<iconSet iconSet=\"9Bogus\"><cfvo type=\"percent\" val=\"0\"/>"), "{xml}");
+    let (back, _) = read_xlsx(&bytes).unwrap();
+    let rules: Vec<usize> = back
+        .sheet(0)
+        .unwrap()
+        .cond_formats
+        .iter()
+        .map(|cf| match &cf.rule {
+            CfRule::IconSet { thresholds, .. } => thresholds.len(),
+            _ => 0,
+        })
+        .collect();
+    assert_eq!(rules, [3, 4, 5]);
+}
+
+/// Files have no `@` operator: Excel writes `@x` as `_xlfn.SINGLE(x)` in a dynamic-array
+/// formula, and reads it back as `@x`.
+#[test]
+fn implicit_intersection_is_written_as_single() {
+    let mut wb = Workbook::new();
+    let s = wb.sheet_mut(0).unwrap();
+    for (r, n) in [(0, 1.0), (1, 3.0), (2, 5.0)] {
+        s.set_value(CellRef::new(r, 0), Value::Number(n));
+    }
+    s.cells.set(at("D3"), Cell { value: Value::Number(10.0), ..Cell::formula(Formula::new("@A1:A3*2")) });
+    s.cells.set(at("D4"), Cell { value: Value::Number(2.0), ..Cell::formula(Formula::new("A1*2")) });
+    let bytes = write_xlsx(&wb).unwrap();
+    let (xml, metadata) = sheet1_xml(&bytes);
+    assert!(xml.contains("<c r=\"D3\" cm=\"1\"><f t=\"array\" ref=\"D3\">_xlfn.SINGLE(A1:A3)*2</f><v>10</v>"), "{xml}");
+    assert!(xml.contains("<c r=\"D4\"><f>A1*2</f>"), "{xml}");
+    assert!(!xml.contains('@'), "{xml}");
+    assert!(metadata);
+    let (back, _) = read_xlsx(&bytes).unwrap();
+    let sh = back.sheet(0).unwrap();
+    assert_eq!(sh.cell(at("D3")).and_then(|c| c.formula.as_ref()).map(|f| f.text.as_str()), Some("@A1:A3*2"));
+    assert_eq!(sh.cell(at("D3")).and_then(|c| c.formula.as_ref()).and_then(|f| f.array), None);
+}
+
+#[test]
+fn threaded_comments_write_persons_and_linked_legacy_notes() {
+    let wb = sample();
+    let bytes = write_xlsx(&wb).unwrap();
+    let mut pkg = Package::open(&bytes).unwrap();
+    let text = |pkg: &mut Package, part: &str| String::from_utf8(pkg.read(part).unwrap().unwrap()).unwrap();
+    // One person per author across the workbook, ids unique.
+    let persons = text(&mut pkg, "xl/persons/person.xml");
+    assert_eq!(persons.matches("<person ").count(), 3, "{persons}");
+    assert!(persons.contains("displayName=\"Ann &amp; Co\""));
+    let ct = text(&mut pkg, "[Content_Types].xml");
+    assert!(ct.contains("application/vnd.ms-excel.threadedcomments+xml") && ct.contains("application/vnd.ms-excel.person+xml"));
+    let tc = text(&mut pkg, "xl/threadedComments/threadedComment1.xml");
+    assert_eq!(tc.matches("<threadedComment ").count(), 4, "{tc}");
+    assert_eq!(tc.matches("parentId=").count(), 2);
+    assert_eq!(tc.matches("done=\"1\"").count(), 1);
+    // The legacy note of each thread points at it.
+    let legacy = text(&mut pkg, "xl/comments1.xml");
+    for id in tc.split("id=\"{").skip(1).filter_map(|s| s.split('}').next()).take(1) {
+        assert!(legacy.contains(&format!("<author>tc={{{id}}}</author>")) && legacy.contains(&format!("xr:uid=\"{{{id}}}\"")), "{legacy}");
+    }
+}
+
+#[test]
+fn bad_comment_dates_are_left_out() {
+    let mut wb = Workbook::new();
+    let s = Arc::make_mut(&mut wb.sheets[0]);
+    let c = Comment {
+        author: "A".into(),
+        text: "t".into(),
+        replies: vec![],
+        threaded: true,
+        resolved: false,
+        visible: false,
+        dates: vec!["\"/><evil".into()],
+    };
+    s.comments.insert(at("A1"), c);
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    let c = &back.sheets[0].comments[&at("A1")];
+    assert!(c.threaded && c.dates.is_empty());
 }

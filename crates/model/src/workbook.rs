@@ -71,6 +71,9 @@ pub struct Workbook {
     pub custom_lists: Vec<Vec<String>>,
     /// Named cell styles (Cell Styles gallery): name → style.
     pub cell_styles: Vec<(String, crate::style::Style)>,
+    /// Unmodelled file content kept for saving (package root and workbook level). Not in JSON.
+    #[serde(skip)]
+    pub preserved: Option<Arc<crate::preserved::Preserved>>,
 }
 
 impl Default for Workbook {
@@ -94,6 +97,7 @@ impl Workbook {
             protected_structure: false,
             custom_lists: vec![],
             cell_styles: vec![],
+            preserved: None,
         }
     }
     pub fn sheet(&self, i: usize) -> Option<&Sheet> {

@@ -318,3 +318,12 @@ fn ordinary_typing_editor_shortcuts_and_altgr_remain_text_input() {
     assert_eq!(h.state().keytips.prefix(), None, "macOS Option must remain available for text composition");
     assert_eq!(h.state().editor.as_ref().unwrap().text, "é");
 }
+
+#[test]
+fn vertical_alignment_keytips_run_their_commands() {
+    for (letter, id) in [(Key::T, "home.alignTop"), (Key::M, "home.alignMiddle"), (Key::B, "home.alignBottom")] {
+        let mut h = harness(blank());
+        sequence(&mut h, &[Key::H, Key::A, letter], false);
+        assert_eq!(h.state().session.journal.iter().filter(|(j, _)| j == id).count(), 1, "HA{} runs {id}", letter.name());
+    }
+}
