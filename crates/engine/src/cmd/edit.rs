@@ -192,8 +192,9 @@ pub(crate) fn input_to_cell(input: &str, sheet: usize, at: CellRef, wb: &mut gri
 }
 
 /// Like Excel, a formula that calls a built-in function with too few or too many arguments is
-/// refused when it's entered, rather than stored to show `#VALUE!`. Special forms the evaluator
-/// handles itself (IF, LET, LAMBDA…) and defined LAMBDA names aren't in the registry: skipped.
+/// refused when it's entered, rather than stored to show `#VALUE!`. Functions the registry doesn't
+/// hold (special forms like LET, LAMBDA, OFFSET, INDIRECT, SUBTOTAL), defined LAMBDA names and
+/// unknown functions are skipped.
 fn check_arg_counts(expr: &gridcraft_formula::Expr) -> Result<()> {
     let mut bad = None;
     expr.walk(&mut |e| {
