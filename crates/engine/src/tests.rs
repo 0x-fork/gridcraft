@@ -203,6 +203,45 @@ fn enter_values_and_formulas() {
 }
 
 #[test]
+fn formulas_with_the_wrong_argument_count_are_refused_on_entry() {
+    // #363: =DATEDIF(start, end) was stored and showed #VALUE!. Like Excel, entry refuses it and
+    // the message gives the signature, so the missing unit argument is visible.
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "kept"})).unwrap();
+    for (input, word) in [
+        ("=DATEDIF(DATE(2024,1,1),DATE(2024,3,15))", "few"),
+        ("=1+DATE(2024,1)", "few"),
+        ("=SUM()", "few"),
+        ("=IFERROR(1,LEFT(\"a\",1,2,3))", "many"),
+        ("=datedif(1,2,\"D\",4)", "many"),
+    ] {
+        let e = s.execute("cell.set", json!({"cell": "A1", "input": input})).unwrap_err().to_string();
+        assert!(e.contains(&format!("too {word} arguments")), "{input}: {e}");
+        assert_eq!(v(&s, "A1"), Value::text("kept"), "{input} must not replace the cell");
+    }
+    let e = s.execute("cell.set", json!({"cell": "A1", "input": "=DATEDIF(1,2)"})).unwrap_err().to_string();
+    assert!(e.contains("DATEDIF(start_date, end_date, unit)"), "{e}");
+    // Correct counts, optional arguments left empty, special forms, LAMBDA names and unknown
+    // functions (#NAME?) still enter.
+    s.execute("formulas.defineName", json!({"name": "TWICE", "refersTo": "=LAMBDA(x,x*2)"})).unwrap();
+    for (cell, input) in [
+        ("B1", "=DATEDIF(DATE(2024,1,1),DATE(2024,3,15),\"D\")"),
+        ("B2", "=IF(TRUE,1)"),
+        ("B3", "=LET(a,1,b,2,a+b)"),
+        ("B4", "=TWICE(4)"),
+        ("B5", "=NOSUCHFUNCTION(1,2,3)"),
+        ("B6", "=ROUND(2.5,)"),
+    ] {
+        s.execute("cell.set", json!({"cell": cell, "input": input})).unwrap_or_else(|e| panic!("{input}: {e}"));
+    }
+    assert_eq!(v(&s, "B1"), Value::Number(74.0));
+    assert_eq!(v(&s, "B4"), Value::Number(8.0));
+    // Pasted text that isn't a valid formula stays text, as it does for a parse error.
+    s.execute("edit.paste", json!({"at": "C1", "text": "=DATEDIF(1,2)\n"})).unwrap();
+    assert_eq!(v(&s, "C1"), Value::text("=DATEDIF(1,2)"));
+}
+
+#[test]
 fn undo_redo() {
     let mut s = s();
     s.execute("cell.set", json!({"cell": "A1", "input": "1"})).unwrap();

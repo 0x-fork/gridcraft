@@ -160,6 +160,11 @@ impl FnSpec {
             None => self.scalar_args.last().copied().unwrap_or(false),
         }
     }
+
+    /// Whether a call with `n` arguments is valid (Excel allows at most 255).
+    pub fn accepts(&self, n: usize) -> bool {
+        (self.min_args..=self.max_args).contains(&n) && n <= 255
+    }
 }
 
 /// Variadic marker for `max_args`.
@@ -215,7 +220,7 @@ pub fn all() -> &'static [FnSpec] {
 
 /// Calls a function with array lifting applied. Wrong arity gives `#VALUE!`.
 pub fn call(spec: &FnSpec, args: &[Arg], ctx: &mut dyn Ctx) -> Value {
-    if args.len() < spec.min_args || args.len() > spec.max_args || args.len() > 255 {
+    if !spec.accepts(args.len()) {
         return Value::Error(CellError::Value);
     }
     lift::call_lifted(spec, args, ctx)

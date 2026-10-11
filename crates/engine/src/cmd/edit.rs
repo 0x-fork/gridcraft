@@ -150,6 +150,7 @@ pub(crate) fn input_to_cell(input: &str, sheet: usize, at: CellRef, wb: &mut gri
         }
         let expr = parsed.map_err(|e| EngineError::Other(format!("There's a problem with this formula: {e}")))?;
         let expr = wb.name_call_case(expr);
+        check_arg_counts(&expr)?;
         let mut cell = Cell::formula(Formula::from_expr(expr));
         cell.style = style;
         // Formulas whose result is a date/time get a format from functions like TODAY().
@@ -188,6 +189,28 @@ pub(crate) fn input_to_cell(input: &str, sheet: usize, at: CellRef, wb: &mut gri
         style = wb.styles.derive(style, |s| s.align.wrap = true);
     }
     Ok(Some(Cell { value: parsed.value, formula: None, style }))
+}
+
+/// Like Excel, a formula that calls a built-in function with too few or too many arguments is
+/// refused when it's entered, rather than stored to show `#VALUE!`. Functions the registry doesn't
+/// hold (special forms like LET, LAMBDA, OFFSET, INDIRECT, SUBTOTAL), defined LAMBDA names and
+/// unknown functions are skipped.
+fn check_arg_counts(expr: &gridcraft_formula::Expr) -> Result<()> {
+    let mut bad = None;
+    expr.walk(&mut |e| {
+        if bad.is_none()
+            && let gridcraft_formula::Expr::Call(name, args) = e
+            && let Some(spec) = gridcraft_functions::lookup(name)
+            && !spec.accepts(args.len())
+        {
+            let few = args.len() < spec.min_args;
+            bad = Some(format!("{} has too {} arguments. Use {}", spec.name, if few { "few" } else { "many" }, spec.signature));
+        }
+    });
+    match bad {
+        Some(msg) => Err(EngineError::Other(msg)),
+        None => Ok(()),
+    }
 }
 
 fn cell_set(s: &mut Session, p: &Json) -> Result<Json> {

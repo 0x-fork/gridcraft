@@ -142,3 +142,21 @@ fn cell_editor_and_helper_stay_below_the_frozen_top_row() {
     frames(&ctx, &mut app);
     assert!(visible(&ctx, "gridcraft.cell_editor"), "scrolling back restores the helper");
 }
+
+#[test]
+fn argument_hint_shows_the_function_description() {
+    // #363: inside DATEDIF( the hint lists the units the third argument takes.
+    let ctx = Context::default();
+    let mut session = Session::new();
+    session.new_workbook();
+    let mut app = SheetApp::new(session, Default::default());
+    frames(&ctx, &mut app);
+    app.begin_edit(Some("=DATEDIF(A1,B1,".into()), false);
+    frames(&ctx, &mut app);
+    let output = frame(&ctx, &mut app);
+    let texts: Vec<&egui::epaint::TextShape> =
+        output.shapes.iter().filter_map(|s| if let egui::Shape::Text(t) = &s.shape { Some(t) } else { None }).collect();
+    assert!(texts.iter().any(|t| t.galley.text() == "DATEDIF("), "signature painted");
+    let desc = texts.iter().find(|t| t.galley.text().contains("YM or YD")).expect("description with the units painted");
+    assert!(desc.galley.rect.width() <= 400.0, "description wraps instead of widening the hint: {}", desc.galley.rect.width());
+}

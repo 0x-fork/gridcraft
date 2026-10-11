@@ -54,3 +54,6 @@ sync_github_name = true
 [people.GhostMitra]
 sync_github_name = true
 
+[people.shrshk]
+real_name = "Shirish Veerabattini"
+sync_github_name = true
