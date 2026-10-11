@@ -8,10 +8,34 @@ use std::path::Path;
 
 const TABS: &[&str] = &["Home", "Insert", "Draw", "Page Layout", "Formulas", "Data", "Review", "View", "Automate"];
 
+/// Format generated source through `rustfmt` so the checked-in file matches
+/// the emitter byte-for-byte.
+fn rustfmt(src: &str) -> Result<String, String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new("rustfmt")
+        .args(["--edition", "2024", "--emit", "stdout"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("spawn rustfmt: {e}"))?;
+    let stdin = child.stdin.as_mut().ok_or("rustfmt: failed to open stdin")?;
+    stdin.write_all(src.as_bytes()).map_err(|e| format!("write rustfmt stdin: {e}"))?;
+    let out = child.wait_with_output().map_err(|e| format!("wait rustfmt: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("rustfmt failed: {}", String::from_utf8_lossy(&out.stderr)));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
 pub fn run(root: &Path, rest: &[&str]) -> Result<(), String> {
     let json_path = root.join("crates/ui-egui/src/keytips/keytips.json");
     let out_path = root.join("crates/ui-egui/src/keytips/keytip_table/generated.rs");
-    let generated = generate(&fs::read_to_string(&json_path).map_err(|e| format!("read {}: {e}", json_path.display()))?)?;
+    let raw = generate(&fs::read_to_string(&json_path).map_err(|e| format!("read {}: {e}", json_path.display()))?)?;
+    // The table is checked into the tree formatted, so emit through rustfmt:
+    // otherwise `--check` always fails against the fmt'd file.
+    let generated = rustfmt(&raw)?;
     if rest.contains(&"--check") {
         let on_disk = fs::read_to_string(&out_path).map_err(|e| format!("read {}: {e}", out_path.display()))?;
         if on_disk != generated {
@@ -34,8 +58,8 @@ pub fn generate(source: &str) -> Result<String, String> {
     for (i, entry) in seqs.iter().enumerate() {
         let at = format!("entry {}", i + 1);
         let seq = entry.get("seq").and_then(|v| v.as_str()).ok_or_else(|| format!("{at}: missing `seq`"))?;
-        if seq.is_empty() || seq.len() > 4 || !seq.bytes().all(|b| b.is_ascii_alphanumeric()) {
-            return Err(format!("{at}: seq {seq:?} must be 1-4 ASCII letters/digits"));
+        if seq.is_empty() || seq.len() > 6 || !seq.bytes().all(|b| b.is_ascii_alphanumeric()) {
+            return Err(format!("{at}: seq {seq:?} must be 1-6 ASCII letters/digits (Excel's longest are 5, e.g. sparkline paths)"));
         }
         if !seen.insert(seq.to_string()) {
             return Err(format!("{at}: duplicate seq {seq:?}"));

@@ -174,6 +174,7 @@ fn keyboard_opened_paste_menu_accepts_a_mouse_click_after_keytips_cancel() {
 #[test]
 fn legacy_paste_special_keeps_formulas_when_requested() {
     let mut h = harness(copied_row());
+    // The legacy Edit route opens the dialog directly; F is a dialog mnemonic.
     sequence(&mut h, &[Key::E, Key::S], false);
     assert_eq!(h.state().dialog.as_ref().unwrap().name(), "pasteSpecial");
     letter(&mut h, Key::F, false);
@@ -306,6 +307,12 @@ fn tab_letters_switch_to_their_ribbon_tabs() {
         key(&mut h, Key::F10); // disarm
         assert_eq!(h.state().keytips.prefix(), None);
     }
+    // A terminal tab unit with no deeper sequences finishes and clears.
+    letter(&mut h, Key::J, false);
+    assert_eq!(h.state().keytips.prefix(), Some("J"), "J waits for its multi-letter unit");
+    letter(&mut h, Key::I, false);
+    assert_eq!(h.state().ui.ribbon_tab, "Draw");
+    assert_eq!(h.state().keytips.prefix(), None, "terminal tab units finish cleanly");
 }
 
 #[test]

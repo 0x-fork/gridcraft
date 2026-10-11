@@ -92,10 +92,14 @@ impl KeyTips {
                     } else if self.prefix.is_some() && !matches!(key, Key::ShiftLeft | Key::ShiftRight) {
                         handled = true;
                         if *key == Key::Escape {
-                            if let Some(prefix) = self.prefix.as_mut()
-                                && prefix.pop().is_none()
-                            {
-                                self.prefix = None;
+                            // Escape pops one level; at a single-letter level it
+                            // returns to the armed root (empty prefix).
+                            if let Some(prefix) = self.prefix.as_mut() {
+                                if prefix.is_empty() {
+                                    self.prefix = None;
+                                } else {
+                                    prefix.pop();
+                                }
                             }
                         } else if key.name().len() == 1 {
                             let next = format!("{}{key_name}", self.prefix.as_deref().unwrap_or_default(), key_name = key.name());
