@@ -335,10 +335,13 @@ fn home(app: &mut SheetApp, ui: &mut Ui) {
     // Keep a keyboard-opened menu anchored to the button when a pointer click
     // cancels keytips, so its items remain in place and can still be clicked.
     let anchor_id = paste.id.with("keytip_anchor");
+    // Query response state before taking the egui context write lock.
+    // Calling secondary_clicked() inside data_mut can deadlock.
+    let paste_secondary_clicked = paste.secondary_clicked();
     let anchored = ui.ctx().data_mut(|data| {
         let anchored = if paste_keys {
             true
-        } else if paste.secondary_clicked() {
+        } else if paste_secondary_clicked {
             false
         } else {
             data.get_temp::<bool>(anchor_id).unwrap_or(false)
