@@ -4,7 +4,7 @@
 
 Each entry is an Excel ribbon or menu command (feature names only). It counts as implemented when GridCraft registers a command with the same id. This measures breadth only; the overall assessment (depth, fidelity, effort) is in [target-app-parity.md](target-app-parity.md).
 
-**Overall: 260 / 290 commands implemented (89.7%).**
+**Overall: 266 / 290 commands implemented (91.7%).**
 
 | Tab | Implemented | Total | Parity |
 |---|---|---|---|
@@ -14,8 +14,8 @@ Each entry is an Excel ribbon or menu command (feature names only). It counts as
 | Draw | 4 | 4 | 100% |
 | Page Layout | 23 | 23 | 100% |
 | Formulas | 23 | 23 | 100% |
-| Data | 21 | 28 | 75% |
-| Review | 9 | 18 | 50% |
+| Data | 22 | 28 | 79% |
+| Review | 10 | 18 | 56% |
 | View | 20 | 20 | 100% |
 | Automate | 3 | 3 | 100% |
 | Table Design | 12 | 13 | 92% |
@@ -237,7 +237,7 @@ Implemented:
 - `formulas.calculateNow` Calculate Now (Calculation)
 - `formulas.calculateSheet` Calculate Sheet (Calculation)
 
-## Data (21 / 28, 75%)
+## Data (22 / 28, 79%)
 
 Implemented:
 
@@ -261,8 +261,8 @@ Implemented:
 - `data.subtotal` Subtotal (Outline)
 - `data.showDetail` Show Detail (Outline)
 - `data.hideDetail` Hide Detail (Outline)
-- `data.analysisToolPak` Data Analysis (Analysis)
 - `data.solver` Solver (Analysis)
+- `data.analysisToolPak` Data Analysis (Analysis)
 
 Missing:
 
@@ -272,8 +272,6 @@ Missing:
 - `data.relationships` Relationships (Data Tools)
 - `data.forecastSheet` Forecast Sheet (Forecast)
 - `data.analyzeData` Analyze Data (Analysis)
-- `data.solver` Solver (Analysis)
-- `data.analysisToolPak` Data Analysis (Analysis)
 
 ## Review (10 / 18, 56%)
 
