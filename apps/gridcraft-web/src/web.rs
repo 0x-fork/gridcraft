@@ -295,11 +295,22 @@ fn download(name: &str, bytes: &[u8]) -> Result<(), String> {
         let prom: js_sys::Promise = prom_val.dyn_into().map_err(|_| "not a promise".to_string())?;
 
         let bytes_vec = bytes.to_vec();
+        let name_owned = name.to_string();
+        // Anything but the user cancelling (no user gesture, a denied permission, a failed write)
+        // falls back to an ordinary download, so a save never fails silently.
+        let fallback = move |bytes: &[u8]| {
+            if let Some(w) = web_sys::window()
+                && let Err(e) = trigger_anchor_download(&w, &name_owned, bytes)
+            {
+                log::error!("download fallback failed: {e}");
+            }
+        };
         wasm_bindgen_futures::spawn_local(async move {
             match wasm_bindgen_futures::JsFuture::from(prom).await {
                 Ok(handle_val) => {
                     if let Err(e) = write_file_handle(&handle_val, &bytes_vec).await {
                         log::error!("failed writing to file handle: {e}");
+                        fallback(&bytes_vec);
                     } else {
                         log::info!("Successfully saved file through save file picker");
                     }
@@ -309,7 +320,8 @@ fn download(name: &str, bytes: &[u8]) -> Result<(), String> {
                     if err_name == "AbortError" {
                         log::info!("Save file dialog cancelled by user");
                     } else {
-                        log::error!("showSaveFilePicker error: {e:?}");
+                        log::warn!("showSaveFilePicker refused ({err_name}); downloading instead");
+                        fallback(&bytes_vec);
                     }
                 }
             }
