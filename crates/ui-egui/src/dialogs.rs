@@ -13,6 +13,7 @@ use crate::theme;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Field {
     Text { key: &'static str, label: &'static str },
+    Password { key: &'static str, label: &'static str },
     Number { key: &'static str, label: &'static str },
     Choice { key: &'static str, label: &'static str, options: Vec<(&'static str, &'static str)> },
     Check { key: &'static str, label: &'static str },
@@ -31,6 +32,8 @@ pub struct Dialog {
     pub search: String,
     pub list_index: usize,
     pub result: Option<Json>,
+    /// "Show password" is ticked: password fields show their text.
+    pub show_password: bool,
     picture_inbox: Option<crate::Inbox>,
     picture_target: Option<(u64, usize)>,
 }
@@ -51,6 +54,7 @@ impl Dialog {
             search: String::new(),
             list_index: 0,
             result: None,
+            show_password: false,
             picture_inbox: None,
             picture_target: None,
         }
@@ -67,6 +71,7 @@ impl Dialog {
             search: String::new(),
             list_index: 0,
             result: None,
+            show_password: false,
             picture_inbox: None,
             picture_target: None,
         }
@@ -151,7 +156,7 @@ impl Dialog {
                 "Protect Sheet",
                 "review.protectSheet",
                 vec![
-                    Text { key: "password", label: "Password (optional):" },
+                    Password { key: "password", label: "Password (optional):" },
                     Note("Allow all users of this sheet to:".into()),
                     Check { key: "formatCells", label: "Format cells" },
                     Check { key: "formatColumns", label: "Format columns" },
@@ -167,7 +172,7 @@ impl Dialog {
                 "unprotectSheet",
                 "Unprotect Sheet",
                 "review.unprotectSheet",
-                vec![Text { key: "password", label: "Password:" }],
+                vec![Password { key: "password", label: "Password:" }],
                 json!({}),
             ),
             "unhideSheet" => {
@@ -987,6 +992,17 @@ fn form(ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, open: &mut bool) 
                         if r.changed() {
                             d.values.insert(key.into(), json!(s));
                         }
+                    });
+                }
+                Field::Password { key, label } => {
+                    // Masked as typed (Excel shows dots); "Show password" reveals it on purpose.
+                    ui.vertical(|ui| {
+                        ui.label(label);
+                        let mut s = d.values.get(key).and_then(Json::as_str).unwrap_or_default().to_string();
+                        if ui.add(egui::TextEdit::singleline(&mut s).password(!d.show_password).desired_width(320.0)).changed() {
+                            d.values.insert(key.into(), json!(s));
+                        }
+                        ui.checkbox(&mut d.show_password, "Show password");
                     });
                 }
                 Field::Number { key, label } => {
