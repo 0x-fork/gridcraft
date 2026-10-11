@@ -15,6 +15,7 @@ mod array_formula;
 mod cfb;
 mod chart;
 mod chartex;
+mod crypto;
 mod csv;
 mod drawing;
 mod feature_bags;
@@ -29,6 +30,8 @@ mod sheet_read;
 mod sheet_write;
 mod styles;
 mod tables;
+#[cfg(test)]
+pub(crate) mod testing;
 mod theme;
 mod write;
 mod xls;
@@ -41,6 +44,7 @@ mod tests;
 use gridcraft_core::DateSystem;
 use gridcraft_model::Workbook;
 
+pub use crypto::{DecryptError, decrypt};
 pub use csv::{read_csv, write_csv};
 pub use ods::read_ods;
 pub use xls::read_xls;
