@@ -37,6 +37,36 @@ pub fn sheet_tabs(app: &mut SheetApp, ui: &mut Ui) {
                     .filter(|(_, s)| s.visibility == Visibility::Visible)
                     .map(|(i, s)| (i, s.name.clone(), s.tab_color.and_then(|c| c.resolve(&d.wb.theme)), i == d.wb.active_sheet))
                     .collect();
+            // Keep worksheet tabs in their own horizontally scrollable
+            // viewport, leaving room for the New Sheet button and grid scrollbar.
+            let tabs_width = (ui.available_width() - 180.0).max(100.0);
+            ui.allocate_ui_with_layout(
+                vec2(tabs_width, 30.0),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    // Translate vertical wheel movement into horizontal
+                    // worksheet-tab scrolling.
+                    let wheel_scroll = if ui.rect_contains_pointer(ui.max_rect()) {
+                        ui.input(|i| {
+                            let d = i.smooth_scroll_delta;
+                            if d.x.abs() > d.y.abs() { d.x } else { d.y }
+                        })
+                    } else {
+                        0.0
+                    };
+
+                    egui::ScrollArea::horizontal()
+                        .id_salt("worksheet_tabs_horizontal")
+                        .auto_shrink([false, false])
+                        .scroll_bar_visibility(
+                            egui::scroll_area::ScrollBarVisibility::AlwaysHidden
+                        )
+                        .show(ui, |ui| {
+                            if wheel_scroll.abs() > 0.0 {
+                                ui.scroll_with_delta(vec2(wheel_scroll, 0.0));
+                            }
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 0.0;
             for (i, name, color, active) in sheets {
                 let renaming = app.grid.renaming_tab == Some(i);
                 let font = if active { theme::ui_bold(13.0) } else { theme::ui_font(13.0) };
@@ -146,6 +176,10 @@ pub fn sheet_tabs(app: &mut SheetApp, ui: &mut Ui) {
                     }
                 });
             }
+                            });
+                        });
+                },
+            );
             ui.add_space(6.0);
             if crate::widgets::icon_button(ui, Icon::Plus, t.text_dim, "New sheet (⇧F11)", vec2(26.0, 26.0)).clicked() {
                 app.run_or_alert("home.insertSheet", json!({}));
