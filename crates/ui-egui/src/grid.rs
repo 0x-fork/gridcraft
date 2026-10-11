@@ -934,10 +934,17 @@ pub(crate) fn paint_quadrant(
             continue;
         }
         let first_line = text.lines().next().unwrap_or("").to_string();
+        // Shrink to fit: too-wide content is drawn in a smaller font so it fits the cell (or the
+        // merged area): it neither spills, nor is clipped, nor turns into ####.
+        let small = (st.align.shrink && !rotated && st.align.h != HAlign::Fill && fill_char.is_none())
+            .then(|| shrink_font(p, &first_line, &font, avail_w - 2.0 * pad - indent))
+            .flatten();
+        let shrunk = small.is_some();
+        let font = small.unwrap_or(font);
         let mut galley = p.layout_no_wrap(first_line.clone(), font.clone(), color);
         let mut w = galley.size().x;
         // Numbers and dates never overflow: they show #### when too narrow.
-        if (numeric || matches!(v, Value::Number(_))) && w > avail_w - 2.0 * pad && st.align.h != HAlign::Fill {
+        if !shrunk && (numeric || matches!(v, Value::Number(_))) && w > avail_w - 2.0 * pad && st.align.h != HAlign::Fill {
             let n = ((avail_w - 2.0 * pad) / char_w).floor().max(1.0) as usize;
             galley = p.layout_no_wrap("#".repeat(n), font.clone(), color);
             w = galley.size().x;
@@ -1159,6 +1166,19 @@ fn merged_edges(
         out.push((right, [pos2(rect.right(), y0), pos2(rect.right(), y1)]));
     }
     out
+}
+
+/// The smaller font that makes `text` fit in `room` points of width (Shrink to fit), or `None`
+/// when it already fits at its own size.
+fn shrink_font(p: &Painter, text: &str, font: &FontId, room: f32) -> Option<FontId> {
+    let natural = p.layout_no_wrap(text.to_string(), font.clone(), Color32::PLACEHOLDER).size().x;
+    let room = room.max(1.0);
+    if natural.is_nan() || natural <= room {
+        return None;
+    }
+    // Glyph advances don't scale exactly linearly (rounding), so leave a little slack.
+    let size = (font.size * room / natural * 0.97).max(1.0);
+    Some(FontId::new(size, font.family.clone()))
 }
 
 pub(crate) fn paint_border(p: &Painter, pts: [Pos2; 2], style: BorderStyle, col: Color32) {
