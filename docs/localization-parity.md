@@ -12,7 +12,7 @@ right-to-left sheets and full complex-script support. Part of
 - **A first catalog exists, for the ribbon only.** `crates/ui-egui/src/i18n.rs` (merged 10-10 in
   #31, #104, #82; German added 10-11) adds an interface-language preference that defaults to the
   system language (closes #20) and a View-tab switcher, with English-keyed lookup tables:
-  Japanese 268 labels, Simplified Chinese, Korean, Russian, Brazilian Portuguese and German 266
+  Japanese 268 labels, Simplified Chinese, Korean, Russian, Brazilian Portuguese, German and Czech 266
   each. The tables are used by
   the ribbon, sheet tabs and widgets (`ribbon.rs`, `tabs.rs`, `widgets.rs`); dialogs, menus,
   context menus, task panes, status messages, command labels and function descriptions are still
