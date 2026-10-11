@@ -869,3 +869,59 @@ fn scroll_position_round_trips_with_and_without_frozen_panes() {
     let (xml, _) = sheet1_xml(&write_xlsx(&wb).unwrap());
     assert!(xml.contains(r#"topLeftCell="A2""#), "{xml}");
 }
+
+/// Excel stores LET/LAMBDA parameters as `_xlpm.name`; the model shows bare names.
+#[test]
+fn let_lambda_parameters_drop_xlpm_on_read() {
+    let mut wb = Workbook::new();
+    let s = wb.sheet_mut(0).unwrap();
+    s.cells.set(at("A1"), Cell { value: Value::Number(2.0), ..Cell::formula(Formula::new("LET(x,1,x+1)")) });
+    s.cells.set(at("A2"), Cell { value: Value::Number(6.0), ..Cell::formula(Formula::new("LAMBDA(a,a*2)(3)")) });
+    let mut arr = Formula::new("MAP(B1:B2,LAMBDA(v,v+1))");
+    arr.array = Some(rr("C1:C2"));
+    s.cells.set(at("C1"), Cell::formula(arr));
+    let bytes = write_xlsx(&wb).unwrap();
+    let (xml, _) = sheet1_xml(&bytes);
+    assert!(xml.contains("_xlfn.LET(_xlpm.x,1,_xlpm.x+1)"), "{xml}");
+    assert!(xml.contains("_xlpm.v"), "{xml}");
+    let (back, _) = read_xlsx(&bytes).unwrap();
+    let sh = back.sheet(0).unwrap();
+    let text = |a: &str| sh.cell(at(a)).and_then(|c| c.formula.as_ref()).map(|f| f.text.clone());
+    assert_eq!(text("A1").as_deref(), Some("LET(x,1,x+1)"));
+    assert_eq!(text("A2").as_deref(), Some("LAMBDA(a,a*2)(3)"));
+    assert_eq!(text("C1").as_deref(), Some("MAP(B1:B2,LAMBDA(v,v+1))"));
+}
+
+/// A line break in a table column name (and its header cell) survives; a
+/// leading backslash in a table name is legal and kept.
+#[test]
+fn table_newline_column_and_backslash_name_survive() {
+    let mut wb = Workbook::new();
+    let s = wb.sheet_mut(0).unwrap();
+    s.set_value(at("A1"), Value::text("Handle\nBars"));
+    s.set_value(at("B1"), Value::text("Name"));
+    s.set_value(at("B2"), Value::text("x"));
+    let col = |n: &str| TableColumn { name: n.into(), totals: TotalsFn::None, totals_label: None, formula: None };
+    s.tables.push(Table {
+        id: 1,
+        name: "\\_Prime.1".into(),
+        range: rr("A1:B2"),
+        header_row: true,
+        totals_row: false,
+        columns: vec![col("Handle\nBars"), col("Name")],
+        style: String::new(),
+        banded_rows: true,
+        banded_cols: false,
+        first_col: false,
+        last_col: false,
+        filter_button: true,
+    });
+    s.cells.set(at("D1"), Cell::formula(Formula::new("COUNTA(\\_Prime.1[Name])")));
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    let s = back.sheet(0).unwrap();
+    assert_eq!(s.tables[0].name, "\\_Prime.1");
+    assert_eq!(s.tables[0].columns[0].name, "Handle\nBars");
+    assert_eq!(s.value(at("A1")), Value::text("Handle\nBars"));
+    assert_eq!(s.cell(at("D1")).and_then(|c| c.formula.as_ref()).map(|f| f.text.as_str()), Some("COUNTA(\\_Prime.1[Name])"));
+    assert!(gridcraft_formula::parse("COUNTA(\\_Prime.1[Name])").is_ok(), "backslash table name parses as a structured reference");
+}

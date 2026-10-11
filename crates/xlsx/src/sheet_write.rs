@@ -35,10 +35,12 @@ fn cf_op_name(op: CfOperator) -> &'static str {
     }
 }
 
-/// Valid table name: letters, digits, `_` and `.`, starting with a letter or `_`.
+/// Valid table name: letters, digits, `_` and `.`, starting with a letter, `_` or `\`
+/// (Microsoft "Names in formulas" rules).
 fn table_name(name: &str, used: &mut HashSet<String>, n: u32) -> String {
-    let mut s: String = name.chars().map(|c| if c.is_alphanumeric() || c == '_' || c == '.' { c } else { '_' }).collect();
-    if s.is_empty() || !s.starts_with(|c: char| c.is_alphabetic() || c == '_') || gridcraft_core::CellRef::parse(&s).is_some() {
+    let mut s: String =
+        name.chars().enumerate().map(|(i, c)| if c.is_alphanumeric() || c == '_' || c == '.' || (i == 0 && c == '\\') { c } else { '_' }).collect();
+    if s.is_empty() || !s.starts_with(|c: char| c.is_alphabetic() || c == '_' || c == '\\') || gridcraft_core::CellRef::parse(&s).is_some() {
         s = format!("Table{n}");
     }
     let mut out = s.clone();
@@ -56,12 +58,7 @@ fn table_columns(t: &Table) -> Vec<String> {
     let mut used = HashSet::new();
     (0..w)
         .map(|i| {
-            let base = t
-                .columns
-                .get(i)
-                .map(|c| c.name.replace(['\r', '\n'], " "))
-                .filter(|n| !n.trim().is_empty())
-                .unwrap_or_else(|| format!("Column{}", i + 1));
+            let base = t.columns.get(i).map(|c| c.name.clone()).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| format!("Column{}", i + 1));
             let mut name = base.clone();
             let mut k = 2;
             while !used.insert(name.to_lowercase()) {

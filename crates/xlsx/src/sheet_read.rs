@@ -454,7 +454,8 @@ fn read_cell(cx: &mut Ctx<'_>, sheet: &mut Sheet, st: &mut RowState, c: &El, pos
 }
 
 fn read_formula(cx: &mut Ctx<'_>, st: &mut RowState, f: &El, pos: CellRef, dynamic: bool) -> Option<Formula> {
-    let text = f.text.trim();
+    let model = from_file(f.text.trim());
+    let text = model.as_str();
     match f.attr("t").unwrap_or("normal") {
         "shared" => {
             let si = f.attr_u32("si")?;
