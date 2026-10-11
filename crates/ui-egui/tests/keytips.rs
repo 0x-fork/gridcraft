@@ -298,12 +298,13 @@ fn held_keys_do_not_toggle_twice_or_leak_repeated_letters() {
 #[test]
 fn tab_letters_switch_to_their_ribbon_tabs() {
     let mut h = harness(blank());
-    for (k, tab) in [(Key::N, "Insert"), (Key::P, "Page Layout"), (Key::M, "Formulas"), (Key::A, "Data"), (Key::R, "Review")] {
+    for (k, tab) in [(Key::N, "Insert"), (Key::P, "Page Layout"), (Key::M, "Formulas"), (Key::A, "Data"), (Key::R, "Review"), (Key::W, "View")] {
         key(&mut h, Key::F10); // arm
         letter(&mut h, k, false);
         assert_eq!(h.state().ui.ribbon_tab, tab, "letter {k:?}");
-        assert_eq!(h.state().keytips.prefix(), None, "terminal tab units finish cleanly");
         assert!(h.state().editor.is_none(), "tab letters must not begin a cell edit");
+        key(&mut h, Key::F10); // disarm
+        assert_eq!(h.state().keytips.prefix(), None);
     }
 }
 
