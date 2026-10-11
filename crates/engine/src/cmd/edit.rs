@@ -1,6 +1,6 @@
 //! Cell entry, selection, undo/redo, clipboard, clear, fill, find & replace.
 
-use gridcraft_core::{CellRef, MAX_COLS, MAX_ROWS, RangeRef, Value};
+use gridcraft_core::{CellRef, MAX_ROWS, RangeRef, Value};
 use gridcraft_model::{Cell, Formula, StyleId};
 use serde_json::{Value as Json, json};
 
@@ -47,7 +47,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Paste",
             ["Home", "Clipboard"],
             Some("Cmd+V"),
-            "{at?: \"C3\", text?: \"tab-separated text from the system clipboard\"}",
+            "{at?: \"C3\", text?: \"tab-separated text from the system clipboard\", html?: \"the clipboard's HTML flavour; cells the source recorded as numbers (x:num, sdval) stay numbers\"}",
             has_doc,
             paste
         ),
@@ -79,7 +79,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "AutoFill",
             [],
             None,
-            "{source: \"A1:A2\", target: \"A1:A10\", mode?: series|copy|formats|values}: the fill-handle drag",
+            "{source: \"A1:A2\", target: \"A1:A10\", mode?: series|alternate|copy|formats|values}: the fill-handle drag (alternate = Ctrl+drag: a lone number counts up, any other series copies)",
             has_doc,
             auto_fill
         ),
@@ -92,7 +92,7 @@ pub fn specs() -> Vec<CommandSpec> {
             has_doc,
             fill_series
         ),
-        cmd!("edit.flashFill", "Flash Fill", ["Home", "Editing", "Fill"], Some("Cmd+E"), "{range?}", has_doc, flash_fill),
+        cmd!("edit.flashFill", "Flash Fill", ["Home", "Editing", "Fill"], Some("Ctrl+E"), "{range?}", has_doc, flash_fill),
         cmd!(noundo "edit.find", "Find…", ["Home", "Editing", "Find & Select"], Some("Cmd+F"), "{what, matchCase?, wholeCell?, lookIn?: formulas|values, byColumns?, all?: bool, within?: sheet|workbook}", has_doc, find),
         cmd!(
             "edit.replace",
@@ -192,17 +192,23 @@ pub(crate) fn input_to_cell(input: &str, sheet: usize, at: CellRef, wb: &mut gri
 
 fn cell_set(s: &mut Session, p: &Json) -> Result<Json> {
     let sheet = target_sheet(s, p)?;
-    let at = match cell_param(p, "cell") {
+    let at = match cell_param_on(s, p, "cell", sheet)? {
         Some(c) => c,
         None => s.doc()?.selection.active,
     };
-    let input =
-        str_param(p, "input").or_else(|| str_param(p, "value")).map(str::to_string).or_else(|| p.get("value").map(json_to_input)).unwrap_or_default();
+    let input = str_param(p, "input")
+        .or_else(|| str_param(p, "value"))
+        .map(str::to_string)
+        .or_else(|| p.get("value").map(json_to_input))
+        .ok_or_else(|| bad("cell.set", "missing `input` (or `value`)"))?;
     let array = bool_param(p, "array").unwrap_or(false);
-    let protected =
-        s.doc()?.wb.sheet(sheet).is_some_and(|sh| sh.is_protected() && s.doc().is_ok_and(|d| d.wb.styles.get(sh.style_id(at)).protection.locked));
-    if protected {
-        return Err(EngineError::Other("The cell or chart you're trying to change is on a protected sheet.".into()));
+    let d = s.doc()?;
+    if let Some(sh) = d.wb.sheet(sheet)
+        && sh.is_protected()
+        && d.wb.styles.get(sh.style_id(at)).protection.locked
+        && let Some(m) = locked_cell_error(sh, at, &d.unlocked_ranges)
+    {
+        return Err(EngineError::Other(m));
     }
     edit(s, |cx| {
         if array {
@@ -340,8 +346,9 @@ fn selection_set(s: &mut Session, p: &Json) -> Result<Json> {
         s.doc_mut()?.wb_switch_sheet(i);
     }
     let ranges = target_ranges(s, p)?;
+    let active = cell_param(s, p, "active")?;
     let d = s.doc_mut()?;
-    let active = cell_param(p, "active").or_else(|| ranges.last().map(|r| r.start)).unwrap_or_default();
+    let active = active.or_else(|| ranges.last().map(|r| r.start)).unwrap_or_default();
     let mut sel = crate::Selection { active, anchor: ranges.last().map(|r| r.start).unwrap_or(active), ranges };
     if let Some(sh) = d.wb.active() {
         sel.expand_merges(sh);
@@ -408,9 +415,9 @@ fn selection_move(s: &mut Session, p: &Json) -> Result<Json> {
         if !extend && let Some(m) = sheet.merge_at(from) {
             // Leaving a merged cell moves from its edge.
             if dr > 0 {
-                t = CellRef::new((m.end.row + dr as u32).min(MAX_ROWS - 1), from.col);
+                t = CellRef::new(m.end.offset_clamped(dr, 0).row, from.col);
             } else if dc > 0 {
-                t = CellRef::new(from.row, (m.end.col + dc as u32).min(MAX_COLS - 1));
+                t = CellRef::new(from.row, m.end.offset_clamped(0, dc).col);
             }
         }
         t
@@ -604,31 +611,119 @@ fn redo(s: &mut Session, p: &Json) -> Result<Json> {
 // ---------------------------------------------------------------- clipboard
 
 fn copy_impl(s: &mut Session, p: &Json, cut: bool) -> Result<Json> {
+    let multiple = || EngineError::Other("This action won't work on multiple selections.".into());
     let sheet = target_sheet(s, p)?;
     let ranges = target_ranges(s, p)?;
-    if ranges.len() > 1 {
-        return Err(EngineError::Other("This action won't work on multiple selections.".into()));
+    if ranges.len() > 1 && cut {
+        return Err(multiple());
     }
-    let range = ranges.first().copied().unwrap_or_default();
+    // The selection as made (untrimmed), for Insert Copied Cells.
+    let selected = ranges.first().copied().unwrap_or_default();
     let d = s.doc()?;
     let Some(sh) = d.wb.sheet(sheet) else { return Err(EngineError::NoDocument) };
-    let range = if range.is_full_cols() || range.is_full_rows() {
-        let used = sh.used_range().unwrap_or(RangeRef::cell(range.start));
-        range.intersection(&used.union(&RangeRef::cell(range.start))).unwrap_or(range)
-    } else {
-        range
+    let trim = |range: RangeRef| {
+        if range.is_full_cols() || range.is_full_rows() {
+            let used = sh.used_range().unwrap_or(RangeRef::cell(range.start));
+            range.intersection(&used.union(&RangeRef::cell(range.start))).unwrap_or(range)
+        } else {
+            range
+        }
     };
-    let text = crate::display::range_text(&d.wb, sheet, range);
+    let (wb, range, areas) = if ranges.len() > 1 {
+        let areas: Vec<RangeRef> = ranges.iter().map(|r| trim(*r)).collect();
+        let (wb, block) = slide_together(&d.wb, sheet, &areas).ok_or_else(multiple)?;
+        (std::sync::Arc::new(wb), block, areas)
+    } else {
+        (d.wb.clone(), trim(ranges.first().copied().unwrap_or_default()), Vec::new())
+    };
+    let text = crate::display::range_text(&wb, sheet, range);
     // The HTML rendering is for the host clipboard (UI); it can reach 4 MB, so agents and
     // scripts get it only when they ask for it.
-    let html = if p.get("html").and_then(Json::as_bool) == Some(true) { crate::io::range_html(&d.wb, sheet, range, &text) } else { None };
-    let clip = Clipboard { wb: d.wb.clone(), sheet, range, cut, doc_uid: d.uid, text: text.clone() };
+    let html = if p.get("html").and_then(Json::as_bool) == Some(true) { crate::io::range_html(&wb, sheet, range, &text) } else { None };
+    let clip = Clipboard { wb, sheet, range, cut, doc_uid: d.uid, text: text.clone(), areas, selected };
     s.clipboard = Some(clip);
     let mut result = json!({"range": range.a1(), "text": text});
     if let Some(html) = html {
         result["html"] = Json::String(html);
     }
     Ok(result)
+}
+
+/// Excel copies a multi-area selection only when the areas line up: all cover the same rows (they
+/// slide together side by side, left to right) or all cover the same columns (stacked, top to
+/// bottom), without overlapping. Returns a copy of the workbook whose sheet holds the areas packed
+/// into one block at the first area's place, and that block. Formulas travel as their values, as
+/// in Excel. `None` when the areas don't line up.
+fn slide_together(wb: &gridcraft_model::Workbook, sheet: usize, areas: &[RangeRef]) -> Option<(gridcraft_model::Workbook, RangeRef)> {
+    let first = *areas.first()?;
+    let across = areas.iter().all(|a| a.start.row == first.start.row && a.end.row == first.end.row);
+    let down = areas.iter().all(|a| a.start.col == first.start.col && a.end.col == first.end.col);
+    let mut sorted = areas.to_vec();
+    if across {
+        sorted.sort_by_key(|a| a.start.col);
+    } else if down {
+        sorted.sort_by_key(|a| a.start.row);
+    } else {
+        return None;
+    }
+    if sorted.windows(2).any(|w| matches!(w, [a, b] if a.intersects(b))) {
+        return None;
+    }
+    let anchor = sorted.first()?.start;
+    let (h, w) = if across {
+        (first.height(), sorted.iter().map(RangeRef::width).fold(0u32, u32::saturating_add))
+    } else {
+        (sorted.iter().map(RangeRef::height).fold(0u32, u32::saturating_add), first.width())
+    };
+    let block = RangeRef::new(anchor, anchor.offset(i64::from(h) - 1, i64::from(w) - 1)?);
+    let src = wb.sheet(sheet)?;
+    let mut out = wb.clone();
+    let dst = out.sheet_mut(sheet)?;
+    dst.take_cells(block);
+    dst.spill.retain(|c, _| !block.contains(*c));
+    dst.spill_ranges.retain(|c, _| !block.contains(*c));
+    dst.comments.retain(|c, _| !block.contains(*c));
+    dst.merges.retain(|m| !m.intersects(&block));
+    if across {
+        dst.cols.retain(|c, _| !(block.start.col..=block.end.col).contains(c));
+    } else {
+        dst.rows.retain(|r, _| !(block.start.row..=block.end.row).contains(r));
+    }
+    let mut next = if across { anchor.col } else { anchor.row };
+    for a in &sorted {
+        let (dr, dc) = if across { (0, i64::from(next) - i64::from(a.start.col)) } else { (i64::from(next) - i64::from(a.start.row), 0) };
+        let cells = src.cells.iter_range(*a).map(|(c, _)| c).chain(src.spill.keys().copied().filter(|c| a.contains(*c)));
+        for c in cells {
+            let Some(to) = c.offset(dr, dc) else { continue };
+            let style = src.cell(c).map(|x| x.style).unwrap_or_default();
+            dst.set_cell(to, Cell { value: src.value(c), formula: None, style });
+            if let Some(picture) = src.cell_pictures.get(&c) {
+                dst.cell_pictures.insert(to, picture.clone());
+            }
+        }
+        for (c, comment) in src.comments.iter().filter(|(c, _)| a.contains(**c)) {
+            if let Some(to) = c.offset(dr, dc) {
+                dst.comments.insert(to, comment.clone());
+            }
+        }
+        for m in src.merges.iter().filter(|m| a.contains_range(m)) {
+            if let (Some(s), Some(e)) = (m.start.offset(dr, dc), m.end.offset(dr, dc)) {
+                dst.merges.push(RangeRef::new(s, e));
+            }
+        }
+        // Column widths (side by side) or row heights and hidden rows (stacked) follow their cells.
+        if across {
+            for (c, info) in src.cols.range(a.start.col..=a.end.col) {
+                dst.cols.insert(next.saturating_add(c.saturating_sub(a.start.col)), *info);
+            }
+        } else {
+            for (r, info) in src.rows.range(a.start.row..=a.end.row) {
+                dst.rows.insert(next.saturating_add(r.saturating_sub(a.start.row)), *info);
+            }
+        }
+        next = next.saturating_add(if across { a.width() } else { a.height() });
+    }
+    Some((out, block))
 }
 
 fn copy(s: &mut Session, p: &Json) -> Result<Json> {
@@ -672,15 +767,20 @@ fn paste(s: &mut Session, p: &Json) -> Result<Json> {
 
 fn paste_text(s: &mut Session, p: &Json, text: &str) -> Result<Json> {
     let sheet = target_sheet(s, p)?;
-    let at = cell_param(p, "at").unwrap_or(s.doc()?.selection.current().start);
+    let at = cell_param_on(s, p, "at", sheet)?.unwrap_or(s.doc()?.selection.current().start);
     let rows: Vec<Vec<String>> = parse_tsv(text);
+    // The HTML flavour, when the host passed it: the number behind each cell's shown text.
+    let html = str_param(p, "html").map(crate::clip_html::table_cells).unwrap_or_default();
     let h = rows.len();
     let w = rows.iter().map(Vec::len).max().unwrap_or(0);
     edit(s, |cx| {
         for (ri, row) in rows.iter().enumerate() {
             for (ci, v) in row.iter().enumerate() {
                 let Some(c) = at.offset(ri as i64, ci as i64) else { continue };
-                let cell = input_to_cell(v, sheet, c, &mut cx.wb).unwrap_or_else(|_| Some(Cell::value(Value::text(v.as_str()))));
+                let mut cell = input_to_cell(v, sheet, c, &mut cx.wb).unwrap_or_else(|_| Some(Cell::value(Value::text(v.as_str()))));
+                if let Some(cl) = cell.as_mut() {
+                    numeric_from_html(cl, v, html.get(ri).and_then(|r| r.get(ci)), &mut cx.wb);
+                }
                 let sh = cx.sheet_mut(sheet)?;
                 match cell {
                     Some(cell) => sh.set_cell(c, cell),
@@ -698,6 +798,27 @@ fn paste_text(s: &mut Session, p: &Json, text: &str) -> Result<Json> {
         Ok(())
     })?;
     Ok(json!({"rows": h, "cols": w}))
+}
+
+/// A pasted cell that came out as text ("Rp10,000.00" isn't en-US input) becomes the number the
+/// source recorded for it in its HTML, with a format that shows the same text when one can be
+/// inferred and the cell has none. The HTML cell must show the same text as the tab-separated
+/// field, so HTML that belongs to another copy (or a table laid out differently) changes nothing.
+fn numeric_from_html(cell: &mut Cell, field: &str, html: Option<&crate::clip_html::HtmlCell>, wb: &mut gridcraft_model::Workbook) {
+    let Some(hc) = html else { return };
+    let Some(n) = hc.num else { return };
+    if cell.formula.is_some() || !matches!(cell.value, Value::Text(_)) || wb.styles.get(cell.style).num_fmt.as_str() == "@" {
+        return;
+    }
+    if crate::clip_html::normalized(&hc.text) != crate::clip_html::normalized(field) {
+        return;
+    }
+    cell.value = Value::number(n);
+    if wb.styles.get(cell.style).num_fmt.as_str() == "General"
+        && let Some(code) = crate::clip_html::format_for(field, n)
+    {
+        cell.style = wb.styles.derive(cell.style, |s| s.num_fmt = gridcraft_model::NumFmt::new(&code));
+    }
 }
 
 /// Tab-separated text with Excel-style quoting.
@@ -769,16 +890,19 @@ fn paste_special(s: &mut Session, p: &Json) -> Result<Json> {
     let skip_blanks = bool_param(p, "skipBlanks").unwrap_or(false);
     let transpose = bool_param(p, "transpose").unwrap_or(false);
     let link = bool_param(p, "link").unwrap_or(false);
+    if link && !clip.areas.is_empty() {
+        return Err(EngineError::Other("This action won't work on multiple selections.".into()));
+    }
     let dest_sheet = target_sheet(s, p)?;
     let sel = s.doc()?.selection.current();
-    let at = cell_param(p, "at").unwrap_or(sel.start);
+    let at = cell_param_on(s, p, "at", dest_sheet)?.unwrap_or(sel.start);
     let src = clip.range;
     let (h, w) = if transpose { (src.width(), src.height()) } else { (src.height(), src.width()) };
     // Tile the copy over a larger destination that is a multiple of its size.
     let tile = sel.height() % h == 0
         && sel.width() % w == 0
         && !sel.is_single()
-        && cell_param(p, "at").is_none()
+        && cell_param_on(s, p, "at", dest_sheet)?.is_none()
         && !sel.is_full_cols()
         && !sel.is_full_rows()
         && sel.count() <= 4_000_000;
@@ -1050,6 +1174,18 @@ pub(crate) fn rewrite_all_formulas(wb: &mut gridcraft_model::Workbook, target: &
 fn clear(s: &mut Session, p: &Json, what: &str) -> Result<Json> {
     let sheet = target_sheet(s, p)?;
     let ranges = target_ranges(s, p)?;
+    // Delete on checkboxes works in two passes (as in Excel): checked boxes are unchecked first,
+    // and only when every box in the selection is unchecked are the boxes removed.
+    let uncheck_only = what == "contents" && {
+        let d = s.doc()?;
+        d.wb.sheet(sheet).is_some_and(|sh| {
+            ranges.iter().any(|r| {
+                r.intersection(&sh.used_range().unwrap_or(RangeRef::cell(r.start))).is_some_and(|r| {
+                    sh.cells.iter_range(r).any(|(c, x)| x.value == Value::Bool(true) && super::extra::is_checkbox_cell(&d.wb, sh, c))
+                })
+            })
+        })
+    };
     edit(s, |cx| {
         for r in &ranges {
             let r = match cx.wb.sheet(sheet).and_then(|sh| sh.used_range()) {
@@ -1061,6 +1197,21 @@ fn clear(s: &mut Session, p: &Json, what: &str) -> Result<Json> {
             };
             let cells: Vec<(CellRef, Cell)> =
                 cx.wb.sheet(sheet).map(|sh| sh.cells.iter_range(r).map(|(c, x)| (c, x.clone())).collect()).unwrap_or_default();
+            let mut cells = cells;
+            if what == "contents" {
+                for (_, cell) in cells.iter_mut() {
+                    let checkbox = cx.wb.styles.get(cell.style).num_fmt.as_str() == "checkbox";
+                    cell.formula = None;
+                    if checkbox && uncheck_only {
+                        cell.value = Value::Bool(false);
+                    } else {
+                        cell.value = Value::Empty;
+                        if checkbox {
+                            cell.style = cx.wb.styles.derive(cell.style, |st| st.num_fmt = gridcraft_model::NumFmt::new("General"));
+                        }
+                    }
+                }
+            }
             let sh = cx.sheet_mut(sheet)?;
             for (c, mut cell) in cells {
                 match what {
@@ -1068,8 +1219,6 @@ fn clear(s: &mut Session, p: &Json, what: &str) -> Result<Json> {
                         sh.remove_cell(c);
                     }
                     "contents" => {
-                        cell.value = Value::Empty;
-                        cell.formula = None;
                         sh.set_cell(c, cell);
                     }
                     "formats" => {
@@ -1139,6 +1288,7 @@ fn auto_fill(s: &mut Session, p: &Json) -> Result<Json> {
     let Some(target) = str_param(p, "target").and_then(RangeRef::parse) else { return Err(bad("edit.autoFill", "missing `target`")) };
     let mode = match str_param(p, "mode").unwrap_or("series") {
         "copy" => crate::fill::FillMode::Copy,
+        "alternate" => crate::fill::FillMode::Alternate,
         "formats" => crate::fill::FillMode::Formats,
         "values" => crate::fill::FillMode::ValuesOnly,
         _ => crate::fill::FillMode::Series,

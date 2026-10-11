@@ -37,6 +37,15 @@ pub fn specs() -> Vec<CommandSpec> {
         )),
         cmd!("sheet.moveColumns", "Move Columns", [], None, "{cols?: \"B:C\", before: zero-based column index}", has_doc, move_columns),
         cmd!("home.insertCells", "Insert Cells…", ["Home", "Cells", "Insert"], None, "{range?, shift: right|down|row|column}", has_doc, insert_cells),
+        cmd!(
+            "home.insertCopiedCells",
+            "Insert Copied Cells",
+            ["Home", "Cells", "Insert"],
+            None,
+            "{at?: \"B3\", shift?: down|right}: inserts the copied cells at `at` (the active cell) and pastes them there. Whole copied rows or columns insert whole rows or columns; other blocks shift the cells at `at` down (default) or right. A cut of whole rows or columns moves them (Insert Cut Cells)",
+            has_clipboard,
+            insert_copied_cells
+        ),
         cmd!("home.deleteCells", "Delete Cells…", ["Home", "Cells", "Delete"], None, "{range?, shift: left|up|row|column}", has_doc, delete_cells),
         cmd!("home.insertSheet", "Insert Sheet", ["Home", "Cells", "Insert"], Some("Shift+F11"), "{name?, before?: index}", has_doc, insert_sheet),
         cmd!("home.deleteSheet", "Delete Sheet", ["Home", "Cells", "Delete"], None, "{sheet?}", has_doc, delete_sheet),
@@ -147,6 +156,10 @@ fn shift_sheet_features(sh: &mut Sheet, axis: Axis, at: u32, count: u32, insert:
     for cf in sh.cond_formats.iter_mut() {
         cf.ranges = cf.ranges.iter().filter_map(|r| map_range(*r)).collect();
     }
+    for er in sh.edit_ranges.iter_mut() {
+        er.ranges = er.ranges.iter().filter_map(|r| map_range(*r)).collect();
+    }
+    sh.edit_ranges.retain(|er| !er.ranges.is_empty());
     sh.cond_formats.retain(|cf| !cf.ranges.is_empty());
     for dv in sh.validations.iter_mut() {
         dv.ranges = dv.ranges.iter().filter_map(|r| map_range(*r)).collect();
@@ -481,6 +494,125 @@ fn delete_cells(s: &mut Session, p: &Json) -> Result<Json> {
     Ok(out)
 }
 
+/// Insert Copied Cells / Insert Cut Cells: makes room at the destination, then pastes (or, for a
+/// cut, moves) the clipboard there, as one undo step.
+fn insert_copied_cells(s: &mut Session, p: &Json) -> Result<Json> {
+    let Some(clip) = s.clipboard.clone() else { return Err(EngineError::Other("Nothing to paste.".into())) };
+    let sheet = target_sheet(s, p)?;
+    let d = s.doc()?;
+    let at = cell_param_on(s, p, "at", sheet)?.unwrap_or(d.selection.current().start);
+    let shift = str_param(p, "shift").unwrap_or("down");
+    if shift != "down" && shift != "right" {
+        return Err(bad("home.insertCopiedCells", format!("unknown `shift`: {shift} (down or right)")));
+    }
+    let sel = clip.selected;
+    let rows = sel.is_full_rows();
+    let cols = sel.is_full_cols();
+    if rows && cols {
+        return Err(EngineError::Other("The copy area is the whole sheet; there is no room to insert it.".into()));
+    }
+    let same_doc = d.uid == clip.doc_uid;
+    let cut = clip.cut && same_doc;
+    if cut && !rows && !cols {
+        return Err(EngineError::Other("Insert Cut Cells works on whole rows or columns; cut whole rows or columns, or use Paste.".into()));
+    }
+    // A moved block can't be inserted inside itself.
+    if cut && clip.sheet == sheet {
+        let inside = if rows { at.row > sel.start.row && at.row <= sel.end.row } else { at.col > sel.start.col && at.col <= sel.end.col };
+        if inside {
+            return Err(EngineError::Other("The cut rows or columns can't be inserted inside themselves.".into()));
+        }
+    }
+    let revision = d.revision;
+    let before = (d.wb.clone(), d.selection.clone());
+    let result = insert_copied_steps(s, &clip, sheet, at, shift, cut);
+    let d = s.doc_mut()?;
+    // The nested steps collapse into this command's single undo step.
+    for _ in 0..d.revision.saturating_sub(revision) {
+        d.undo.pop();
+    }
+    match result {
+        Ok((final_range, out)) => {
+            d.selection = crate::Selection { active: final_range.start, anchor: final_range.start, ranges: vec![final_range] };
+            // Like inserting cells, this ends copy mode (the copied block may have moved).
+            cancel_copy_mode(s);
+            Ok(out)
+        }
+        Err(e) => {
+            d.wb = before.0;
+            d.selection = before.1;
+            d.calc.rebuild(&d.wb);
+            s.clipboard = Some(clip);
+            Err(e)
+        }
+    }
+}
+
+fn insert_copied_steps(s: &mut Session, clip: &crate::Clipboard, sheet: usize, at: CellRef, shift: &str, cut: bool) -> Result<(RangeRef, Json)> {
+    let sel = clip.selected;
+    let rows = sel.is_full_rows();
+    let cols = sel.is_full_cols();
+    // Where the copied block's top-left lands, relative to the (untrimmed) copied lines.
+    let (inserted, paste_at) = if rows {
+        let h = sel.height();
+        let start = at.row;
+        let r = format!("{}:{}", start as u64 + 1, start as u64 + h as u64);
+        s.execute("home.insertRows", json!({"rows": r, "sheet": sheet}))?;
+        let dr = clip.range.start.row.saturating_sub(sel.start.row);
+        (RangeRef::rows(start, start.saturating_add(h - 1).min(MAX_ROWS - 1)), CellRef::new(start.saturating_add(dr), clip.range.start.col))
+    } else if cols {
+        let w = sel.width();
+        let start = at.col;
+        let end = start.saturating_add(w - 1).min(MAX_COLS - 1);
+        s.execute("home.insertColumns", json!({"cols": RangeRef::cols(start, end).a1(), "sheet": sheet}))?;
+        let dc = clip.range.start.col.saturating_sub(sel.start.col);
+        (RangeRef::cols(start, end), CellRef::new(clip.range.start.row, start.saturating_add(dc)))
+    } else {
+        let end = at
+            .offset(clip.range.height() as i64 - 1, clip.range.width() as i64 - 1)
+            .ok_or_else(|| EngineError::Other("The copied cells don't fit on the sheet at this position.".into()))?;
+        let block = RangeRef::new(at, end);
+        s.execute("home.insertCells", json!({"range": block.a1(), "shift": shift, "sheet": sheet}))?;
+        (block, at)
+    };
+    // Inserting ended copy mode; bring the clipboard back for the paste. A cut reads the live
+    // workbook, so it follows the source if the insert pushed it along.
+    let mut clip = clip.clone();
+    if cut {
+        let pushed = clip.sheet == sheet && if rows { sel.start.row >= at.row } else { sel.start.col >= at.col };
+        if pushed {
+            let (dr, dc) = if rows { (inserted.height() as i64, 0) } else { (0, inserted.width() as i64) };
+            clip.range = RangeRef::new(clip.range.start.offset_clamped(dr, dc), clip.range.end.offset_clamped(dr, dc));
+            clip.selected = RangeRef::new(sel.start.offset_clamped(dr, dc), sel.end.offset_clamped(dr, dc));
+        }
+        clip.wb = s.doc()?.wb.clone();
+    }
+    let source_lines = clip.selected;
+    s.clipboard = Some(clip.clone());
+    let out = s.execute("edit.pasteSpecial", json!({"what": "all", "at": paste_at.a1(), "sheet": sheet}))?;
+    if !cut {
+        return Ok((inserted, out));
+    }
+    // Close the gap the moved lines left behind.
+    let (removed, before_dest) = if rows {
+        s.execute(
+            "home.deleteRows",
+            json!({"rows": format!("{}:{}", source_lines.start.row as u64 + 1, source_lines.end.row as u64 + 1), "sheet": clip.sheet}),
+        )?;
+        (source_lines.height(), clip.sheet == sheet && source_lines.start.row < inserted.start.row)
+    } else {
+        s.execute("home.deleteColumns", json!({"cols": RangeRef::cols(source_lines.start.col, source_lines.end.col).a1(), "sheet": clip.sheet}))?;
+        (source_lines.width(), clip.sheet == sheet && source_lines.start.col < inserted.start.col)
+    };
+    let moved = if before_dest {
+        let (dr, dc) = if rows { (-(removed as i64), 0) } else { (0, -(removed as i64)) };
+        RangeRef::new(inserted.start.offset_clamped(dr, dc), inserted.end.offset_clamped(dr, dc))
+    } else {
+        inserted
+    };
+    Ok((moved, out))
+}
+
 fn insert_sheet(s: &mut Session, p: &Json) -> Result<Json> {
     if s.doc()?.wb.protected_structure {
         return Err(EngineError::Other("The workbook is protected and cannot be changed.".into()));
@@ -638,6 +770,12 @@ fn rename_sheet(s: &mut Session, p: &Json) -> Result<Json> {
                     se.categories = se.categories.as_deref().map(fix);
                     se.name = se.name.as_deref().map(fix);
                 }
+                // A PivotChart follows its PivotTable's sheet.
+                if let Some((sheet, pivot)) = ch.pivot.as_deref().and_then(crate::pivot::parse_chart_link)
+                    && sheet.eq_ignore_ascii_case(&old)
+                {
+                    ch.pivot = Some(crate::pivot::chart_link(&name, &pivot));
+                }
             }
         }
         for n in cx.wb.names.iter_mut() {
@@ -663,6 +801,7 @@ fn move_sheet(s: &mut Session, p: &Json) -> Result<Json> {
             let name = (2..).map(|k| format!("{base} ({k})")).find(|nm| cx.wb.sheet_index(nm).is_none()).unwrap_or(base.clone());
             sh.name = name.chars().take(31).collect();
             sh.tables.clear(); // table names must be unique
+            sh.preserved = None; // kept file content (form controls, OLE objects…) stays with the original
             let at = to.min(n);
             // The copy gets its own copies of the sheet's names, referring to the copy.
             let copies: Vec<gridcraft_model::DefinedName> = cx
@@ -793,6 +932,10 @@ fn shift_cell_features(sh: &mut Sheet, e: &Edit) {
     for cf in sh.cond_formats.iter_mut() {
         cf.ranges = cf.ranges.iter().filter_map(|r| map_range(*r, e)).collect();
     }
+    for er in sh.edit_ranges.iter_mut() {
+        er.ranges = er.ranges.iter().filter_map(|r| map_range(*r, e)).collect();
+    }
+    sh.edit_ranges.retain(|er| !er.ranges.is_empty());
     sh.cond_formats.retain(|cf| !cf.ranges.is_empty());
     for dv in sh.validations.iter_mut() {
         dv.ranges = dv.ranges.iter().filter_map(|r| map_range(*r, e)).collect();

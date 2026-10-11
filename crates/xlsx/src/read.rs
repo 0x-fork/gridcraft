@@ -98,6 +98,7 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         return Err(IoError::Format(format!("unexpected root element <{}> in workbook part", wb_xml.name)));
     }
     let wb_rels = cx.pkg.rels(&wb_part)?;
+    let mut kept = crate::passthrough::KeptReader::new(&mut cx);
     cx.cell_pictures = match crate::richdata::read(&mut cx, &wb_rels) {
         Ok(pictures) => pictures,
         Err(error) => {
@@ -108,10 +109,16 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     let mut wb = Workbook::new();
     wb.sheets.clear();
 
-    // Styles and theme.
+    // Styles and theme. Cell checkboxes live in the feature property bags, which styles refer to.
+    let mut checkboxes = Vec::new();
+    if let Some(r) = find_rel(&wb_rels, "FeaturePropertyBag").cloned()
+        && let Some(x) = cx.optional_xml(&r.target)?
+    {
+        checkboxes = crate::feature_bags::checkbox_complements(&x);
+    }
     if let Some(r) = find_rel(&wb_rels, "styles").cloned() {
         if let Some(x) = cx.optional_xml(&r.target)? {
-            let StylesIn { xfs, dxfs, palette, named, num_fmts } = read_styles(&x);
+            let StylesIn { xfs, dxfs, palette, named, num_fmts } = read_styles(&x, &checkboxes);
             cx.num_fmts = num_fmts;
             cx.xf_map = xfs.into_iter().enumerate().map(|(i, s)| if i == 0 { StyleId::DEFAULT } else { cx.styles.intern(s) }).collect();
             cx.dxfs = dxfs;
@@ -212,6 +219,7 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
             Err(IoError::TooLarge(m)) => return Err(IoError::TooLarge(m)),
             Err(e) => cx.warn(format!("PivotTables on sheet \"{name}\" could not be read: {e}")),
         }
+        sheet.preserved = kept.sheet(&mut cx, &rel.target, &name);
         sheet.visibility = match se.attr("state") {
             Some("hidden") => Visibility::Hidden,
             Some("veryHidden") => Visibility::VeryHidden,
@@ -308,9 +316,7 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     if wb_rels.iter().any(|r| r.kind == "vbaProject") {
         cx.warn("macros (VBA project) are not supported and were dropped");
     }
-    if wb_rels.iter().any(|r| r.kind == "externalLink") {
-        cx.warn("links to external workbooks are not supported");
-    }
+    wb.preserved = kept.workbook(&mut cx, &wb_part, &wb_xml);
     // Calls of LAMBDA names are spelled like the names (the parser upper-cases them).
     wb.apply_name_call_case();
     wb.styles = cx.styles;

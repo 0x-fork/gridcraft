@@ -48,6 +48,7 @@ fn chart(kind: ChartKind) -> Chart {
         y_title: Some("Revenue".into()),
         source: None,
         by_rows: false,
+        pivot: None,
     }
 }
 
@@ -657,4 +658,30 @@ fn treemap_and_histogram_shapes() {
     let prims = render(&chart(ChartKind::Histogram), &d, 600.0, 400.0, &ApproxMeasure);
     let bins = prims.iter().filter(|p| matches!(p, Prim::Rect { fill: Some([10, 20, 30, 255]), .. })).count();
     assert_eq!(bins, 10);
+}
+
+#[test]
+fn union_series_references() {
+    let mut wb = Workbook::new();
+    {
+        let s = wb.sheet_mut(0).unwrap();
+        for (r, (l, v)) in [("a", 1.0), ("b", 2.0), ("Total", 3.0), ("d", 4.0)].iter().enumerate() {
+            s.set_value(CellRef::new(r as u32, 0), Value::from(*l));
+            s.set_value(CellRef::new(r as u32, 1), Value::Number(*v));
+        }
+    }
+    let mut c = chart(ChartKind::ColumnClustered);
+    c.series = vec![Series {
+        name: Some("\"Sum of X\"".into()),
+        categories: Some("(Sheet1!$A$1:$A$2,Sheet1!$A$4)".into()),
+        values: "(Sheet1!$B$1:$B$2,Sheet1!$B$4)".into(),
+        ..Series::default()
+    }];
+    let d = resolve(&wb, 0, &c);
+    assert_eq!(d.series[0].values, vec![Some(1.0), Some(2.0), Some(4.0)]);
+    assert_eq!(d.series[0].name, "Sum of X");
+    assert_eq!(d.categories, vec!["a", "b", "d"]);
+    // Deeply nested parentheses from a file are bounded, not a crash.
+    c.series[0].values = format!("{}Sheet1!$B$1,Sheet1!$B$2{}", "(".repeat(5000), ")".repeat(5000));
+    let _ = resolve(&wb, 0, &c);
 }
