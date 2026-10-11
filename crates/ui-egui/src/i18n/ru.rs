@@ -173,6 +173,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Threaded Comments" => "Комментарии с ветками",
         "Show\nComments" => "Показать\nкомментарии",
         "Protect\nWorkbook" => "Защитить\nкнигу",
+        "Allow Edit\nRanges" => "Разрешить\nизменение диапазонов",
+        "Allow Edit Ranges" => "Разрешить изменение диапазонов",
         "Unprotect\nSheet" => "Снять защиту\nлиста",
         "Protect Sheet…" => "Защитить лист…",
         "Comments" => "Комментарии",

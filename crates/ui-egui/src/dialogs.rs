@@ -163,6 +163,44 @@ impl Dialog {
                 ],
                 json!({}),
             ),
+            "allowEditRanges" => {
+                let list = app.session.run("review.allowEditRanges", json!({})).unwrap_or(Json::Null);
+                let rows: Vec<String> = list
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .map(|r| {
+                                let lock = match (r["password"].as_bool(), r["unlocked"].as_bool()) {
+                                    (Some(true), Some(true)) => " (password, unlocked)",
+                                    (Some(true), _) => " (password)",
+                                    _ => "",
+                                };
+                                format!("{}: {}{lock}", r["title"].as_str().unwrap_or(""), r["range"].as_str().unwrap_or(""))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let summary = if rows.is_empty() { "No ranges yet.".to_string() } else { rows.join("\n") };
+                Dialog::form(
+                    "allowEditRanges",
+                    "Allow Edit Ranges",
+                    "review.allowEditRanges",
+                    vec![
+                        Note(format!("Ranges that stay editable when the sheet is protected:\n{summary}")),
+                        Choice {
+                            key: "action",
+                            label: "Action",
+                            options: vec![("add", "New"), ("modify", "Modify"), ("delete", "Delete"), ("unlock", "Unlock with password")],
+                        },
+                        Text { key: "title", label: "Title:" },
+                        Text { key: "range", label: "Refers to cells:" },
+                        Text { key: "password", label: "Range password:" },
+                        Text { key: "newTitle", label: "New title (Modify):" },
+                        Check { key: "removePassword", label: "Remove the password (Modify)" },
+                    ],
+                    json!({"action": "add", "range": sel}),
+                )
+            }
             "unprotectSheet" => Dialog::form(
                 "unprotectSheet",
                 "Unprotect Sheet",
@@ -612,6 +650,15 @@ fn build_params(d: &Dialog) -> Json {
         "removeDuplicates" | "subtotal" => {
             if let Some(t) = d.values.get("columnsText").and_then(Json::as_str).filter(|t| !t.trim().is_empty()) {
                 v["columns"] = Json::Array(t.split(',').map(|c| json!(c.trim().to_ascii_uppercase())).collect());
+            }
+        }
+        "allowEditRanges" => {
+            if let Some(m) = v.as_object_mut() {
+                // Blank fields mean "unchanged"; the check box clears a password.
+                m.retain(|_, x| x.as_str().is_none_or(|s| !s.trim().is_empty()));
+                if m.remove("removePassword").and_then(|x| x.as_bool()) == Some(true) {
+                    m.insert("password".into(), json!(""));
+                }
             }
         }
         "zoom" => {

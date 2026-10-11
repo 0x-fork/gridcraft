@@ -322,6 +322,8 @@ const JAPANESE: &[(&str, &str)] = &[
     ("Threaded Comments", "スレッド化されたコメント"),
     ("Show\nComments", "コメントの表示"),
     ("Protect\nWorkbook", "ブックの保護"),
+    ("Allow Edit\nRanges", "範囲の編集を許可"),
+    ("Allow Edit Ranges", "範囲の編集を許可"),
     ("Unprotect\nSheet", "シート保護の解除"),
     ("Protect Sheet…", "シートの保護…"),
     ("Comments", "コメント"),

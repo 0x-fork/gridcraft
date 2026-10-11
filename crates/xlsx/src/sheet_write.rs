@@ -329,6 +329,7 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
         }
         s.push_str("/>");
     }
+    s.push_str(&protected_ranges_xml(sheet));
     // autoFilter (a sheet filter overlapping a table would be invalid).
     if let Some(af) = &sheet.autofilter
         && !sheet.tables.iter().any(|t| t.range.intersects(&af.range))
@@ -994,6 +995,35 @@ fn comments_xml(sheet: &Sheet) -> String {
     }
     s.push_str("</commentList></comments>");
     s
+}
+
+/// Allow Edit Ranges: `<protectedRanges>` (after `sheetProtection`).
+fn protected_ranges_xml(sheet: &Sheet) -> String {
+    let mut s = String::new();
+    for r in sheet.edit_ranges.iter().filter(|r| !r.ranges.is_empty()) {
+        let sqref: Vec<String> = r.ranges.iter().map(|x| x.a1()).collect();
+        let _ = write!(s, "<protectedRange name=\"{}\" sqref=\"{}\"", esc_attr(&r.title), sqref.join(" "));
+        match &r.password {
+            Some(gridcraft_model::PasswordHash::Legacy(h)) => {
+                let _ = write!(s, " password=\"{h:04X}\"");
+            }
+            Some(gridcraft_model::PasswordHash::Iterated { algorithm, hash, salt, spin_count }) => {
+                let _ = write!(
+                    s,
+                    " algorithmName=\"{}\" hashValue=\"{}\" saltValue=\"{}\" spinCount=\"{spin_count}\"",
+                    esc_attr(algorithm),
+                    esc_attr(hash),
+                    esc_attr(salt)
+                );
+            }
+            None => {}
+        }
+        if let Some(sd) = &r.security_descriptor {
+            let _ = write!(s, " securityDescriptor=\"{}\"", esc_attr(sd));
+        }
+        s.push_str("/>");
+    }
+    if s.is_empty() { s } else { format!("<protectedRanges>{s}</protectedRanges>") }
 }
 
 /// Legacy VML shapes Excel uses to display notes.

@@ -96,6 +96,8 @@ pub struct DocState {
     pub title: String,
     /// Per-sheet selection memory.
     pub sheet_selections: Vec<Selection>,
+    /// Allow Edit Ranges unlocked with their password in this session: (sheet name, title).
+    pub unlocked_ranges: Vec<(String, String)>,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -119,6 +121,7 @@ impl DocState {
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             title,
             sheet_selections: vec![],
+            unlocked_ranges: vec![],
         }
     }
     pub fn is_dirty(&self) -> bool {

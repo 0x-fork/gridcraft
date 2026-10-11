@@ -257,7 +257,7 @@ pub(crate) fn commit<R>(d: &mut DocState, f: impl FnOnce(&mut Ctx) -> Result<R>)
     let r = f(&mut ctx)?;
     let Ctx { mut wb, changed, structural, mut fit_rows, protection_checked, .. } = ctx;
     if !protection_checked {
-        check_protection(&d.wb, &wb)?;
+        check_protection(&d.wb, &wb, &d.unlocked_ranges)?;
     }
     if changed.len() <= 200_000 {
         fit_rows.extend(changed.iter().map(|(s, c)| (*s, c.row)));
@@ -292,7 +292,7 @@ pub(crate) const PROTECTED: &str = "The cell or chart you're trying to change is
 /// Refuses an edit that changed what a locked cell on a protected sheet holds (its value or
 /// formula), whichever command made it. Sheets are matched by name, so moving, renaming or
 /// deleting a sheet isn't an edit of its cells.
-fn check_protection(old: &Workbook, new: &Workbook) -> Result<()> {
+fn check_protection(old: &Workbook, new: &Workbook, unlocked: &[(String, String)]) -> Result<()> {
     for sh in &old.sheets {
         if !sh.is_protected() {
             continue;
@@ -302,12 +302,31 @@ fn check_protection(old: &Workbook, new: &Workbook) -> Result<()> {
             continue;
         }
         for c in sh.cells.diff(&after.cells) {
-            if !same_content(sh.cell(c), after.cell(c)) && old.styles.get(sh.style_id(c)).protection.locked {
-                return Err(EngineError::Other(PROTECTED.into()));
+            if !same_content(sh.cell(c), after.cell(c))
+                && old.styles.get(sh.style_id(c)).protection.locked
+                && let Some(m) = locked_cell_error(sh, c, unlocked)
+            {
+                return Err(EngineError::Other(m));
             }
         }
     }
     Ok(())
+}
+
+/// Whether a locked cell on a protected sheet stays locked: `None` when it's in an Allow Edit
+/// Range without a password or one unlocked in this session, else the message to show.
+pub(crate) fn locked_cell_error(sh: &gridcraft_model::Sheet, c: CellRef, unlocked: &[(String, String)]) -> Option<String> {
+    let mut needs_password = None;
+    for r in sh.edit_ranges.iter().filter(|r| r.contains(c)) {
+        if r.password.is_none() || unlocked.iter().any(|(s, t)| *s == sh.name && *t == r.title) {
+            return None;
+        }
+        needs_password.get_or_insert(r.title.as_str());
+    }
+    Some(match needs_password {
+        Some(t) => format!("The range \"{t}\" needs its password before it can be changed (Review › Allow Edit Ranges)."),
+        None => PROTECTED.into(),
+    })
 }
 
 /// Two cells hold the same value or formula (formats aside).

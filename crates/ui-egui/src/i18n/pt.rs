@@ -174,6 +174,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Threaded Comments" => "Comentários Encadeados",
         "Show\nComments" => "Mostrar\nComentários",
         "Protect\nWorkbook" => "Proteger\nPasta de Trabalho",
+        "Allow Edit\nRanges" => "Permitir Edição\nde Intervalos",
+        "Allow Edit Ranges" => "Permitir Edição de Intervalos",
         "Unprotect\nSheet" => "Desproteger\nPlanilha",
         "Protect Sheet…" => "Proteger Planilha…",
         "Comments" => "Comentários",

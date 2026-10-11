@@ -121,3 +121,18 @@ fn zip_bomb_is_rejected() {
     assert!(bytes.len() < 10 << 20);
     assert!(matches!(read_xlsx(&bytes), Err(IoError::TooLarge(_))));
 }
+
+/// Allow Edit Ranges from a hostile file: bad references are dropped and a password that can't be
+/// read keeps the range locked instead of opening it.
+#[test]
+fn hostile_protected_ranges_stay_locked() {
+    let body = r#"<sheetData/><protectedRanges><protectedRange name="bad ref" sqref="ZZZZZ1 A0"/><protectedRange name="hex" sqref="A1" password="XYZ"/><protectedRange name="spin" sqref="B1" algorithmName="SHA-512" hashValue="AAAA" saltValue="AAAA" spinCount="4294967295"/><protectedRange name="half" sqref="C1" hashValue="AAAA"/><protectedRange name="md5" sqref="D1" algorithmName="MD5" hashValue="AAAA" saltValue="AAAA" spinCount="1"/></protectedRanges>"#;
+    let (wb, _) = read_xlsx(&minimal(body, &[], "", "")).unwrap();
+    let ranges = &wb.sheets[0].edit_ranges;
+    assert_eq!(ranges.iter().map(|r| r.title.as_str()).collect::<Vec<_>>(), ["hex", "spin", "half", "md5"]);
+    for r in ranges {
+        let h = r.password.as_ref().unwrap();
+        assert!(!matches!(h.verify(""), Ok(true)), "{}", r.title);
+        assert!(!matches!(h.verify("password"), Ok(true)), "{}", r.title);
+    }
+}

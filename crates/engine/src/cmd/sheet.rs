@@ -146,6 +146,10 @@ fn shift_sheet_features(sh: &mut Sheet, axis: Axis, at: u32, count: u32, insert:
     for cf in sh.cond_formats.iter_mut() {
         cf.ranges = cf.ranges.iter().filter_map(|r| map_range(*r)).collect();
     }
+    for er in sh.edit_ranges.iter_mut() {
+        er.ranges = er.ranges.iter().filter_map(|r| map_range(*r)).collect();
+    }
+    sh.edit_ranges.retain(|er| !er.ranges.is_empty());
     sh.cond_formats.retain(|cf| !cf.ranges.is_empty());
     for dv in sh.validations.iter_mut() {
         dv.ranges = dv.ranges.iter().filter_map(|r| map_range(*r)).collect();
@@ -693,6 +697,10 @@ fn shift_cell_features(sh: &mut Sheet, e: &Edit) {
     for cf in sh.cond_formats.iter_mut() {
         cf.ranges = cf.ranges.iter().filter_map(|r| map_range(*r, e)).collect();
     }
+    for er in sh.edit_ranges.iter_mut() {
+        er.ranges = er.ranges.iter().filter_map(|r| map_range(*r, e)).collect();
+    }
+    sh.edit_ranges.retain(|er| !er.ranges.is_empty());
     sh.cond_formats.retain(|cf| !cf.ranges.is_empty());
     for dv in sh.validations.iter_mut() {
         dv.ranges = dv.ranges.iter().filter_map(|r| map_range(*r, e)).collect();
