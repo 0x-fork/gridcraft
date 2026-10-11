@@ -65,6 +65,11 @@ pub struct Table {
     pub first_col: bool,
     pub last_col: bool,
     pub filter_button: bool,
+    /// Criteria of the table's AutoFilter (column offset within the table → criterion). With
+    /// criteria present, hidden data rows are filtered out rather than hidden by hand, which
+    /// SUBTOTAL distinguishes.
+    #[serde(default)]
+    pub filter: Vec<(u32, FilterCriterion)>,
 }
 
 impl Table {
@@ -490,6 +495,12 @@ pub enum FilterCriterion {
     AboveAverage(bool),
     FillColor(Color),
     FontColor(Color),
+    /// Rows whose cell shows icon `id` (0-based; `None` = no icon) of conditional-format icon set
+    /// `set` (`iconFilter`). Kept from files; re-applying the filter leaves those rows as they are.
+    Icon {
+        set: String,
+        id: Option<u32>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

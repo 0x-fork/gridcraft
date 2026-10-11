@@ -172,7 +172,7 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
                     if let Some(rel) = tp.attr("id").and_then(|id| rels.iter().find(|r| r.id == id)) {
                         let target = rel.target.clone();
                         if let Some(x) = cx.optional_xml(&target)?
-                            && let Some(mut t) = read_table(&x)
+                            && let Some(mut t) = read_table(cx, &x)
                         {
                             t.id = cx.next_object_id();
                             sheet.tables.push(t);
@@ -745,6 +745,9 @@ pub fn read_autofilter(cx: &mut Ctx<'_>, e: &El) -> Option<AutoFilter> {
         } else if let Some(c) = fc.child("colorFilter") {
             let Some(dxf) = c.attr_u32("dxfId").and_then(|i| cx.dxfs.get(i as usize)) else { continue };
             if c.flag("cellColor", true) { FilterCriterion::FillColor(dxf.fill.fg) } else { FilterCriterion::FontColor(dxf.font.color) }
+        } else if let Some(i) = fc.child("iconFilter") {
+            let Some(set) = i.attr("iconSet") else { continue };
+            FilterCriterion::Icon { set: set.to_string(), id: i.attr_u32("iconId") }
         } else {
             continue;
         };
@@ -753,7 +756,7 @@ pub fn read_autofilter(cx: &mut Ctx<'_>, e: &El) -> Option<AutoFilter> {
     Some(AutoFilter { range, criteria })
 }
 
-pub fn read_table(x: &El) -> Option<Table> {
+pub fn read_table(cx: &mut Ctx<'_>, x: &El) -> Option<Table> {
     let range = x.attr("ref").and_then(RangeRef::parse)?;
     let name = x.attr("displayName").or_else(|| x.attr("name")).unwrap_or("Table").to_string();
     let header_row = x.attr_u32("headerRowCount").unwrap_or(1) > 0;
@@ -804,6 +807,7 @@ pub fn read_table(x: &El) -> Option<Table> {
         first_col: si.is_some_and(|s| s.flag("showFirstColumn", false)),
         last_col: si.is_some_and(|s| s.flag("showLastColumn", false)),
         filter_button: x.child("autoFilter").is_some(),
+        filter: x.child("autoFilter").and_then(|e| read_autofilter(cx, e)).map(|af| af.criteria).unwrap_or_default(),
     })
 }
 

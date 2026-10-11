@@ -296,6 +296,7 @@ fn insert_table(s: &mut Session, p: &Json) -> Result<Json> {
             first_col: false,
             last_col: false,
             filter_button: true,
+            filter: vec![],
         });
         cx.structural = true;
         Ok(json!({"table": name, "range": r.a1()}))
@@ -355,7 +356,12 @@ fn table_flag(s: &mut Session, p: &Json, which: &str) -> Result<Json> {
             "bandedCols" => t.banded_cols = on.unwrap_or(!t.banded_cols),
             "firstCol" => t.first_col = on.unwrap_or(!t.first_col),
             "lastCol" => t.last_col = on.unwrap_or(!t.last_col),
-            "header" => t.filter_button = on.unwrap_or(!t.filter_button),
+            "header" => {
+                t.filter_button = on.unwrap_or(!t.filter_button);
+                if !t.filter_button {
+                    t.filter.clear();
+                }
+            }
             _ => {}
         }
         Ok(Json::Null)

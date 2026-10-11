@@ -5,8 +5,8 @@ use std::fmt::Write as _;
 
 use gridcraft_core::{CellError, CellRef, RangeRef, Value};
 use gridcraft_model::{
-    AutoFilter, Cell, CfOperator, CfRule, CfValueKind, Color, CondFormat, ErrorStyle, FilterCriterion, LineInfo, Orientation, Sheet, SparklineKind,
-    Style, Table, TotalsFn, Validation, ValidationKind, Workbook, default_icon_thresholds, icon_count,
+    Cell, CfOperator, CfRule, CfValueKind, Color, CondFormat, ErrorStyle, FilterCriterion, LineInfo, Orientation, Sheet, SparklineKind, Style, Table,
+    TotalsFn, Validation, ValidationKind, Workbook, default_icon_thresholds, icon_count,
 };
 
 use crate::drawing::{Obj, image_content_type, image_ext};
@@ -339,7 +339,7 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
     if let Some(af) = &sheet.autofilter
         && !sheet.tables.iter().any(|t| t.range.intersects(&af.range))
     {
-        s.push_str(&autofilter_xml(af, out));
+        s.push_str(&autofilter_xml(af.range, &af.criteria, out));
     }
     if !sheet.merges.is_empty() {
         let merges: Vec<&RangeRef> = sheet.merges.iter().filter(|m| !m.is_single()).collect();
@@ -544,7 +544,8 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
             out.table_id += 1;
             let n = out.tables;
             let name = table_name(&t.name, &mut used_names, out.table_id);
-            out.part(&format!("xl/tables/table{n}.xml"), Some(CT_TABLE), table_xml(t, cols, &name, out.table_id).into_bytes());
+            let xml = table_xml(t, cols, &name, out.table_id, out);
+            out.part(&format!("xl/tables/table{n}.xml"), Some(CT_TABLE), xml.into_bytes());
             let rid = rels.add("table", &format!("../tables/table{n}.xml"));
             let _ = write!(parts, "<tablePart r:id=\"{rid}\"/>");
         }
@@ -886,14 +887,14 @@ fn filter_operator(op: &str) -> &'static str {
     }
 }
 
-fn autofilter_xml(af: &AutoFilter, out: &mut Out) -> String {
-    let mut s = format!("<autoFilter ref=\"{}\"", af.range.a1());
-    if af.criteria.is_empty() {
+fn autofilter_xml(range: RangeRef, criteria: &[(u32, FilterCriterion)], out: &mut Out) -> String {
+    let mut s = format!("<autoFilter ref=\"{}\"", range.a1());
+    if criteria.is_empty() {
         s.push_str("/>");
         return s;
     }
     s.push('>');
-    for (col, c) in &af.criteria {
+    for (col, c) in criteria {
         let _ = write!(s, "<filterColumn colId=\"{col}\">");
         match c {
             FilterCriterion::Values { values, blanks } => {
@@ -926,6 +927,13 @@ fn autofilter_xml(af: &AutoFilter, out: &mut Out) -> String {
                 st.font.color = *c;
                 let _ = write!(s, "<colorFilter dxfId=\"{}\" cellColor=\"0\"/>", dxf_id(&mut out.dxfs, &st));
             }
+            FilterCriterion::Icon { set, id } => {
+                let _ = write!(s, "<iconFilter iconSet=\"{}\"", esc_attr(set));
+                if let Some(id) = id {
+                    let _ = write!(s, " iconId=\"{id}\"");
+                }
+                s.push_str("/>");
+            }
         }
         s.push_str("</filterColumn>");
     }
@@ -933,7 +941,7 @@ fn autofilter_xml(af: &AutoFilter, out: &mut Out) -> String {
     s
 }
 
-fn table_xml(t: &Table, cols: &[String], name: &str, id: u32) -> String {
+fn table_xml(t: &Table, cols: &[String], name: &str, id: u32, out: &mut Out) -> String {
     let mut s =
         format!("{XML_DECL}<table xmlns=\"{NS_MAIN}\" id=\"{id}\" name=\"{0}\" displayName=\"{0}\" ref=\"{1}\"", esc_attr(name), t.range.a1());
     if !t.header_row {
@@ -948,7 +956,7 @@ fn table_xml(t: &Table, cols: &[String], name: &str, id: u32) -> String {
     if t.header_row && t.filter_button {
         let end_row = if t.totals_row { t.range.end.row.saturating_sub(1).max(t.range.start.row) } else { t.range.end.row };
         let r = RangeRef::new(t.range.start, CellRef::new(end_row, t.range.end.col));
-        let _ = write!(s, "<autoFilter ref=\"{}\"/>", r.a1());
+        s.push_str(&autofilter_xml(r, &t.filter, out));
     }
     let _ = write!(s, "<tableColumns count=\"{}\">", cols.len());
     for (i, name) in cols.iter().enumerate() {

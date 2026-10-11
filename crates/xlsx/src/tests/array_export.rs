@@ -183,6 +183,7 @@ fn calculated_table_column_keeps_formula_and_cell_value() {
         first_col: false,
         last_col: false,
         filter_button: true,
+        filter: vec![],
     });
     let bytes = write_xlsx(&wb).unwrap();
     let mut pkg = Package::open(&bytes).unwrap();
@@ -330,6 +331,7 @@ fn implicit_intersection_metadata_distinguishes_table_rows_and_columns() {
         first_col: false,
         last_col: false,
         filter_button: true,
+        filter: vec![],
     });
     sh.cells.set(at("A2"), Cell::value(Value::Number(3.0)));
     sh.cells.set(at("B2"), formula("[@Input]*2", 6.0));

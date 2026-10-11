@@ -292,17 +292,14 @@ fn unicode(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     num_val(ch as u32 as f64)
 }
 
+/// VALUE: a blank cell reads as 0, but empty or blank text is not a number (observed:
+/// `VALUE("")` is `#VALUE!`).
 fn value(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     match scalar(arg(a, 0)?) {
         Value::Number(n) => num_val(n),
         Value::Empty => num_val(0.0),
         Value::Error(e) => Err(e),
-        Value::Text(t) => {
-            if t.trim().is_empty() {
-                return num_val(0.0);
-            }
-            parse_number_text(&t).ok_or(CellError::Value).and_then(num_val)
-        }
+        Value::Text(t) => parse_number_text(&t).ok_or(CellError::Value).and_then(num_val),
         _ => Err(CellError::Value),
     }
 }
@@ -1052,6 +1049,25 @@ mod tests {
         close(ev("UNICODE", vec![t("☃")]), 9731.0);
         is_err(ev("UNICHAR", vec![n(0.0)]), CellError::Value);
         is_err(ev("UNICHAR", vec![n(55296.0)]), CellError::NA);
+    }
+
+    /// VALUE cases observed in Excel (ValueFunctionOfBlank, FormulaEvalTestData); a blank cell
+    /// still reads as 0.
+    #[test]
+    fn value_observed() {
+        let cases: Vec<(crate::Arg, Result<f64, CellError>)> = vec![
+            (t(""), Err(CellError::Value)),
+            (t("ABC"), Err(CellError::Value)),
+            (t("0.33"), Ok(0.33)),
+            (t("$1,000"), Ok(1000.0)),
+            (rf(Value::Empty), Ok(0.0)),
+        ];
+        for (arg, want) in cases {
+            match want {
+                Ok(x) => close(ev("VALUE", vec![arg]), x),
+                Err(err) => is_err(ev("VALUE", vec![arg]), err),
+            }
+        }
     }
 
     #[test]
