@@ -33,6 +33,8 @@ pub struct Dialog {
     pub result: Option<Json>,
     picture_inbox: Option<crate::Inbox>,
     picture_target: Option<(u64, usize)>,
+    /// The dialog this one was opened from (Name Manager › New…): it comes back when this closes.
+    back: Option<Box<Dialog>>,
 }
 
 impl Dialog {
@@ -53,6 +55,7 @@ impl Dialog {
             result: None,
             picture_inbox: None,
             picture_target: None,
+            back: None,
         }
     }
 
@@ -69,6 +72,7 @@ impl Dialog {
             result: None,
             picture_inbox: None,
             picture_target: None,
+            back: None,
         }
     }
 
@@ -353,18 +357,32 @@ impl Dialog {
                 ],
                 json!({"percent": app.session.active().and_then(|d| d.wb.active().map(|s| s.zoom)).unwrap_or(100)}),
             ),
-            "defineName" => Dialog::form(
-                "defineName",
-                "New Name",
-                "formulas.defineName",
-                vec![
-                    Text { key: "name", label: "Name:" },
-                    Text { key: "scope", label: "Scope (Workbook or sheet name):" },
-                    Text { key: "comment", label: "Comment:" },
-                    Text { key: "refersTo", label: "Refers to:" },
-                ],
-                json!({"scope": "Workbook", "refersTo": app.session.active().and_then(|d| d.wb.active().map(|s| format!("={}!{}", gridcraft_engine::formula::quote_sheet(&s.name), abs(&d.selection.current()))))}),
-            ),
+            "defineName" => {
+                // Name Manager › Edit… passes the name being edited (`oldName`, `oldScope`) and
+                // its current fields; New… and Define Name start from the selection.
+                let editing = params.get("oldName").and_then(Json::as_str).is_some();
+                let selection = app.session.active().and_then(|d| {
+                    d.wb.active().map(|s| format!("={}!{}", gridcraft_engine::formula::quote_sheet(&s.name), abs(&d.selection.current())))
+                });
+                let mut defaults = json!({"scope": "Workbook", "refersTo": selection});
+                for key in ["name", "scope", "comment", "refersTo", "oldName", "oldScope"] {
+                    if let Some(v) = params.get(key).filter(|v| v.is_string()) {
+                        defaults[key] = v.clone();
+                    }
+                }
+                Dialog::form(
+                    "defineName",
+                    if editing { "Edit Name" } else { "New Name" },
+                    "formulas.defineName",
+                    vec![
+                        Text { key: "name", label: "Name:" },
+                        Text { key: "scope", label: "Scope (Workbook or sheet name):" },
+                        Text { key: "comment", label: "Comment:" },
+                        Text { key: "refersTo", label: "Refers to:" },
+                    ],
+                    defaults,
+                )
+            }
             "dataValidation" => Dialog::form(
                 "dataValidation",
                 "Data Validation",
@@ -636,10 +654,12 @@ fn build_params(d: &Dialog) -> Json {
             }
         }
         "defineName" => {
-            if d.values.get("scope").and_then(Json::as_str) == Some("Workbook")
-                && let Some(m) = v.as_object_mut()
-            {
-                m.remove("scope");
+            if let Some(m) = v.as_object_mut() {
+                for key in ["scope", "oldScope"] {
+                    if m.get(key).and_then(Json::as_str) == Some("Workbook") {
+                        m.remove(key);
+                    }
+                }
             }
         }
         _ => {}
@@ -677,7 +697,7 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
                 "find" => find(app, ui, &mut d),
                 "goTo" => go_to(app, ui, &mut d, &mut confirm),
                 "sort" => sort(app, ui, &mut d, &mut confirm),
-                "nameManager" => name_manager(app, ui),
+                "nameManager" => name_manager(app, ui, &mut d, &mut open),
                 "manageRules" => manage_rules(app, ui),
                 "commandSearch" => command_search(app, ui, &mut d, &mut confirm),
                 "goalSeek" => goal_seek(app, ui, &mut d, &mut confirm),
@@ -810,7 +830,8 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
                         if ui.button("Cancel").clicked() {
                             open = false;
                         }
-                        if ui.button("Save").clicked() {
+                        // File operations must include the cell the user is still editing (as the File > Save menu item already does).
+                        if ui.button("Save").clicked() && app.commit_edit(0, 0, false, false) {
                             app.run_or_alert("file.save", json!({}));
                             if app.session.active().is_some_and(|x| !x.is_dirty()) {
                                 app.run_or_alert("file.close", json!({"force": true}));
@@ -883,8 +904,21 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
     } else if confirm {
         open = false;
     }
+    if let Some(child) = app.dialog.as_mut() {
+        // The body opened another dialog (Name Manager › New…). It takes over; this one waits
+        // behind it and comes back when it closes, as Excel returns to the Name Manager. Go To
+        // hands over to Go To Special for good, as in Excel.
+        if open && d.name != "goTo" {
+            child.back = Some(Box::new(d));
+        } else if child.back.is_none() {
+            child.back = d.back.take();
+        }
+        return;
+    }
     if open {
         app.dialog = Some(d);
+    } else if let Some(back) = d.back.take() {
+        app.dialog = Some(*back);
     }
 }
 
@@ -1485,30 +1519,61 @@ fn sort(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut boo
     }
 }
 
-fn name_manager(app: &mut SheetApp, ui: &mut egui::Ui) {
+fn name_manager(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, open: &mut bool) {
     let list = app.session.run("formulas.nameManager", json!({})).unwrap_or(Json::Null);
-    egui::Grid::new("names").striped(true).num_columns(4).show(ui, |ui| {
-        ui.strong("Name");
-        ui.strong("Value");
-        ui.strong("Refers To");
-        ui.strong("Scope");
-        ui.end_row();
-        for n in list.as_array().cloned().unwrap_or_default() {
-            ui.label(n["name"].as_str().unwrap_or(""));
-            ui.label(n["value"].to_string().chars().take(30).collect::<String>());
-            ui.label(n["refersTo"].as_str().unwrap_or(""));
-            ui.horizontal(|ui| {
-                ui.label(n["scope"].as_str().unwrap_or(""));
-                if ui.small_button("Delete").clicked() {
-                    app.run_or_alert("formulas.deleteName", json!({"name": n["name"], "scope": n["scope"]}));
-                }
-            });
-            ui.end_row();
+    let names = list.as_array().cloned().unwrap_or_default();
+    let selected = names.get(d.list_index).cloned();
+    let field = |n: &Json, k: &str| n.get(k).and_then(Json::as_str).unwrap_or("").to_string();
+    ui.horizontal(|ui| {
+        if ui.button("New…").clicked() {
+            app.open_dialog("defineName", json!({}));
+        }
+        if ui.add_enabled(selected.is_some(), egui::Button::new("Edit…")).clicked()
+            && let Some(n) = &selected
+        {
+            app.open_dialog(
+                "defineName",
+                json!({
+                    "name": field(n, "name"), "scope": field(n, "scope"), "comment": field(n, "comment"),
+                    "refersTo": field(n, "refersTo"), "oldName": field(n, "name"), "oldScope": field(n, "scope"),
+                }),
+            );
+        }
+        if ui.add_enabled(selected.is_some(), egui::Button::new("Delete")).clicked()
+            && let Some(n) = &selected
+        {
+            app.run_or_alert("formulas.deleteName", json!({"name": field(n, "name"), "scope": field(n, "scope")}));
         }
     });
-    if ui.button("New…").clicked() {
-        app.open_dialog("defineName", json!({}));
-    }
+    ui.add_space(4.0);
+    egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+        egui::Grid::new("names").striped(true).num_columns(4).show(ui, |ui| {
+            ui.strong("Name");
+            ui.strong("Value");
+            ui.strong("Refers To");
+            ui.strong("Scope");
+            ui.end_row();
+            if names.is_empty() {
+                ui.label(egui::RichText::new("No names defined").italics());
+                ui.end_row();
+            }
+            for (i, n) in names.iter().enumerate() {
+                if ui.selectable_label(i == d.list_index, field(n, "name")).clicked() {
+                    d.list_index = i;
+                }
+                ui.label(n.get("value").map(|v| v.to_string()).unwrap_or_default().chars().take(30).collect::<String>());
+                ui.label(field(n, "refersTo"));
+                ui.label(field(n, "scope"));
+                ui.end_row();
+            }
+        });
+    });
+    ui.add_space(8.0);
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        if ui.button(" Close ").clicked() {
+            *open = false;
+        }
+    });
 }
 
 fn manage_rules(app: &mut SheetApp, ui: &mut egui::Ui) {

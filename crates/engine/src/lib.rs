@@ -8,6 +8,7 @@
 
 pub mod catalog;
 pub mod cf;
+mod clip_html;
 pub mod cmd;
 pub mod display;
 pub mod fill;
@@ -153,6 +154,8 @@ pub struct Prefs {
     pub r1c1: bool,
     /// Words added with Add to Dictionary.
     pub user_dictionary: Vec<String>,
+    /// View › Show › Formula Bar (an application option in Excel, not saved in the file).
+    pub formula_bar: bool,
 }
 
 impl Default for Prefs {
@@ -166,6 +169,7 @@ impl Default for Prefs {
             sheets_in_new_workbook: 1,
             r1c1: false,
             user_dictionary: vec![],
+            formula_bar: true,
         }
     }
 }

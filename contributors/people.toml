@@ -28,3 +28,17 @@ sync_github_name = false
 
 [people.edurbs]
 sync_github_name = true
+
+[people.vangel76]
+real_name = "Valentin Klein"
+sync_github_name = true
+
+[people.MacJedi42]
+sync_github_name = true
+
+[people.alexanderalber]
+real_name = "Alexander Alber"
+
+[people.webdevtodayjason]
+display_name = "Jason Brashear"
+sync_github_name = false

@@ -53,6 +53,52 @@ fn entering_empty_cells_preserves_whole_sheet_formatting() {
 }
 
 #[test]
+fn pasted_currency_text_keeps_the_number_from_the_clipboard_html() {
+    // #257: "Rp10,000.00" copied from Excel for the web / LibreOffice Calc pasted as text. Their
+    // clipboard HTML records the number (x:num, sdval); paste keeps it and shows the same text.
+    let mut s = s();
+    let text = "Rp10,000.00\tRp2,500.50\tLabel\n";
+    let html =
+        r#"<table><tr><td x:num="10000">Rp10,000.00</td><td sdval="2500.5" sdnum="1033;0;x"><font>Rp2,500.50</font></td><td>Label</td></tr></table>"#;
+    s.execute("edit.paste", json!({"at": "A1", "text": text, "html": html})).unwrap();
+    assert_eq!(v(&s, "A1"), Value::number(10000.0));
+    assert_eq!(v(&s, "B1"), Value::number(2500.5));
+    assert_eq!(v(&s, "C1"), Value::text("Label"));
+    let d = s.doc().unwrap();
+    let sh = d.wb.active().unwrap();
+    assert_eq!(crate::display::cell_text(&d.wb, sh, CellRef::parse("A1").unwrap()), "Rp10,000.00");
+    assert_eq!(crate::display::cell_text(&d.wb, sh, CellRef::parse("B1").unwrap()), "Rp2,500.50");
+
+    // HTML that doesn't show the same text (left over from another copy) changes nothing; without
+    // HTML the text stays text, as typing it would in an en-US locale.
+    let stale = r#"<table><tr><td x:num="7">Rp7.00</td></tr></table>"#;
+    s.execute("edit.paste", json!({"at": "A3", "text": "Rp10,000.00", "html": stale})).unwrap();
+    s.execute("edit.paste", json!({"at": "A4", "text": "Rp10,000.00"})).unwrap();
+    assert_eq!(v(&s, "A3"), Value::text("Rp10,000.00"));
+    assert_eq!(v(&s, "A4"), Value::text("Rp10,000.00"));
+}
+
+#[test]
+fn editing_a_name_renames_it_in_formulas() {
+    // Name Manager › Edit…: `oldName` edits the name in place; formulas that use it follow.
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "21"})).unwrap();
+    s.execute("formulas.defineName", json!({"name": "Price", "refersTo": "=Sheet1!$A$1"})).unwrap();
+    s.execute("formulas.defineName", json!({"name": "Other", "refersTo": "=1"})).unwrap();
+    s.execute("cell.set", json!({"cell": "B1", "input": "=Price*2"})).unwrap();
+    let err = s.execute("formulas.defineName", json!({"name": "Other", "refersTo": "=Sheet1!$A$1", "oldName": "Price"}));
+    assert!(err.is_err(), "renaming onto another existing name is refused");
+    s.execute("formulas.defineName", json!({"name": "Cost", "refersTo": "=Sheet1!$A$1", "comment": "unit", "oldName": "Price"})).unwrap();
+    let d = s.doc().unwrap();
+    let names: Vec<&str> = d.wb.names.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(names, ["Other", "Cost"]);
+    let b1 = d.wb.active().unwrap().cell(CellRef::parse("B1").unwrap()).and_then(|c| c.formula.clone()).unwrap();
+    assert_eq!(b1.text, "Cost*2");
+    assert_eq!(v(&s, "B1"), Value::number(42.0));
+    assert!(s.execute("formulas.defineName", json!({"name": "X", "oldName": "Missing"})).is_err());
+}
+
+#[test]
 fn entry_and_text_paste_use_inherited_formats_and_cell_overrides() {
     let mut s = s();
     s.execute("home.bold", json!({"range": "B:B", "on": true})).unwrap();
@@ -453,6 +499,39 @@ fn fill_series() {
 }
 
 #[test]
+fn ctrl_drag_fill_swaps_copy_and_series() {
+    // Issue #264: Ctrl+drag fills a lone number as a series, and copies what a plain drag extends.
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "7"})).unwrap();
+    s.execute("edit.autoFill", json!({"source": "A1", "target": "A1:A4"})).unwrap();
+    assert_eq!(v(&s, "A4"), Value::Number(7.0), "a plain drag copies a lone number");
+    s.execute("edit.autoFill", json!({"source": "A1", "target": "A1:A4", "mode": "alternate"})).unwrap();
+    assert_eq!(v(&s, "A2"), Value::Number(8.0));
+    assert_eq!(v(&s, "A4"), Value::Number(10.0));
+    // Upward too.
+    s.execute("cell.set", json!({"cell": "B5", "input": "7"})).unwrap();
+    s.execute("edit.autoFill", json!({"source": "B5", "target": "B3:B5", "mode": "alternate"})).unwrap();
+    assert_eq!(v(&s, "B3"), Value::Number(5.0));
+    // A two-number series, a list entry and text with a number are copied.
+    s.execute("range.setValues", json!({"range": "C1", "values": [[1], [3]]})).unwrap();
+    s.execute("edit.autoFill", json!({"source": "C1:C2", "target": "C1:C4", "mode": "alternate"})).unwrap();
+    assert_eq!(v(&s, "C3"), Value::Number(1.0));
+    assert_eq!(v(&s, "C4"), Value::Number(3.0));
+    s.execute("cell.set", json!({"cell": "D1", "input": "Mon"})).unwrap();
+    s.execute("edit.autoFill", json!({"source": "D1", "target": "D1:D3", "mode": "alternate"})).unwrap();
+    assert_eq!(v(&s, "D3"), Value::from("Mon"));
+    s.execute("cell.set", json!({"cell": "E1", "input": "Item 9"})).unwrap();
+    s.execute("edit.autoFill", json!({"source": "E1", "target": "E1:E2", "mode": "alternate"})).unwrap();
+    assert_eq!(v(&s, "E2"), Value::from("Item 9"));
+    // Plain text copies either way; an empty source clears.
+    s.execute("cell.set", json!({"cell": "F1", "input": "abc"})).unwrap();
+    s.execute("edit.autoFill", json!({"source": "F1", "target": "F1:F2", "mode": "alternate"})).unwrap();
+    assert_eq!(v(&s, "F2"), Value::from("abc"));
+    s.execute("edit.autoFill", json!({"source": "G1", "target": "G1:G3", "mode": "alternate"})).unwrap();
+    assert_eq!(v(&s, "G3"), Value::Empty);
+}
+
+#[test]
 fn insert_delete_cells_adjust() {
     let formula = |s: &mut Session, a: &str| s.execute("cell.get", json!({"cell": a})).unwrap()["formula"].clone();
     let mut s = s();
@@ -510,6 +589,26 @@ fn sort_and_filter() {
     s.execute("data.filter", json!({})).unwrap();
     let r = s.execute("data.filterBy", json!({"column": "B", "custom": {"op": ">", "value": "1"}})).unwrap();
     assert_eq!(r["hiddenRows"], 1);
+}
+
+/// Turning the filter on with only the header row selected filters the data below it (#201).
+#[test]
+fn filter_on_a_selected_header_row_covers_the_data_below() {
+    let mut s = s();
+    s.execute(
+        "range.setValues",
+        json!({"range": "A1", "values": [["Name", "City"], ["Ana", "SP"], ["Bia", "RJ"], ["Caio", "SP"], ["Duda", "BH"], ["Eva", "RJ"]]}),
+    )
+    .unwrap();
+    s.execute("selection.set", json!({"range": "A1:B1"})).unwrap();
+    let r = s.execute("data.filter", json!({})).unwrap();
+    assert_eq!(r["range"], "A1:B6");
+    let r = s.execute("data.filterBy", json!({"column": "B", "values": ["SP"]})).unwrap();
+    assert_eq!(r["hiddenRows"], 3);
+    // An explicit range is taken as given.
+    s.execute("data.filter", json!({})).unwrap();
+    let r = s.execute("data.filter", json!({"range": "A1:B1"})).unwrap();
+    assert_eq!(r["range"], "A1:B1");
 }
 
 /// A sheet with locked data in A1:B3, unlocked cells in D1:D3 and row 10, then protected.
@@ -604,6 +703,27 @@ fn hidden_formulas_stay_hidden_on_protected_sheets() {
     assert!(s.execute("edit.find", json!({"what": "SEQUENCE", "all": true})).is_err());
     let r = s.execute("edit.find", json!({"what": "7", "all": true})).unwrap();
     assert_eq!(r["results"][0]["value"], "7");
+}
+
+#[test]
+fn case_sensitive_sort_puts_lowercase_first() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["b"], ["B"], ["Ab"], ["a"], ["aB"], ["A"]]})).unwrap();
+    s.execute("data.sort", json!({"range": "A1:A6", "header": false, "matchCase": true, "keys": [{"column": "A"}]})).unwrap();
+    let col: Vec<Value> = (1..=6).map(|r| v(&s, &format!("A{r}"))).collect();
+    assert_eq!(col, ["a", "A", "aB", "Ab", "b", "B"].map(Value::from));
+}
+
+#[test]
+fn remove_duplicates_compares_shown_text() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Date", "Price"], ["2006-03-08", 1.01], ["2006-03-08", 1.02]]})).unwrap();
+    s.execute("home.numberFormat", json!({"range": "A3", "code": "mmm d, yyyy"})).unwrap();
+    s.execute("home.numberFormat", json!({"range": "B2:B3", "code": "0.0"})).unwrap();
+    let r = s.execute("data.removeDuplicates", json!({"range": "A1:A3", "header": true})).unwrap();
+    assert_eq!(r["removed"], 0);
+    let r = s.execute("data.removeDuplicates", json!({"range": "B1:B3", "header": true})).unwrap();
+    assert_eq!(r["removed"], 1);
 }
 
 #[test]
@@ -1693,4 +1813,33 @@ fn copying_areas_that_do_not_line_up_is_refused_with_a_message() {
     s.execute("edit.copy", json!({})).unwrap();
     assert!(s.execute("edit.pasteSpecial", json!({"what": "all", "link": true, "at": "E1"})).is_err());
     assert!(v(&s, "E1").is_empty());
+}
+
+/// Icon-set thresholds as read from a file (one per icon, the first the lower bound) decide the
+/// icon; a rule without thresholds uses Excel's defaults (percent 33 and 67) (#235).
+#[test]
+fn icon_set_thresholds_from_files_pick_the_icon() {
+    use gridcraft_model::{CfRule, CfValueKind, CondFormat};
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [[0], [10], [20], [30], [100]]})).unwrap();
+    s.execute("home.conditionalFormat", json!({"range": "A1:A5", "rule": {"type": "iconSet", "set": "3Arrows"}})).unwrap();
+    let icon = |s: &Session, a: &str| {
+        let wb = &s.doc().unwrap().wb;
+        crate::cf::CfCache::new().look(wb, 0, CellRef::parse(a).unwrap()).and_then(|l| l.icon).map(|(_, i)| i)
+    };
+    // Defaults: percent of the 0..100 span, so 30 is still the lowest icon.
+    assert_eq!([icon(&s, "A1"), icon(&s, "A4"), icon(&s, "A5")], [Some(0), Some(0), Some(2)]);
+    let sh = std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb).sheet_mut(0).unwrap();
+    sh.cond_formats = vec![CondFormat {
+        ranges: vec![gridcraft_core::RangeRef::parse("A1:A5").unwrap()],
+        rule: CfRule::IconSet {
+            set: "3Arrows".into(),
+            thresholds: vec![CfValueKind::Percent(0.0), CfValueKind::Number(10.0), CfValueKind::Number(25.0)],
+            reverse: false,
+            show_value: true,
+        },
+        priority: 1,
+        stop_if_true: false,
+    }];
+    assert_eq!([icon(&s, "A1"), icon(&s, "A2"), icon(&s, "A3"), icon(&s, "A4")], [Some(0), Some(1), Some(1), Some(2)]);
 }

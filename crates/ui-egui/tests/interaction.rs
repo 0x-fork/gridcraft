@@ -1,6 +1,7 @@
 //! UI interaction tests: real egui input through the whole app (no GPU needed).
 
 use egui::{Event, Key, Modifiers, PointerButton};
+use egui_kittest::kittest::Queryable as _;
 use gridcraft_engine::Session;
 use gridcraft_engine::core::{CellRef, Value};
 use gridcraft_ui_egui::{SheetApp, grid::Geo};
@@ -85,6 +86,21 @@ fn click_cell(h: &mut egui_kittest::Harness<'static, SheetApp>, cell: &str) {
     h.run_steps(2);
 }
 
+fn click_chart(h: &mut egui_kittest::Harness<'static, SheetApp>, id: u32) {
+    let app = h.state();
+    let sheet = app.session.active().unwrap().wb.active().unwrap();
+    let geo = Geo::new(sheet, app.grid.rect.unwrap(), app.view().scroll);
+    let anchor = sheet.charts.iter().find(|chart| chart.id == id).unwrap().anchor;
+    let pos = egui::pos2(geo.x(sheet, anchor.cell.col) + anchor.dx * geo.z, geo.y(sheet, anchor.cell.row) + anchor.dy * geo.z)
+        + egui::vec2(anchor.width, anchor.height) * geo.z / 2.0;
+    h.input_mut().events.extend([
+        Event::PointerMoved(pos),
+        Event::PointerButton { pos, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE },
+        Event::PointerButton { pos, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE },
+    ]);
+    h.run_steps(2);
+}
+
 #[test]
 fn keyboard_navigation_does_not_replay_the_last_pointer_click() {
     let mut h = harness(blank());
@@ -123,6 +139,26 @@ fn space_toggles_the_active_checkbox_without_clicking_the_hovered_cell() {
     assert_eq!(value(&h, "A1"), Value::Bool(true), "the old pointer location must remain unchanged");
     assert_eq!(value(&h, "B1"), Value::Bool(true));
     assert!(h.state().editor.is_none());
+}
+
+#[test]
+fn name_box_enter_goes_to_the_typed_cell_not_the_one_below() {
+    // #247: typing A1 in the Name Box and pressing Enter selected A2; the grid replayed the Enter.
+    let mut h = harness(blank());
+    h.state_mut().session.run("selection.set", json!({"cell": "C5"})).unwrap();
+    h.run_steps(2);
+    h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("gridcraft.name_box")));
+    h.run_steps(2);
+    h.input_mut().events.push(Event::Key { key: Key::A, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND });
+    h.input_mut().events.push(Event::Text("A1".into()));
+    h.run_steps(2);
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    h.run_steps(2);
+    assert_eq!(h.state().session.active().unwrap().selection.active, CellRef::new(0, 0));
+    assert!(h.state().name_box.is_none());
+    // The grid has the focus back: a plain Enter there still moves down.
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    assert_eq!(h.state().session.active().unwrap().selection.active, CellRef::new(1, 0));
 }
 
 #[test]
@@ -171,6 +207,24 @@ fn shortcuts_format_and_extend() {
 }
 
 #[test]
+fn delete_key_removes_the_selected_chart() {
+    let mut session = blank();
+    session.execute("range.setValues", json!({"range": "A1:B2", "values": [[1, 2], [3, 4]]})).unwrap();
+    let id = session.execute("insert.chart", json!({"range": "A1:B2", "at": "D2"})).unwrap()["chart"].as_u64().unwrap() as u32;
+    let mut h = harness(session);
+
+    click_cell(&mut h, "C10");
+    click_chart(&mut h, id);
+    assert_eq!(h.state().selected_chart, Some(id));
+
+    key(&mut h, Key::Delete, Modifiers::NONE);
+
+    assert!(h.state().session.active().unwrap().wb.active().unwrap().charts.is_empty());
+    assert_eq!(h.state().selected_chart, None);
+    assert_eq!(value(&h, "A1"), Value::Number(1.0));
+}
+
+#[test]
 fn renders_every_ribbon_tab_without_panicking() {
     let mut s = Session::new();
     s.execute("file.new", json!({"sample": "sales"})).unwrap();
@@ -199,9 +253,14 @@ fn language_switch_translates_the_ribbon_and_persists() {
     for id in ["app.language.set", "app.language.english", "app.language.japanese"] {
         assert!(ids.contains(&id), "engine.commands lists {id}");
     }
-    for (language, expected) in
-        [(Language::Zh, "数据"), (Language::Ja, "データ"), (Language::Ko, "데이터"), (Language::Ru, "Данные"), (Language::PtBr, "Dados")]
-    {
+    for (language, expected) in [
+        (Language::Zh, "数据"),
+        (Language::Ja, "データ"),
+        (Language::Ko, "데이터"),
+        (Language::Ru, "Данные"),
+        (Language::PtBr, "Dados"),
+        (Language::De, "Daten"),
+    ] {
         h.state_mut().run("app.language.set", json!({"language": language.code()})).unwrap();
         h.run_steps(2); // every locale renders the ribbon without panicking
         assert_eq!(h.state().ui.language, language);
@@ -211,6 +270,42 @@ fn language_switch_translates_the_ribbon_and_persists() {
     }
     h.state_mut().run("app.language.set", json!({"language": "en"})).unwrap();
     assert_eq!(h.state().ui.language, Language::En);
+}
+
+#[test]
+fn name_manager_new_and_edit_open_the_name_dialog_and_come_back() {
+    // #238: New… in the Name Manager did nothing (the manager put itself back over the dialog it
+    // had just opened).
+    let mut h = harness(blank());
+    h.state_mut().open_dialog("nameManager", json!({}));
+    h.run_steps(4);
+    h.get_by_label("New…").click();
+    h.run_steps(2);
+    assert_eq!(h.state().dialog.as_ref().map(|d| d.title.as_str()), Some("New Name"));
+    if let Some(d) = h.state_mut().dialog.as_mut() {
+        d.values.insert("name".into(), json!("Total"));
+        d.values.insert("refersTo".into(), json!("=Sheet1!$A$1"));
+    }
+    h.run_steps(1);
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    h.run_steps(2);
+    let names = |h: &egui_kittest::Harness<'static, SheetApp>| {
+        h.state().session.active().unwrap().wb.names.iter().map(|n| n.name.clone()).collect::<Vec<_>>()
+    };
+    assert_eq!(names(&h), ["Total"]);
+    assert_eq!(h.state().dialog.as_ref().map(|d| d.name()), Some("nameManager"), "OK returns to the Name Manager");
+
+    h.get_by_label("Edit…").click();
+    h.run_steps(2);
+    assert_eq!(h.state().dialog.as_ref().map(|d| d.title.as_str()), Some("Edit Name"));
+    if let Some(d) = h.state_mut().dialog.as_mut() {
+        d.values.insert("name".into(), json!("GrandTotal"));
+    }
+    h.run_steps(1);
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    h.run_steps(2);
+    assert_eq!(names(&h), ["GrandTotal"], "Edit renames instead of adding a second name");
+    assert_eq!(h.state().dialog.as_ref().map(|d| d.name()), Some("nameManager"));
 }
 
 #[test]

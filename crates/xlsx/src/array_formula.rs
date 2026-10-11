@@ -24,7 +24,10 @@ pub(crate) fn needs_array(wb: &Workbook, sheet: usize, at: CellRef, formula: &Fo
     let Some(expr) = formula.expr_arc() else { return false };
     let mut scan = Scan { wb, at, remaining: 4096, locals: Vec::new() };
     let shape = scan.expr(&expr, sheet, false, 0);
-    shape.array || shape.affected
+    // An explicit `@` is written as `_xlfn.SINGLE`, which only dynamic-array formulas carry.
+    let mut at = false;
+    expr.walk(&mut |e| at |= matches!(e, Expr::Unary(UnOp::At, _)));
+    shape.array || shape.affected || at
 }
 
 struct Scan<'a> {
