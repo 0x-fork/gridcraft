@@ -444,6 +444,9 @@ fn toggle_filter(s: &mut Session, p: &Json) -> Result<Json> {
             let sh = cx.sheet_mut(sheet)?;
             if let Some(t) = sh.tables.iter_mut().find(|t| t.name == name) {
                 t.filter_button = !t.filter_button;
+                if !t.filter_button {
+                    t.filter.clear();
+                }
             }
             Ok(Json::Null)
         });
@@ -624,6 +627,8 @@ pub(crate) fn apply_filter(wb: &mut Workbook, sheet: usize) {
                 },
                 FilterCriterion::FillColor(col) => wb.styles.get(sh.style_id(c)).fill.fg == *col,
                 FilterCriterion::FontColor(col) => wb.styles.get(sh.style_id(c)).font.color == *col,
+                // Icons are not evaluated here: the row keeps its current visibility.
+                FilterCriterion::Icon { .. } => !sh.is_row_hidden(row),
             };
             if !ok {
                 visible = false;

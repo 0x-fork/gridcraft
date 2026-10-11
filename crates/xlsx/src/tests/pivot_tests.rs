@@ -70,6 +70,7 @@ fn workbook() -> Workbook {
         first_col: false,
         last_col: false,
         filter_button: true,
+        filter: vec![],
     });
     wb.names.push(DefinedName { name: "SalesData".into(), scope: None, formula: "Data!$A$1:$F$9".into(), comment: String::new(), hidden: false });
 

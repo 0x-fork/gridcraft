@@ -345,6 +345,7 @@ fn arrays_do_not_spill_in_tables() {
         first_col: false,
         last_col: false,
         filter_button: false,
+        filter: vec![],
     });
     t.set("C4", "=SEQUENCE(2)");
     t.set("E1", "=SEQUENCE(4)");
@@ -559,6 +560,52 @@ fn subtotal_skips_hidden() {
     t.set("B2", "=SUBTOTAL(9,A1:A3)");
     assert_eq!(t.num("B1"), 4.0);
     assert_eq!(t.num("B2"), 6.0);
+}
+
+/// SUBTOTAL leaves out rows a filter hides for every function number, while 1-11 keep rows
+/// hidden by hand (as in ConditionalFormattingSamples.xlsx, where `SUBTOTAL(9,Table69[Sales])`
+/// under a filtered table adds only the visible rows).
+#[test]
+fn subtotal_skips_filtered_rows() {
+    use gridcraft_model::{AutoFilter, FilterCriterion, LineInfo};
+    let mut t = T::new();
+    for (i, v) in [1, 2, 4, 8, 16, 32].iter().enumerate() {
+        t.set(&format!("A{}", i + 2), &v.to_string());
+        t.set(&format!("C{}", i + 2), &v.to_string());
+    }
+    let crit = || vec![(0, FilterCriterion::Custom { a: (">".into(), "1".into()), b: None, and: false })];
+    let sh = t.wb.sheet_mut(0).unwrap();
+    sh.tables.push(gridcraft_model::Table {
+        id: 1,
+        name: "Sales".into(),
+        range: gridcraft_core::RangeRef::parse("A1:A7").unwrap(),
+        header_row: true,
+        totals_row: false,
+        columns: vec![gridcraft_model::TableColumn { name: "Amount".into(), totals: Default::default(), totals_label: None, formula: None }],
+        style: String::new(),
+        banded_rows: false,
+        banded_cols: false,
+        first_col: false,
+        last_col: false,
+        filter_button: true,
+        filter: crit(),
+    });
+    sh.autofilter = Some(AutoFilter { range: gridcraft_core::RangeRef::parse("C1:C7").unwrap(), criteria: crit() });
+    // Rows 3 and 5 are filtered out; row 9 (outside both filters) is hidden by hand.
+    for row in [2, 4, 8] {
+        sh.rows.insert(row, LineInfo { hidden: true, ..Default::default() });
+    }
+    t.set("A9", "64");
+    t.set("E1", "=SUBTOTAL(9,Sales[Amount])");
+    t.set("E2", "=SUBTOTAL(109,Sales[Amount])");
+    t.set("E3", "=SUBTOTAL(9,C2:C7)");
+    t.set("E4", "=SUBTOTAL(9,A2:A9)");
+    t.set("E5", "=SUBTOTAL(109,A2:A9)");
+    t.set("E6", "=SUBTOTAL(2,A2:A7)");
+    t.set("E7", "=AGGREGATE(9,4,A2:A7)");
+    for (at, want) in [("E1", 53.0), ("E2", 53.0), ("E3", 53.0), ("E4", 117.0), ("E5", 53.0), ("E6", 4.0), ("E7", 63.0)] {
+        assert_eq!(t.num(at), want, "{at}");
+    }
 }
 
 #[test]

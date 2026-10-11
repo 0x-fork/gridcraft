@@ -1311,6 +1311,9 @@ impl<'h> Evaluator<'h> {
             return err(CellError::Value);
         }
         let skip_hidden = matches!(options, 1 | 3 | 5 | 7);
+        // SUBTOTAL leaves out rows a filter hides whatever the function number (Microsoft's
+        // SUBTOTAL documentation); 101-111 also leave out rows hidden by hand.
+        let skip_filtered = name == "SUBTOTAL";
         let skip_errors = matches!(options, 2 | 3 | 6 | 7);
         let skip_nested = options <= 3;
         let mut values = Vec::new();
@@ -1328,7 +1331,8 @@ impl<'h> Evaluator<'h> {
                             let (hidden, nested) = {
                                 let wb = self.host.workbook();
                                 let s = wb.sheet(a.sheet);
-                                let hidden = skip_hidden && s.is_some_and(|s| s.is_row_hidden(c.row));
+                                let hidden =
+                                    s.is_some_and(|s| if skip_hidden { s.is_row_hidden(c.row) } else { skip_filtered && s.is_row_filtered(c.row) });
                                 let nested = skip_nested
                                     && s.and_then(|s| s.cell(c)).and_then(|cell| cell.formula.as_ref()).is_some_and(|f| {
                                         let u = f.text.to_ascii_uppercase();

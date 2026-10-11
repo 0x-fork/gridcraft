@@ -109,20 +109,24 @@ fn product(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     num_val(v.iter().product())
 }
 
+/// SUMPRODUCT: non-numeric entries of arrays and multi-cell ranges count as 0, but a scalar
+/// argument holding text (a literal or a single-cell reference) is `#VALUE!` (observed:
+/// `SUMPRODUCT(G1330:G1330,I1330:I1330)` with G1330 = the text "4" is `#VALUE!`).
 fn sumproduct(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
-    let arrays: Vec<_> = a.iter().map(|x| as_array(&x.value)).collect();
-    let Some(first) = arrays.first() else { return Err(CellError::Value) };
+    let arrays: Vec<_> = a.iter().map(|x| (as_array(&x.value), !matches!(x.value, Value::Array(_)))).collect();
+    let Some((first, _)) = arrays.first() else { return Err(CellError::Value) };
     let (rows, cols) = (first.rows, first.cols);
-    if arrays.iter().any(|x| x.rows != rows || x.cols != cols) {
+    if arrays.iter().any(|(x, _)| x.rows != rows || x.cols != cols) {
         return Err(CellError::Value);
     }
     let mut total = 0.0;
     for i in 0..rows.saturating_mul(cols) {
         let mut p = 1.0;
-        for arr in &arrays {
+        for (arr, scalar) in &arrays {
             match arr.data.get(i) {
                 Some(Value::Number(n)) => p *= n,
                 Some(Value::Error(e)) => return Err(*e),
+                Some(Value::Text(_)) if *scalar => return Err(CellError::Value),
                 _ => p = 0.0,
             }
         }
@@ -1334,6 +1338,27 @@ mod tests {
         close(ev("SUMX2PY2", vec![av(x.clone()), av(y.clone())]), 521.0);
         close(ev("SUMXMY2", vec![av(x.clone()), av(y)]), 79.0);
         is_err(ev("SUMXMY2", vec![av(x), av(row(&[1.0]))]), NA);
+    }
+
+    /// SUMPRODUCT cases observed in Excel (FormulaEvalTestData, row "Sumproduct"): scalars and
+    /// single-cell references multiply in, text in a scalar argument is `#VALUE!`, sizes must match.
+    #[test]
+    fn sumproduct_scalar_arguments() {
+        let cases: Vec<(Vec<crate::Arg>, Result<f64, CellError>)> = vec![
+            (vec![n(3.0), rf(nv(534.0)), rf(nv(1.1))], Ok(1762.2)),
+            (vec![rf(nv(1.1)), n(3.0), rf(nv(534.0)), rf(nv(1.1))], Ok(1938.42)),
+            (vec![n(2.0), rf(col(&[1.00001, 2.99999]))], Err(CellError::Value)),
+            (vec![rf(tv("4")), rf(nv(2.0))], Err(CellError::Value)),
+            (vec![t("4"), n(2.0)], Err(CellError::Value)),
+            (vec![rf(nv(3.0)), rf(Value::Error(CellError::Ref))], Err(CellError::Ref)),
+            (vec![av(arr(vec![vec![tv("4")]])), n(2.0)], Ok(0.0)),
+        ];
+        for (args, want) in cases {
+            match want {
+                Ok(x) => close(ev("SUMPRODUCT", args), x),
+                Err(err) => is_err(ev("SUMPRODUCT", args), err),
+            }
+        }
     }
 
     #[test]

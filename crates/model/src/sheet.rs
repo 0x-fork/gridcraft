@@ -252,6 +252,17 @@ impl Sheet {
     pub fn is_row_hidden(&self, row: u32) -> bool {
         self.rows.get(&row).is_some_and(|r| r.hidden)
     }
+    /// Whether `row` is hidden by an applied filter: a hidden row below the header of the
+    /// sheet AutoFilter while it has criteria, or a hidden data row of a filtered table.
+    /// Other hidden rows were hidden by hand.
+    pub fn is_row_filtered(&self, row: u32) -> bool {
+        if !self.is_row_hidden(row) {
+            return false;
+        }
+        let in_sheet_filter =
+            self.autofilter.as_ref().is_some_and(|af| !af.criteria.is_empty() && row > af.range.start.row && row <= af.range.end.row);
+        in_sheet_filter || self.tables.iter().any(|t| !t.filter.is_empty() && t.data_range().is_some_and(|r| row >= r.start.row && row <= r.end.row))
+    }
     pub fn is_col_hidden(&self, col: u32) -> bool {
         self.cols.get(&col).is_some_and(|r| r.hidden)
     }

@@ -300,6 +300,10 @@ fn sample() -> Workbook {
         first_col: true,
         last_col: false,
         filter_button: true,
+        filter: vec![
+            (0, FilterCriterion::Values { values: vec!["East".into()], blanks: false }),
+            (1, FilterCriterion::Icon { set: "3TrafficLights1".into(), id: Some(1) }),
+        ],
     });
     let png = b"\x89PNG\r\n\x1a\n0000IHDRfake".to_vec();
     s.images.push(Image {
@@ -494,6 +498,7 @@ fn full_roundtrip() {
     assert_eq!(tb.name, "Sales_Table");
     assert_eq!((tb.range, tb.header_row, tb.totals_row, &tb.columns, &tb.style), (ta.range, ta.header_row, ta.totals_row, &ta.columns, &ta.style));
     assert_eq!((tb.banded_rows, tb.banded_cols, tb.first_col, tb.last_col, tb.filter_button), (true, true, true, false, true));
+    assert_eq!(tb.filter, ta.filter, "the table's filter criteria survive (SUBTOTAL tells filtered rows apart)");
     assert_eq!(b.value(at("P1")), Value::text("Region"), "header cells carry the column names");
     // Drawings.
     assert_eq!(b.images.len(), 1);
@@ -694,6 +699,7 @@ fn writing_repairs_invalid_models() {
         first_col: false,
         last_col: false,
         filter_button: true,
+        filter: vec![],
     });
     s.cells.set(at("B2"), Cell { value: Value::Number(1.0), formula: None, style: StyleId(9999) });
     let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
