@@ -1,7 +1,7 @@
 //! Formulas tab: AutoSum, Insert Function, names, auditing, calculation.
 
 use gridcraft_core::{CellRef, RangeRef};
-use gridcraft_model::{CalcMode, DefinedName};
+use gridcraft_model::{CalcMode, DefinedName, Formula};
 use serde_json::{Value as Json, json};
 
 use super::*;
@@ -32,7 +32,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Define Name…",
             ["Formulas", "Defined Names"],
             None,
-            "{name, refersTo?: \"=Sheet1!$A$1:$A$10\" (default: the selection), scope?: \"Workbook\"|sheet name, comment?}",
+            "{name, refersTo?: \"=Sheet1!$A$1:$A$10\" (default: the selection), scope?: \"Workbook\"|sheet name, comment?, oldName?, oldScope?} (oldName: edit that name (Name Manager › Edit); a new name also renames it in formulas)",
             has_doc,
             define_name
         ),
@@ -185,6 +185,7 @@ pub fn function_list() -> Vec<Json> {
         ("SHEET", "Information", "SHEET([value])", "Sheet number."),
         ("SHEETS", "Information", "SHEETS([reference])", "Number of sheets."),
         ("AREAS", "Lookup", "AREAS(reference)", "Number of areas in a reference."),
+        ("TRIMRANGE", "Lookup", "TRIMRANGE(range, [trim_rows], [trim_cols])", "A range or array without its blank outer rows and columns."),
         ("ISOMITTED", "Information", "ISOMITTED(argument)", "TRUE when a LAMBDA argument was left out."),
     ];
     for (n, c, sig, d) in specials {
@@ -265,12 +266,82 @@ fn define_name(s: &mut Session, p: &Json) -> Result<Json> {
         return Err(EngineError::Other("There's a problem with this formula.".into()));
     }
     let comment = str_param(p, "comment").unwrap_or("").to_string();
+    // Editing an existing name (Name Manager › Edit…): it must exist, and its new name must not
+    // collide with another name in the target scope.
+    let old = match str_param(p, "oldName") {
+        Some(old_name) => {
+            let old_scope = match str_param(p, "oldScope") {
+                None | Some("Workbook") => None,
+                Some(sh) => Some(d.wb.sheet_index(sh).ok_or_else(|| bad("formulas.defineName", "no such sheet"))?),
+            };
+            if !d.wb.names.iter().any(|n| n.name.eq_ignore_ascii_case(old_name) && n.scope == old_scope) {
+                return Err(bad("formulas.defineName", "no such name to edit"));
+            }
+            let same = old_name.eq_ignore_ascii_case(&name) && old_scope == scope;
+            if !same && d.wb.names.iter().any(|n| n.name.eq_ignore_ascii_case(&name) && n.scope == scope) {
+                return Err(EngineError::Other("The name entered already exists. Enter a unique name.".into()));
+            }
+            Some((old_name.to_string(), old_scope))
+        }
+        None => None,
+    };
     edit(s, |cx| {
+        if let Some((old_name, old_scope)) = &old {
+            cx.wb.names.retain(|n| !(n.name.eq_ignore_ascii_case(old_name) && n.scope == *old_scope));
+            if !old_name.eq_ignore_ascii_case(&name) {
+                rename_name_in_formulas(&mut cx.wb, old_name, *old_scope, &name);
+            }
+        }
         cx.wb.names.retain(|n| !(n.name.eq_ignore_ascii_case(&name) && n.scope == scope));
         cx.wb.names.push(DefinedName { name: name.clone(), scope, formula: refers.clone(), comment: comment.clone(), hidden: false });
         cx.structural = true;
         Ok(json!({"name": name, "refersTo": format!("={refers}")}))
     })
+}
+
+/// Formulas that use a renamed name follow it: cell formulas and other names' definitions, on
+/// the sheets where `old` resolves to the renamed name (its own sheet for a sheet-scoped name;
+/// every sheet without a same-named sheet-level name for a workbook-level one).
+fn rename_name_in_formulas(wb: &mut gridcraft_model::Workbook, old: &str, old_scope: Option<usize>, new: &str) {
+    let shadowed: Vec<usize> = wb.names.iter().filter(|n| n.name.eq_ignore_ascii_case(old)).filter_map(|n| n.scope).collect();
+    let applies = |sheet: usize| match old_scope {
+        Some(s) => s == sheet,
+        None => !shadowed.contains(&sheet),
+    };
+    // The renamed expression, or `None` when the name doesn't occur in it.
+    let rename = |e: gridcraft_formula::Expr| {
+        let mut hit = false;
+        let out = e.map(&mut |x| match x {
+            gridcraft_formula::Expr::Name(n) if n.eq_ignore_ascii_case(old) => {
+                hit = true;
+                gridcraft_formula::Expr::Name(new.to_string())
+            }
+            o => o,
+        });
+        hit.then_some(out)
+    };
+    for i in 0..wb.sheets.len() {
+        if !applies(i) {
+            continue;
+        }
+        let Some(sh) = wb.sheet_mut(i) else { continue };
+        let formulas: Vec<(CellRef, std::sync::Arc<Formula>)> = sh.cells.iter().filter_map(|(c, x)| x.formula.clone().map(|f| (c, f))).collect();
+        for (c, f) in formulas {
+            let Some(e) = f.expr().and_then(rename) else { continue };
+            let mut nf = Formula::from_expr(e);
+            nf.array = f.array;
+            if let Some(cell) = sh.cells.get_mut(c) {
+                cell.formula = Some(std::sync::Arc::new(nf));
+            }
+        }
+    }
+    for n in wb.names.iter_mut() {
+        if n.scope.is_none_or(applies)
+            && let Some(e) = gridcraft_formula::parse(&n.formula).ok().and_then(rename)
+        {
+            n.formula = gridcraft_formula::print(&e);
+        }
+    }
 }
 
 fn delete_name(s: &mut Session, p: &Json) -> Result<Json> {
@@ -373,7 +444,7 @@ fn create_from_selection(s: &mut Session, p: &Json) -> Result<Json> {
 
 fn trace_precedents(s: &mut Session, p: &Json) -> Result<Json> {
     let d = s.doc()?;
-    let at = cell_param(p, "cell").unwrap_or(d.selection.active);
+    let at = cell_param(s, p, "cell")?.unwrap_or(d.selection.active);
     let areas = d.calc.graph.precedents_of((d.wb.active_sheet, at));
     let v: Vec<Json> = areas.iter().map(|a| json!({"sheet": d.wb.sheet(a.sheet).map(|s| s.name.clone()), "range": a.range.a1()})).collect();
     Ok(Json::Array(v))
@@ -381,7 +452,7 @@ fn trace_precedents(s: &mut Session, p: &Json) -> Result<Json> {
 
 fn trace_dependents(s: &mut Session, p: &Json) -> Result<Json> {
     let d = s.doc()?;
-    let at = cell_param(p, "cell").unwrap_or(d.selection.active);
+    let at = cell_param(s, p, "cell")?.unwrap_or(d.selection.active);
     let mut deps = Vec::new();
     d.calc.graph.dependents(d.wb.active_sheet, at, &mut deps);
     deps.sort();
@@ -422,7 +493,7 @@ fn error_checking(s: &mut Session, _: &Json) -> Result<Json> {
 
 fn evaluate_formula(s: &mut Session, p: &Json) -> Result<Json> {
     let d = s.doc()?;
-    let at = cell_param(p, "cell").unwrap_or(d.selection.active);
+    let at = cell_param(s, p, "cell")?.unwrap_or(d.selection.active);
     let sheet = d.wb.active_sheet;
     let text = match str_param(p, "formula") {
         Some(f) => f.trim_start_matches('=').to_string(),
@@ -454,7 +525,7 @@ fn evaluate_formula(s: &mut Session, p: &Json) -> Result<Json> {
 fn evaluate(s: &mut Session, p: &Json) -> Result<Json> {
     let d = s.doc()?;
     let f = str_param(p, "formula").ok_or_else(|| bad("formulas.evaluate", "missing `formula`"))?;
-    let at = cell_param(p, "cell").unwrap_or(d.selection.active);
+    let at = cell_param(s, p, "cell")?.unwrap_or(d.selection.active);
     let v = gridcraft_calc::evaluate(&d.wb, d.wb.active_sheet, at, f);
     Ok(crate::cmd::inspect::value_json(&v))
 }

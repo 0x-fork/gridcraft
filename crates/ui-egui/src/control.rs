@@ -2,7 +2,7 @@
 //!
 //! Methods (JSON lines over the host's transport, see `docs/control-protocol.md`):
 //! - `engine.execute {command, params}` — run any engine or UI command
-//! - `engine.commands` — every command with enablement and params docs
+//! - `engine.commands {search?}` — every command with enablement and params docs
 //! - `document.inspect`, `sheet.read {range?}`, `cell.get {cell?}` — read state
 //! - `ui.inspect` — UI state (ribbon tab, editor, dialog, grid geometry, perf)
 //! - `ui.click {x, y, button?, count?, shift?, cmd?, alt?}`, `ui.drag {x, y, toX, toY}`,
@@ -12,8 +12,8 @@
 //! - `ui.ribbon {tab}`, `ui.dialog {name}`, `ui.dialog.set {field, value}`,
 //!   `ui.dialog.confirm`, `ui.dialog.cancel`, `ui.message.dismiss`
 //! - `ui.edit.begin {text?}`, `ui.edit.commit {move?}`, `ui.edit.cancel`
-//! - `ui.screenshot {path?}` — PNG of the window (base64 when no path)
-//! - `ui.resize {width, height}`, `ui.set {dark?, formulaBar?}`
+//! - `ui.screenshot {path?}` — PNG of the window (base64 when no path); animations are settled
+//! - `ui.resize {width, height}`, `ui.set {dark?, formulaBar?, ribbonCollapsed?, animations?}`
 //! - `app.open {path}`, `app.save {path?}`, `app.quit`
 
 use std::sync::mpsc::Sender;
@@ -50,6 +50,14 @@ pub struct Shots {
     pending: Vec<(u64, Option<String>, Sender<ControlResponse>, f64)>,
 }
 
+impl Shots {
+    /// A screenshot was asked for and hasn't been delivered yet: animations hold still, so the
+    /// picture shows the settled state.
+    pub(crate) fn in_flight(&self) -> bool {
+        !self.queued.is_empty() || !self.pending.is_empty()
+    }
+}
+
 fn ok(v: Json) -> Outcome {
     Outcome::Done(json!({"ok": true, "result": v}))
 }
@@ -73,6 +81,7 @@ pub fn inspect(app: &SheetApp, ctx: &egui::Context) -> Json {
         "scroll": [v.scroll.x, v.scroll.y],
         "editor": app.editor.as_ref().map(|e| json!({"cell": e.cell.a1(), "text": e.text, "formulaBar": e.from_formula_bar, "point": e.can_point()})),
         "dialog": app.dialog.as_ref().map(|d| json!({"name": d.name, "title": d.title, "values": d.values, "tab": d.tab})),
+        "backstage": app.backstage.as_ref().map(|b| b.page.id()),
         "message": app.message.as_ref().map(|(t, m)| json!({"title": t, "text": m})),
         "selectedChart": app.selected_chart,
         "mode": format!("{:?}", app.session.mode),
@@ -121,7 +130,7 @@ fn cell_center(app: &SheetApp, c: CellRef) -> Option<egui::Pos2> {
     let sh = d.wb.active()?;
     let rect = app.grid.rect?;
     let geo = crate::grid::Geo::new(sh, rect, app.view().scroll);
-    Some(geo.cell_rect(sh, c).center())
+    Some(geo.screen_cell_rect(sh, c).center())
 }
 
 fn push_click(app: &mut SheetApp, pos: egui::Pos2, button: egui::PointerButton, count: u32, m: egui::Modifiers) {
@@ -144,6 +153,17 @@ fn push_drag(app: &mut SheetApp, a: egui::Pos2, b: egui::Pos2, steps: usize, m: 
     app.synthetic.push_back(vec![egui::Event::PointerButton { pos: b, button: egui::PointerButton::Primary, pressed: false, modifiers: m }]);
 }
 
+/// Keeps the commands whose id, label or ribbon path contains `search` (case-insensitive); `None` keeps all.
+fn filter_commands(commands: Vec<Json>, search: Option<&str>) -> Vec<Json> {
+    let Some(q) = search.map(str::to_ascii_lowercase) else { return commands };
+    let has = |c: &Json, k: &str| c.get(k).and_then(Json::as_str).is_some_and(|v| v.to_ascii_lowercase().contains(&q));
+    let in_menu = |c: &Json| {
+        let menu = c.get("menu").and_then(Json::as_array);
+        menu.is_some_and(|m| m.iter().filter_map(Json::as_str).any(|v| v.to_ascii_lowercase().contains(&q)))
+    };
+    commands.into_iter().filter(|c| has(c, "id") || has(c, "label") || in_menu(c)).collect()
+}
+
 pub fn handle(app: &mut SheetApp, ctx: &egui::Context, method: &str, p: &Json) -> Outcome {
     let s = |k: &str| p.get(k).and_then(Json::as_str);
     let f = |k: &str| p.get(k).and_then(Json::as_f64).unwrap_or(0.0) as f32;
@@ -157,19 +177,20 @@ pub fn handle(app: &mut SheetApp, ctx: &egui::Context, method: &str, p: &Json) -
             let mut v: Vec<Json> = app.session.commands().into_iter().map(|c| serde_json::to_value(c).unwrap_or_default()).collect();
             for (id, label, params) in [
                 ("ui.ribbonTab", "Ribbon Tab", ""),
-                ("view.formulaBar", "Formula Bar", ""),
                 ("view.collapseRibbon", "Collapse Ribbon", ""),
                 ("view.darkMode", "Dark Mode", ""),
                 ("view.theme", "Display Theme", ""),
-                ("view.zoom100", "100%", ""),
+                ("view.animations", "Animations", "{on?: bool} (toggles without it) → {on}"),
+                ("view.interfaceScale", "Interface Size", "{percent: 75–200 | \"auto\"} (100 = auto; clamped)"),
                 ("ui.dialog", "Open Dialog", ""),
-                ("app.language.set", "Interface Language", "{language: \"en\"|\"zh\"|\"ja\"|\"ko\"|\"ru\"|\"pt\"} (alias: code)"),
+                ("ui.backstage", "File (Backstage view)", "{page?: home|new|open|info|saveAs|print|export|options|close}"),
+                ("app.language.set", "Interface Language", "{language: \"en\"|\"zh\"|\"ja\"|\"ko\"|\"ru\"|\"pt\"|\"de\"|\"cs\"} (alias: code)"),
                 ("app.language.english", "Interface Language: English", ""),
                 ("app.language.japanese", "Interface Language: Japanese", ""),
             ] {
                 v.push(json!({"id": id, "label": label, "params": params, "enabled": true, "ui": true}));
             }
-            ok(Json::Array(v))
+            ok(Json::Array(filter_commands(v, s("search"))))
         }
         "engine.journal" => ok(json!(app.session.journal.iter().map(|(id, p)| json!({"command": id, "params": p})).collect::<Vec<_>>())),
         "document.inspect" | "sheet.read" | "cell.get" | "selection.stats" => wrap(app.session.run(method, p.clone())),
@@ -185,12 +206,19 @@ pub fn handle(app: &mut SheetApp, ctx: &egui::Context, method: &str, p: &Json) -
                 app.ui.system_theme = false;
             }
             if let Some(v) = p.get("formulaBar").and_then(Json::as_bool) {
-                app.ui.formula_bar = v;
+                let _ = app.run("view.formulaBar", json!({"on": v}));
             }
             if let Some(v) = p.get("ribbonCollapsed").and_then(Json::as_bool) {
                 app.ui.ribbon_collapsed = v;
             }
-            ok(serde_json::to_value(&app.ui).unwrap_or_default())
+            if let Some(v) = p.get("animations").and_then(Json::as_bool) {
+                app.ui.animations = v;
+            }
+            let mut out = serde_json::to_value(&app.ui).unwrap_or_default();
+            if let Some(o) = out.as_object_mut() {
+                o.insert("formulaBar".into(), json!(app.session.prefs.formula_bar));
+            }
+            ok(out)
         }
         "ui.dialog" => {
             app.open_dialog(s("name").unwrap_or(""), p.clone());
@@ -431,5 +459,32 @@ pub fn save_image(image: &egui::ColorImage, path: Option<&str>) -> Json {
             Err(e) => json!({"ok": false, "error": e.to_string()}),
         },
         None => json!({"ok": true, "result": {"base64": gridcraft_engine::io::base64_encode(&png), "width": w, "height": h}}),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample() -> Vec<Json> {
+        vec![
+            json!({"id": "home.borders", "label": "Borders", "menu": ["Home", "Font"]}),
+            json!({"id": "home.bold", "label": "Bold", "menu": ["Home", "Font"]}),
+            json!({"id": "ui.ribbonTab", "label": "Ribbon Tab", "enabled": true, "ui": true}),
+        ]
+    }
+
+    fn ids(v: &[Json]) -> Vec<&str> {
+        v.iter().filter_map(|c| c.get("id").and_then(Json::as_str)).collect()
+    }
+
+    #[test]
+    fn search_filters_case_insensitively() {
+        assert_eq!(ids(&filter_commands(sample(), Some("border"))), ["home.borders"]);
+        assert_eq!(filter_commands(sample(), Some("BORDER")), filter_commands(sample(), Some("border")));
+        assert_eq!(ids(&filter_commands(sample(), Some("ribbon"))), ["ui.ribbonTab"]);
+        assert_eq!(ids(&filter_commands(sample(), Some("font"))), ["home.borders", "home.bold"]);
+        assert!(filter_commands(sample(), Some("catalog_no_match_7391")).is_empty());
+        assert_eq!(filter_commands(sample(), None).len(), 3);
     }
 }

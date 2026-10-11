@@ -102,7 +102,9 @@ impl NumberFormat {
     /// Parses a format code. Never fails: unknown or malformed parts degrade to literal text.
     pub fn parse(code: &str) -> NumberFormat {
         let trimmed = code.trim();
-        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("general") {
+        // `checkbox` marks a checkbox cell (Insert › Checkbox): TRUE/FALSE draw as a box, any other
+        // value displays as General.
+        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("general") || trimmed == "checkbox" {
             return NumberFormat {
                 inner: Arc::new(Inner { code: code.to_string(), general: true, sections: Vec::new(), num_sections: 0, text_section: None }),
             };

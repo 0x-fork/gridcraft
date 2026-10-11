@@ -1,4 +1,5 @@
-//! GridCraft file formats: XLSX (transitional and strict) and CSV import/export, plus XLSB and ODS data import.
+//! GridCraft file formats: XLSX (transitional and strict) and CSV import/export, plus XLSB and ODS data import
+//! and legacy Excel 97-2003 `.xls` (BIFF8) import.
 //!
 //! Clean-room implementation from ECMA-376 / ISO/IEC 29500 and observed behaviour. All entry
 //! points work on byte slices (no file system access), so the crate builds for WebAssembly.
@@ -10,21 +11,27 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod array_formula;
 mod cfb;
 mod chart;
+mod chartex;
 mod csv;
 mod drawing;
+mod feature_bags;
 mod fmla;
 mod ods;
 mod package;
+mod passthrough;
 mod pivot;
 mod read;
+mod richdata;
 mod sheet_read;
 mod sheet_write;
 mod styles;
 mod tables;
 mod theme;
 mod write;
+mod xls;
 mod xlsb;
 mod xml;
 
@@ -36,6 +43,7 @@ use gridcraft_model::Workbook;
 
 pub use csv::{read_csv, write_csv};
 pub use ods::read_ods;
+pub use xls::read_xls;
 pub use xlsb::read_xlsb;
 
 /// Errors from reading or writing files.
@@ -102,7 +110,9 @@ pub enum Format {
     Csv,
     /// A password-protected (encrypted) workbook: a compound file with an `EncryptedPackage`.
     Encrypted,
-    /// Another compound (CFB/OLE2) file: an Excel 97-2003 `.xls` or other legacy Office binary.
+    /// An Excel 97-2003 `.xls` workbook: a compound file with a `Workbook` (or BIFF5 `Book`) stream.
+    Xls,
+    /// Another compound (CFB/OLE2) file: a legacy Office binary that isn't an Excel workbook.
     LegacyBinary,
     Unknown,
 }
@@ -119,9 +129,16 @@ pub fn sniff(bytes: &[u8]) -> Format {
         };
     }
     // CFB/OLE2 compound file: a password-protected workbook when it holds an encryption
-    // stream, otherwise a legacy binary (.xls, .doc…).
+    // stream, an Excel 97-2003 workbook when it holds a workbook stream, otherwise another
+    // legacy binary (.doc…).
     if bytes.starts_with(&cfb::SIGNATURE) {
-        return if cfb::is_encrypted(bytes) { Format::Encrypted } else { Format::LegacyBinary };
+        return if cfb::is_encrypted(bytes) {
+            Format::Encrypted
+        } else if xls::is_xls(bytes) {
+            Format::Xls
+        } else {
+            Format::LegacyBinary
+        };
     }
     if bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[0xFE, 0xFF]) || bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
         return Format::Csv;

@@ -196,6 +196,18 @@ pub enum CfRule {
     },
 }
 
+/// Number of icons in an icon set (`3Arrows` → 3, `5Quarters` → 5), always 3 to 5.
+pub fn icon_count(set: &str) -> usize {
+    set.chars().next().and_then(|c| c.to_digit(10)).unwrap_or(3).clamp(3, 5) as usize
+}
+
+/// Excel's default icon-set thresholds: one per icon, the first being the lower bound,
+/// then even percent steps (`0, 33, 67` for three icons).
+pub fn default_icon_thresholds(set: &str) -> Vec<CfValueKind> {
+    let k = icon_count(set);
+    (0..k).map(|i| CfValueKind::Percent((i as f64 * 100.0 / k as f64).round())).collect()
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CondFormat {
     pub ranges: Vec<RangeRef>,
@@ -279,6 +291,10 @@ pub struct Comment {
     pub threaded: bool,
     pub resolved: bool,
     pub visible: bool,
+    /// Threaded comments: when the thread (first entry) and each reply were written, ISO 8601 as
+    /// read from the file (`dT`); empty when unknown, e.g. for comments made here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dates: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -390,6 +406,10 @@ pub struct Chart {
     /// Source range when created from a selection (for Switch Row/Column).
     pub source: Option<String>,
     pub by_rows: bool,
+    /// A PivotChart's PivotTable (`Sheet2!PivotTable1`): its series are rebuilt from the report
+    /// whenever the PivotTable is refreshed or its layout changes.
+    #[serde(default)]
+    pub pivot: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -569,6 +589,24 @@ pub struct SheetProtection {
     pub autofilter: bool,
 }
 
+/// Review › Allow Edit Ranges: cells that stay editable on a protected sheet, with or without a
+/// password (XLSX `<protectedRange>`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EditRange {
+    pub title: String,
+    pub ranges: Vec<RangeRef>,
+    pub password: Option<crate::PasswordHash>,
+    /// Windows permissions (`securityDescriptor`), kept as read from the file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_descriptor: Option<String>,
+}
+
+impl EditRange {
+    pub fn contains(&self, c: CellRef) -> bool {
+        self.ranges.iter().any(|r| r.contains(c))
+    }
+}
+
 /// Simple non-cryptographic password hash for sheet protection (like Excel's, protection is a
 /// convenience, not security).
 pub fn password_hash(pw: &str) -> u64 {
@@ -719,6 +757,18 @@ pub struct PivotTable {
     pub show_headers: bool,
     /// Area written by the last refresh.
     pub last_range: Option<RangeRef>,
+    /// Calculated fields, usable in the Values area by name.
+    pub calculated_fields: Vec<PivotCalcField>,
+}
+
+/// A calculated field: a formula over other fields (`=Sales*0.1`, `='Unit Price'*Units`). As in
+/// Excel, it is evaluated on the sums of the fields it names for each report cell, not per record.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PivotCalcField {
+    pub name: String,
+    /// Formula text, starting with `=`.
+    pub formula: String,
 }
 
 impl Default for PivotTable {
@@ -740,6 +790,7 @@ impl Default for PivotTable {
             style: "PivotStyleLight16".into(),
             show_headers: true,
             last_range: None,
+            calculated_fields: vec![],
         }
     }
 }
