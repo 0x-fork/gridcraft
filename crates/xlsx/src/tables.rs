@@ -194,6 +194,7 @@ const FUTURE_FUNCTIONS: &[&str] = &[
     "PDURATION",
     "PERCENTILE.EXC",
     "PERCENTILE.INC",
+    "PERCENTOF",
     "PERCENTRANK.EXC",
     "PERCENTRANK.INC",
     "PERMUTATIONA",
@@ -231,6 +232,7 @@ const FUTURE_FUNCTIONS: &[&str] = &[
     "TEXTSPLIT",
     "TOCOL",
     "TOROW",
+    "TRIMRANGE",
     "UNICHAR",
     "UNICODE",
     "UNIQUE",
@@ -322,6 +324,8 @@ mod tests {
     fn functions() {
         assert_eq!(file_function_name("xlookup").as_deref(), Some("_xlfn.XLOOKUP"));
         assert_eq!(file_function_name("FILTER").as_deref(), Some("_xlfn._xlws.FILTER"));
+        assert_eq!(file_function_name("PERCENTOF").as_deref(), Some("_xlfn.PERCENTOF"));
+        assert_eq!(file_function_name("TRIMRANGE").as_deref(), Some("_xlfn.TRIMRANGE"));
         assert_eq!(file_function_name("SUM"), None);
         assert_eq!(builtin_format(14), Some("m/d/yyyy"));
         assert_eq!(builtin_id("0.00%"), Some(10));

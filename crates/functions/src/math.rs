@@ -86,6 +86,17 @@ fn sum(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     num_val(numbers(a)?.iter().sum())
 }
 
+/// PERCENTOF(data_subset, data_all) = SUM(data_subset) / SUM(data_all).
+fn percentof(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+    let part = a.get(..1).ok_or(CellError::Value)?;
+    let all = a.get(1..2).ok_or(CellError::Value)?;
+    let (part, all): (f64, f64) = (numbers(part)?.iter().sum(), numbers(all)?.iter().sum());
+    if all == 0.0 {
+        return Err(CellError::Div0);
+    }
+    num_val(part / all)
+}
+
 fn sumsq(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     num_val(numbers(a)?.iter().map(|x| x * x).sum())
 }
@@ -1050,6 +1061,16 @@ fn averageif(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
 pub(crate) fn specs() -> Vec<FnSpec> {
     vec![
         f!("SUM", 1, VAR, MathTrig, A, "SUM(number1, [number2], ...)", "Adds all the numbers in the arguments.", sum),
+        f!(
+            "PERCENTOF",
+            2,
+            2,
+            MathTrig,
+            A,
+            "PERCENTOF(data_subset, data_all)",
+            "The sum of a subset as a fraction of the sum of all the values.",
+            percentof
+        ),
         f!("SUMSQ", 1, VAR, MathTrig, A, "SUMSQ(number1, [number2], ...)", "Adds the squares of the numbers.", sumsq),
         f!(
             "SUMPRODUCT",
@@ -1276,6 +1297,18 @@ mod tests {
     }
     fn ev2(name: &str, x: f64, y: f64) -> Value {
         ev(name, vec![n(x), n(y)])
+    }
+
+    #[test]
+    fn percentof() {
+        // SUM(subset) / SUM(all): text, booleans and blanks inside ranges are skipped like SUM.
+        let all = arr(vec![vec![nv(10.0)], vec![nv(30.0)], vec![tv("x")], vec![Value::Empty], vec![nv(60.0)]]);
+        let part = arr(vec![vec![nv(10.0)], vec![nv(30.0)]]);
+        close(ev("PERCENTOF", vec![rf(part), rf(all.clone())]), 0.4);
+        close(ev("PERCENTOF", vec![n(25.0), n(200.0)]), 0.125);
+        is_err(ev("PERCENTOF", vec![n(1.0), rf(arr(vec![vec![nv(5.0), nv(-5.0)]]))]), Div0);
+        is_err(ev("PERCENTOF", vec![rf(arr(vec![vec![Value::Error(NA)]])), rf(all)]), NA);
+        is_err(ev("PERCENTOF", vec![t("abc"), n(1.0)]), CellError::Value);
     }
 
     #[test]

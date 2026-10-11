@@ -196,6 +196,18 @@ pub enum CfRule {
     },
 }
 
+/// Number of icons in an icon set (`3Arrows` → 3, `5Quarters` → 5), always 3 to 5.
+pub fn icon_count(set: &str) -> usize {
+    set.chars().next().and_then(|c| c.to_digit(10)).unwrap_or(3).clamp(3, 5) as usize
+}
+
+/// Excel's default icon-set thresholds: one per icon, the first being the lower bound,
+/// then even percent steps (`0, 33, 67` for three icons).
+pub fn default_icon_thresholds(set: &str) -> Vec<CfValueKind> {
+    let k = icon_count(set);
+    (0..k).map(|i| CfValueKind::Percent((i as f64 * 100.0 / k as f64).round())).collect()
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CondFormat {
     pub ranges: Vec<RangeRef>,

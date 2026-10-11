@@ -4,7 +4,7 @@
 
 Each entry is an Excel ribbon or menu command (feature names only). It counts as implemented when GridCraft registers a command with the same id. This measures breadth only; the overall assessment (depth, fidelity, effort) is in [target-app-parity.md](target-app-parity.md).
 
-**Overall: 258 / 290 commands implemented (89.0%).**
+**Overall: 260 / 290 commands implemented (89.7%).**
 
 | Tab | Implemented | Total | Parity |
 |---|---|---|---|
@@ -16,7 +16,7 @@ Each entry is an Excel ribbon or menu command (feature names only). It counts as
 | Formulas | 23 | 23 | 100% |
 | Data | 20 | 28 | 71% |
 | Review | 9 | 18 | 50% |
-| View | 18 | 20 | 90% |
+| View | 20 | 20 | 100% |
 | Automate | 3 | 3 | 100% |
 | Table Design | 12 | 13 | 92% |
 | Chart Design | 8 | 8 | 100% |
@@ -302,7 +302,7 @@ Missing:
 - `review.allowEditRanges` Allow Edit Ranges (Protect)
 - `review.showChanges` Show Changes (Changes)
 
-## View (18 / 20, 90%)
+## View (20 / 20, 100%)
 
 Implemented:
 
@@ -311,7 +311,9 @@ Implemented:
 - `view.pageLayout` Page Layout (Workbook Views)
 - `view.customViews` Custom Views (Workbook Views)
 - `view.ruler` Ruler (Show)
+- `view.formulaBar` Formula Bar (Show)
 - `view.zoom` Zoom (Zoom)
+- `view.zoom100` 100% (Zoom)
 - `view.zoomToSelection` Zoom to Selection (Zoom)
 - `view.newWindow` New Window (Window)
 - `view.arrangeAll` Arrange All (Window)
@@ -324,11 +326,6 @@ Implemented:
 - `view.unhideWindow` Unhide (Window)
 - `view.switchWindows` Switch Windows (Window)
 - `view.macros` Macros (Macros)
-
-Missing:
-
-- `view.formulaBar` Formula Bar (Show)
-- `view.zoom100` 100% (Zoom)
 
 ## Automate (3 / 3, 100%)
 

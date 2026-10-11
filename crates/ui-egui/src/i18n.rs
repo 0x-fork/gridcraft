@@ -9,6 +9,8 @@
 
 use serde::{Deserialize, Serialize};
 
+mod de;
+mod es;
 mod ko;
 mod pt;
 mod ru;
@@ -26,10 +28,11 @@ pub enum Language {
     Ru,
     #[serde(rename = "pt")]
     PtBr,
+    De,
 }
 
 impl Language {
-    pub const ALL: [Self; 7] = [Self::En, Self::Es, Self::Zh, Self::Ja, Self::Ko, Self::Ru, Self::PtBr];
+    pub const ALL: [Self; 8] = [Self::En, Self::Es, Self::Zh, Self::Ja, Self::Ko, Self::Ru, Self::PtBr, Self::De];
 
     /// The language's own name, shown in the switcher.
     pub fn name(self) -> &'static str {
@@ -41,6 +44,7 @@ impl Language {
             Self::Ko => "한국어",
             Self::Ru => "Русский",
             Self::PtBr => "Português (Brasil)",
+            Self::De => "Deutsch",
         }
     }
 
@@ -54,6 +58,7 @@ impl Language {
             Self::Ko => "ko",
             Self::Ru => "ru",
             Self::PtBr => "pt",
+            Self::De => "de",
         }
     }
 
@@ -70,6 +75,7 @@ impl Language {
             "ko" => Some(Self::Ko),
             "ru" => Some(Self::Ru),
             "pt" => Some(Self::PtBr),
+            "de" => Some(Self::De),
             _ => None,
         }
     }
@@ -97,12 +103,14 @@ impl Language {
     /// "Orientation") is keyed `context|label`: English shows only the part after the `|`.
     pub fn tr(self, text: &str) -> &str {
         let translated = match self {
-            Self::En | Self::Es => None,
+            Self::En => None,
+            Self::Es => es::translate(text),
             Self::Ja => JAPANESE.iter().find(|(english, _)| *english == text).map(|(_, translated)| *translated),
             Self::Zh => zh::translate(text),
             Self::Ko => ko::translate(text),
             Self::Ru => ru::translate(text),
             Self::PtBr => pt::translate(text),
+            Self::De => de::translate(text),
         };
         translated.unwrap_or_else(|| text.rsplit_once('|').map_or(text, |(_, label)| label))
     }
@@ -345,6 +353,8 @@ const JAPANESE: &[(&str, &str)] = &[
     ("Light", "ライト"),
     ("Dark", "ダーク"),
     ("Interface language", "表示言語"),
+    ("Interface size", "表示サイズ"),
+    ("Auto", "自動"),
     ("Command\nPalette", "コマンド パレット"),
     ("Agent\nControl", "エージェント制御"),
     ("Action\nJournal", "操作ジャーナル"),
@@ -434,12 +444,19 @@ mod tests {
             assert!(ko::translate(english).is_some_and(|text| !text.is_empty()), "missing Korean: {english}");
             assert!(ru::translate(english).is_some_and(|text| !text.is_empty()), "missing Russian: {english}");
             assert!(pt::translate(english).is_some_and(|text| !text.is_empty()), "missing Portuguese: {english}");
+            assert!(es::translate(english).is_some_and(|text| !text.is_empty()), "missing Spanish: {english}");
+            assert!(de::translate(english).is_some_and(|text| !text.is_empty()), "missing German: {english}");
         }
         assert_eq!(Language::Ja.tr("Data"), "データ");
         assert_eq!(Language::Zh.tr("Data"), "数据");
         assert_eq!(Language::Ko.tr("Data"), "데이터");
         assert_eq!(Language::Ru.tr("Data"), "Данные");
         assert_eq!(Language::PtBr.tr("Data"), "Dados");
+        assert_eq!(Language::Es.tr("Data"), "Datos");
+        assert_eq!(Language::Es.tr("Freeze Panes"), "Inmovilizar paneles");
+        assert_eq!(Language::Es.tr("Sheet1!A1"), "Sheet1!A1");
+        assert_eq!(Language::De.tr("Data"), "Daten");
+        assert_eq!(Language::De.tr("Sheet1!A1"), "Sheet1!A1");
         assert_eq!(Language::PtBr.tr("Date"), "Data");
         assert_eq!(Language::PtBr.tr("Sheet1!A1"), "Sheet1!A1");
         assert_eq!(Language::Ja.tr("Sheet1!A1"), "Sheet1!A1");
@@ -476,7 +493,9 @@ mod tests {
         assert_eq!(Language::from_tag("zh-Hans-CN"), Some(Language::Zh));
         assert_eq!(Language::from_tag("ko-KR"), Some(Language::Ko));
         assert_eq!(Language::from_tag("RU_ru"), Some(Language::Ru));
-        assert_eq!(Language::from_tag("de-DE"), None);
+        assert_eq!(Language::from_tag("de-DE"), Some(Language::De));
+        assert_eq!(Language::from_tag("de_AT"), Some(Language::De));
+        assert_eq!(Language::from_tag("de-CH"), Some(Language::De));
         assert_eq!(Language::from_tag("pt-BR"), Some(Language::PtBr));
         assert_eq!(Language::parse("pt"), Some(Language::PtBr));
         assert_eq!(Language::parse("pt-br"), Some(Language::PtBr));
