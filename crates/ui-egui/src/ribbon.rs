@@ -1580,6 +1580,10 @@ fn data(app: &mut SheetApp, ui: &mut Ui) {
             app.open_dialog("subtotal", json!({}));
         }
     });
+    sep(ui);
+    if big_button(ui, Icon::ChartBar, "Data\nAnalysis", "Data Analysis", false).clicked() {
+        app.open_dialog("analysisToolPak", json!({}));
+    }
 }
 
 fn review(app: &mut SheetApp, ui: &mut Ui) {

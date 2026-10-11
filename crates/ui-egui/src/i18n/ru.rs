@@ -164,6 +164,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Group" => "Группировать",
         "Ungroup" => "Разгруппировать",
         "Subtotal" => "Промежуточный итог",
+        "Data\nAnalysis" => "Анализ данных",
+        "Data Analysis" => "Анализ данных",
         "What-If\nAnalysis" => "Анализ «что\nесли»",
         "Data Table…" => "Таблица данных…",
         "Scenario Manager…" => "Диспетчер сценариев…",

@@ -98,8 +98,9 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   data model (`data.fromWeb`, `data.relationships` missing). **Estimate:** 60–100 h.
 
 ### 13. Analysis tools: Solver, Analysis ToolPak, Forecast Sheet (F)
-- `data.solver`, `data.analysisToolPak`, `data.forecastSheet` missing; FORECAST.ETS family missing.
-  **Estimate:** 22–35 h.
+- `data.solver`, `data.forecastSheet` missing; FORECAST.ETS family missing. Analysis ToolPak
+  (`data.analysisToolPak`, #312) has 13 tools; Anova two-factor, z-Test, Sampling, Random Number
+  Generation, Fourier Analysis and the tools' charts remain. **Estimate:** 18–30 h.
 
 ### 14. Page Layout view and print polish (U, F)
 - No paper view with rulers and in-place header/footer editing; web print exports only (#141, PR

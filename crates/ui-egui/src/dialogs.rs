@@ -317,6 +317,16 @@ impl Dialog {
                 json!({"header": true}),
             ),
             "goalSeek" => Dialog::custom("goalSeek", "Goal Seek", json!({"set": active, "to": "0", "changing": ""})),
+            "analysisToolPak" => {
+                // Opened with a known `tool`, it goes straight to that tool's form.
+                let tool = params.get("tool").and_then(Json::as_str).unwrap_or("");
+                let mut d = Dialog::custom("analysisToolPak", "Data Analysis", json!({"tool": "", "pick": tool}));
+                if gridcraft_engine::cmd::analysis::TOOLS.iter().any(|(id, _)| *id == tool) {
+                    d.values = toolpak_defaults(&sel, tool);
+                }
+                d.command = Some("data.analysisToolPak");
+                d
+            }
             "subtotal" => Dialog::form(
                 "subtotal",
                 "Subtotal",
@@ -659,6 +669,7 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
         "formatCells" => 560.0,
         "about" => 660.0,
         "insertFunction" | "commandSearch" | "nameManager" | "manageRules" | "journal" | "agents" => 520.0,
+        "analysisToolPak" => 420.0,
         _ => 380.0,
     };
     let window = egui::Window::new(d.title.clone())
@@ -681,6 +692,7 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
                 "manageRules" => manage_rules(app, ui),
                 "commandSearch" => command_search(app, ui, &mut d, &mut confirm),
                 "goalSeek" => goal_seek(app, ui, &mut d, &mut confirm),
+                "analysisToolPak" => analysis_toolpak(app, ui, &mut d, &mut confirm, &mut open),
                 "spelling" => spelling(app, ui, &mut d, &mut open),
                 "agents" => {
                     ui.label("GridCraft is fully drivable by agents. Every menu item, button and gesture is a command:");
@@ -878,6 +890,10 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
         let params = build_params(&d);
         match app.run(cmd, params) {
             Ok(_) => open = false,
+            // Data Analysis asks before replacing data in its output range.
+            Err(e) if d.name == "analysisToolPak" && e.contains(gridcraft_engine::cmd::analysis::OVERWRITE_ERROR) => {
+                d.values.insert("askOverwrite".into(), json!(true));
+            }
             Err(e) => app.message = Some((d.title.clone(), crate::clean_error(&e))),
         }
     } else if confirm {
@@ -967,6 +983,12 @@ fn ok_cancel(ui: &mut egui::Ui, confirm: &mut bool, open: &mut bool) {
 }
 
 fn form(ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, open: &mut bool) {
+    form_fields(ui, d);
+    ok_cancel(ui, confirm, open);
+}
+
+/// Draws a dialog's `fields`, editing its values.
+fn form_fields(ui: &mut egui::Ui, d: &mut Dialog) {
     egui::Grid::new("form").num_columns(1).spacing(vec2(8.0, 6.0)).show(ui, |ui| {
         for f in d.fields.clone() {
             match f {
@@ -1022,7 +1044,6 @@ fn form(ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, open: &mut bool) 
             ui.end_row();
         }
     });
-    ok_cancel(ui, confirm, open);
 }
 
 /// Help ▸ About GridCraft: the app, its contributors and the AI models that helped. The credits
@@ -1605,6 +1626,144 @@ fn goal_seek(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mu
     if !open {
         *confirm = true;
     }
+}
+
+/// The fields of one Analysis ToolPak tool's form (input and options; output is drawn apart).
+fn toolpak_fields(tool: &str) -> Vec<Field> {
+    use Field::*;
+    let grouped = || Choice { key: "groupedBy", label: "Grouped By:", options: vec![("columns", "Columns"), ("rows", "Rows")] };
+    let labels = || Check { key: "labels", label: "Labels in first row" };
+    let range = || Text { key: "range", label: "Input Range:" };
+    let two = || vec![Text { key: "range1", label: "Variable 1 Range:" }, Text { key: "range2", label: "Variable 2 Range:" }];
+    match tool {
+        "descriptive" => vec![
+            range(),
+            grouped(),
+            labels(),
+            Check { key: "summary", label: "Summary statistics" },
+            Text { key: "confidence", label: "Confidence Level for Mean (%), blank for none:" },
+            Text { key: "kthLargest", label: "Kth Largest (blank for none):" },
+            Text { key: "kthSmallest", label: "Kth Smallest (blank for none):" },
+        ],
+        "histogram" => vec![
+            range(),
+            Text { key: "bins", label: "Bin Range (blank for automatic bins):" },
+            labels(),
+            Check { key: "pareto", label: "Pareto (sorted histogram)" },
+            Check { key: "cumulative", label: "Cumulative Percentage" },
+        ],
+        "correlation" | "covariance" | "rankPercentile" => vec![range(), grouped(), labels()],
+        "anovaSingle" => vec![range(), grouped(), labels(), Text { key: "alpha", label: "Alpha:" }],
+        "regression" => vec![
+            Text { key: "inputY", label: "Input Y Range:" },
+            Text { key: "inputX", label: "Input X Range:" },
+            labels(),
+            Check { key: "constantZero", label: "Constant is Zero" },
+            Text { key: "confidence", label: "Confidence Level (%):" },
+            Check { key: "residuals", label: "Residuals" },
+            Check { key: "standardizedResiduals", label: "Standardized Residuals" },
+            Check { key: "normalProbability", label: "Normal Probability" },
+        ],
+        "movingAverage" => {
+            vec![range(), labels(), Text { key: "interval", label: "Interval:" }, Check { key: "standardErrors", label: "Standard Errors" }]
+        }
+        "exponentialSmoothing" => {
+            vec![range(), labels(), Text { key: "damping", label: "Damping factor:" }, Check { key: "standardErrors", label: "Standard Errors" }]
+        }
+        "fTest" => {
+            let mut v = two();
+            v.extend([labels(), Text { key: "alpha", label: "Alpha:" }]);
+            v
+        }
+        _ => {
+            let mut v = two();
+            v.extend([
+                Text { key: "hypothesizedDifference", label: "Hypothesized Mean Difference:" },
+                labels(),
+                Text { key: "alpha", label: "Alpha:" },
+            ]);
+            v
+        }
+    }
+}
+
+/// The starting values of a tool's form: the selection as its input, a new sheet as output.
+fn toolpak_defaults(sel: &str, tool: &str) -> Map<String, Json> {
+    let mut v = json!({
+        "tool": tool, "range": sel, "inputY": "", "inputX": "", "range1": sel, "range2": "", "bins": "",
+        "groupedBy": "columns", "labels": false, "summary": true, "confidence": "", "kthLargest": "", "kthSmallest": "",
+        "interval": "3", "damping": "0.3", "alpha": "0.05", "hypothesizedDifference": "0",
+        "outputTo": "newSheet", "output": "", "newSheet": "",
+    });
+    if tool == "regression" {
+        v["confidence"] = json!("95");
+        v["inputY"] = json!(sel);
+    }
+    v.as_object().cloned().unwrap_or_default()
+}
+
+/// Data › Data Analysis: pick a tool, then fill in its form. OK runs `data.analysisToolPak`
+/// (through the dialog's command); a report that would replace data asks first.
+fn analysis_toolpak(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, open: &mut bool) {
+    use gridcraft_engine::cmd::analysis::TOOLS;
+    if d.values.get("askOverwrite").and_then(Json::as_bool) == Some(true) {
+        ui.label("The output range already holds data. Replace it with the report?");
+        ui.horizontal(|ui| {
+            if ui.button("Replace").clicked() {
+                d.values.remove("askOverwrite");
+                d.values.insert("overwrite".into(), json!(true));
+                *confirm = true;
+            }
+            if ui.button("Cancel").clicked() {
+                d.values.remove("askOverwrite");
+            }
+        });
+        return;
+    }
+    let tool = d.values.get("tool").and_then(Json::as_str).unwrap_or("").to_string();
+    let Some((_, label)) = TOOLS.iter().find(|(id, _)| *id == tool) else {
+        ui.label(egui::RichText::new("Analysis Tools").strong());
+        let pick = d.values.get("pick").and_then(Json::as_str).unwrap_or("").to_string();
+        let mut chosen = false;
+        egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+            for (id, label) in TOOLS {
+                let r = ui.selectable_label(pick == *id, *label);
+                if r.clicked() {
+                    d.values.insert("pick".into(), json!(id));
+                }
+                if r.double_clicked() {
+                    chosen = true;
+                }
+            }
+        });
+        let mut ok = false;
+        ok_cancel(ui, &mut ok, open);
+        let pick = d.values.get("pick").and_then(Json::as_str).unwrap_or("").to_string();
+        if (ok || chosen) && TOOLS.iter().any(|(id, _)| *id == pick) {
+            let sel = app.session.active().map(|doc| doc.selection.current().a1()).unwrap_or_default();
+            d.values = toolpak_defaults(&sel, &pick);
+        }
+        return;
+    };
+    d.title = label.to_string();
+    d.fields = toolpak_fields(&tool);
+    form_fields(ui, d);
+    ui.separator();
+    ui.label(egui::RichText::new("Output options").strong());
+    let to = d.values.get("outputTo").and_then(Json::as_str).unwrap_or("newSheet").to_string();
+    for (key, choice, text_label) in [("output", "range", "Output Range:"), ("newSheet", "newSheet", "New Worksheet Ply:")] {
+        ui.horizontal(|ui| {
+            if ui.radio(to == choice, text_label).clicked() {
+                d.values.insert("outputTo".into(), json!(choice));
+            }
+            let mut t = d.values.get(key).and_then(Json::as_str).unwrap_or("").to_string();
+            if ui.add(egui::TextEdit::singleline(&mut t).desired_width(160.0)).changed() {
+                d.values.insert(key.into(), json!(t));
+                d.values.insert("outputTo".into(), json!(choice));
+            }
+        });
+    }
+    ok_cancel(ui, confirm, open);
 }
 
 fn spelling(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, open: &mut bool) {
