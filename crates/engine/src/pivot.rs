@@ -12,6 +12,8 @@ use gridcraft_core::date::datetime_from_serial;
 use gridcraft_core::{CellError, CellRef, MAX_COLS, MAX_ROWS, RangeRef, Value};
 use gridcraft_model::*;
 
+use crate::pivot_calc::CalcSet;
+
 /// Largest source block read (cells).
 pub const MAX_SOURCE_CELLS: u64 = 10_000_000;
 /// Largest report written (cells).
@@ -666,13 +668,44 @@ fn flatten_cols(
 
 type AggMap = HashMap<(Vec<u32>, Vec<u32>), Vec<Acc>>;
 
+/// Where a value field's numbers come from.
+#[derive(Clone, Copy)]
+enum ValSrc {
+    /// A source column.
+    Col(usize),
+    /// A calculated field (index into the PivotTable's calculated fields).
+    Calc(usize),
+}
+
 /// Computes a PivotTable report from the workbook.
 pub fn compute(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Result<Output, String> {
     let src = read_source(wb, &pt.source, pivot_sheet)?;
     let fmt_of = |c: usize| src.formats.get(c).cloned().unwrap_or_else(|| "General".into());
     let rows: Vec<(usize, &PivotField)> = pt.rows.iter().filter_map(|f| src.col(&f.source_col).map(|c| (c, f))).collect();
     let cols: Vec<(usize, &PivotField)> = pt.columns.iter().filter_map(|f| src.col(&f.source_col).map(|c| (c, f))).collect();
-    let vals: Vec<(usize, &PivotValue)> = pt.values.iter().filter_map(|v| src.col(&v.source_col).map(|c| (c, v))).collect();
+    // Value fields: a source column, or a calculated field evaluated on sums (see `pivot_calc`).
+    let calc = CalcSet::new(pt, &src.headers);
+    let vals: Vec<(ValSrc, &PivotValue)> = pt
+        .values
+        .iter()
+        .filter_map(|v| match src.col(&v.source_col) {
+            Some(c) => Some((ValSrc::Col(c), v)),
+            None => calc.index(&v.source_col).map(|i| (ValSrc::Calc(i), v)),
+        })
+        .collect();
+    // Source columns summed for the calculated fields, accumulated after the value fields.
+    let mut extra: Vec<usize> = Vec::new();
+    for (vs, _) in &vals {
+        if let ValSrc::Calc(i) = vs {
+            for name in calc.source_refs(*i) {
+                if let Some(c) = src.col(&name)
+                    && !extra.contains(&c)
+                {
+                    extra.push(c);
+                }
+            }
+        }
+    }
     if rows.len() + cols.len() > MAX_AXIS_FIELDS {
         return Err(format!("A PivotTable can have at most {MAX_AXIS_FIELDS} row and column fields."));
     }
@@ -728,8 +761,13 @@ pub fn compute(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Result<Out
         }
         for a in 0..=rp.len() {
             for b in 0..=cp.len() {
-                let e = aggs.entry((rp[..a].to_vec(), cp[..b].to_vec())).or_insert_with(|| vec![Acc::default(); k]);
-                for (acc, (c, _)) in e.iter_mut().zip(vals.iter()) {
+                let e = aggs.entry((rp[..a].to_vec(), cp[..b].to_vec())).or_insert_with(|| vec![Acc::default(); k + extra.len()]);
+                for (acc, (vs, _)) in e.iter_mut().zip(vals.iter()) {
+                    if let ValSrc::Col(c) = vs {
+                        acc.add(rec.get(*c).unwrap_or(&Value::Empty));
+                    }
+                }
+                for (acc, c) in e.iter_mut().skip(k).zip(extra.iter()) {
                     acc.add(rec.get(*c).unwrap_or(&Value::Empty));
                 }
             }
@@ -915,8 +953,21 @@ pub fn compute(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Result<Out
 
     // ---- body
     let get = |rp: &[u32], cp: &[u32], vi: usize| -> Option<Value> {
-        let (_, v) = vals.get(vi)?;
-        aggs.get(&(rp.to_vec(), cp.to_vec())).and_then(|a| a.get(vi)).map(|a| a.result(v.func))
+        let (vs, v) = vals.get(vi)?;
+        let accs = aggs.get(&(rp.to_vec(), cp.to_vec()))?;
+        match vs {
+            ValSrc::Col(_) => accs.get(vi).map(|a| a.result(v.func)),
+            ValSrc::Calc(i) => {
+                let sum = |name: &str| -> Value {
+                    src.col(name)
+                        .and_then(|c| extra.iter().position(|x| *x == c))
+                        .and_then(|j| accs.get(k + j))
+                        .map(|a| a.result(PivotFunc::Sum))
+                        .unwrap_or(Value::Number(0.0))
+                };
+                Some(calc.value(wb, *i, &sum))
+            }
+        }
     };
     let num = |v: &Option<Value>| v.as_ref().and_then(Value::as_f64);
     let ratio = |a: Value, b: Option<Value>| -> Value {
@@ -935,7 +986,7 @@ pub fn compute(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Result<Out
     };
     let data_fmt: Vec<Option<String>> = vals
         .iter()
-        .map(|(c, v)| match v.show_as {
+        .map(|(vs, v)| match v.show_as {
             PivotShowAs::PercentOfGrandTotal | PivotShowAs::PercentOfColumnTotal | PivotShowAs::PercentOfRowTotal => {
                 Some(v.number_format.clone().unwrap_or_else(|| "0.00%".into()))
             }
@@ -943,7 +994,10 @@ pub fn compute(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Result<Out
             _ => v.number_format.clone().or_else(|| match v.func {
                 PivotFunc::Count | PivotFunc::CountNumbers => None,
                 _ => {
-                    let f = fmt_of(*c);
+                    let f = match vs {
+                        ValSrc::Col(c) => fmt_of(*c),
+                        ValSrc::Calc(_) => "General".to_string(),
+                    };
                     (f != "General").then_some(f)
                 }
             }),

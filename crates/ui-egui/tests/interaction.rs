@@ -227,6 +227,7 @@ fn dialogs_open_and_close() {
         "commandSearch",
         "spelling",
         "goTo",
+        "pivotCalculatedField",
         "about",
     ] {
         h.state_mut().open_dialog(name, json!({}));

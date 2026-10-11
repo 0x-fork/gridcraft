@@ -480,6 +480,13 @@ impl Dialog {
                 d
             }
             "goTo" => Dialog::custom("goTo", "Go To", json!({"reference": ""})),
+            "pivotCalculatedField" => Dialog::form(
+                "pivotCalculatedField",
+                "Insert Calculated Field",
+                "pivot.calculatedField",
+                vec![Text { key: "name", label: "Name:" }, Text { key: "formula", label: "Formula:" }],
+                json!({"pivot": p("pivot"), "name": p("name"), "formula": p("formula")}),
+            ),
             "goToSpecial" => Dialog::form(
                 "goToSpecial",
                 "Go To Special",
