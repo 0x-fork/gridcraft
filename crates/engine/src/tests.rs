@@ -1555,6 +1555,31 @@ fn every_chart_kind_survives_xlsx() {
 }
 
 #[test]
+fn scatter_of_two_columns_is_one_series_with_the_first_as_x() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["X", "Y"], [1, 10], [2, 20], [3, 30]]})).unwrap();
+    s.execute("insert.chart", json!({"type": "scatter", "range": "A1:B4"})).unwrap();
+    let c = s.doc().unwrap().wb.active().unwrap().charts[0].clone();
+    assert_eq!(c.series.len(), 1);
+    assert_eq!(c.series[0].values, "Sheet1!$B$2:$B$4");
+    assert_eq!(c.series[0].categories.as_deref(), Some("Sheet1!$A$2:$A$4"));
+    // Select Data on the scatter chart and Switch Row/Column rebuild the series the same way.
+    s.execute("chart.selectData", json!({"range": "A2:B4"})).unwrap();
+    let c = s.doc().unwrap().wb.active().unwrap().charts[0].clone();
+    assert_eq!(c.series.len(), 1);
+    assert_eq!(c.series[0].categories.as_deref(), Some("Sheet1!$A$2:$A$4"));
+    s.execute("range.setValues", json!({"range": "D1", "values": [[1, 2, 3, 4], [10, 20, 30, 40]]})).unwrap();
+    s.execute("chart.selectData", json!({"range": "D1:G2"})).unwrap();
+    s.execute("chart.switchRowColumn", json!({})).unwrap();
+    s.execute("chart.switchRowColumn", json!({})).unwrap();
+    let c = s.doc().unwrap().wb.active().unwrap().charts[0].clone();
+    assert!(c.by_rows);
+    assert_eq!(c.series.len(), 1);
+    assert_eq!(c.series[0].values, "Sheet1!$D$2:$G$2");
+    assert_eq!(c.series[0].categories.as_deref(), Some("Sheet1!$D$1:$G$1"));
+}
+
+#[test]
 fn whole_sheet_selection_stays_within_the_data() {
     // On an empty sheet with everything selected these filled or scanned every cell of the
     // sheet, running out of memory or time.

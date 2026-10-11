@@ -573,6 +573,17 @@ pub fn series_from_range(sh: &Sheet, r: RangeRef, by_rows: bool) -> Vec<Series> 
     out
 }
 
+/// A scatter plot of a block without category labels takes its first column (or row) as the X
+/// values of the others, as Excel does: two plain columns make one series of points, not two (#428).
+pub fn scatter_x_from_first(kind: ChartKind, series: &mut Vec<Series>) {
+    if matches!(kind, ChartKind::Scatter | ChartKind::ScatterLines) && series.len() > 1 && series[0].categories.is_none() {
+        let x = series.remove(0).values;
+        for se in series.iter_mut() {
+            se.categories = Some(x.clone());
+        }
+    }
+}
+
 /// Most cells a chart's source block may span (bounds the series it builds).
 const MAX_CHART_CELLS: u64 = 1_000_000;
 
@@ -661,10 +672,11 @@ pub fn build_chart(s: &Session, p: &Json) -> Result<(usize, Chart)> {
     let data_w = r.width();
     let by_rows = data_w > data_h + 1;
     let kind = chart_kind(&t, &sub);
-    let series = series_from_range(sh, r, by_rows);
+    let mut series = series_from_range(sh, r, by_rows);
     if series.is_empty() {
         return Err(EngineError::Other("Select data for the chart first.".into()));
     }
+    scatter_x_from_first(kind, &mut series);
     let id = d.wb.next_object_id();
     let at = cell_param_on(s, p, "at", sheet)?.unwrap_or_else(|| CellRef::new(r.start.row, r.end.col + 2));
     let title = str_param(p, "title").map(str::to_string).or_else(|| {
@@ -801,6 +813,7 @@ fn chart_switch(s: &mut Session, p: &Json) -> Result<Json> {
             c.source.get_or_insert(src);
             c.by_rows = by_rows;
             c.series = series;
+            scatter_x_from_first(c.kind, &mut c.series);
         }
         Ok(Json::Null)
     })

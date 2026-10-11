@@ -421,6 +421,7 @@ fn select_data(s: &mut Session, p: &Json) -> Result<Json> {
     with_chart(s, p, move |c| {
         if let Some((series, source, by_rows)) = rebuilt {
             c.series = series;
+            super::insert::scatter_x_from_first(c.kind, &mut c.series);
             c.source = Some(source);
             c.by_rows = by_rows;
         }
