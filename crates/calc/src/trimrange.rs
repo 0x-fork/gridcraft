@@ -2,7 +2,7 @@
 //! documented semantics: trim_rows / trim_cols 0 none, 1 leading, 2 trailing, 3 both).
 
 use gridcraft_core::{Array, CellError, CellRef, RangeRef, Value};
-use gridcraft_formula::Expr;
+use gridcraft_formula::{Expr, TrimMode};
 
 use crate::eval::{Area, Ev, Evaluator, MAX_CELLS};
 
@@ -46,6 +46,20 @@ impl Evaluator<'_> {
         }
     }
 
+    /// A trim reference `A1.:E10` / `A1:.E10` / `A1.:.E10`: `TRIMRANGE(range, code, code)`.
+    pub(crate) fn trim_ref(&mut self, mode: TrimMode, x: &Expr) -> Ev {
+        let flags = match mode {
+            TrimMode::Leading => (true, false),
+            TrimMode::Trailing => (false, true),
+            TrimMode::All => (true, true),
+        };
+        let ev = self.eval(x);
+        match self.trim_ev(ev, flags, flags) {
+            Ok(ev) => ev,
+            Err(e) => Ev::V(Value::Error(e)),
+        }
+    }
+
     fn trim_mode(&mut self, args: &[Expr], i: usize) -> Result<(bool, bool), CellError> {
         match args.get(i) {
             None | Some(Expr::Missing) => Ok((true, true)),
@@ -63,8 +77,13 @@ impl Evaluator<'_> {
         };
         let rows = self.trim_mode(args, 1)?;
         let cols = self.trim_mode(args, 2)?;
+        let ev = self.eval(first);
+        self.trim_ev(ev, rows, cols)
+    }
+
+    fn trim_ev(&mut self, ev: Ev, rows: (bool, bool), cols: (bool, bool)) -> Result<Ev, CellError> {
         let none = rows == (false, false) && cols == (false, false);
-        match self.eval(first) {
+        match ev {
             Ev::R(areas) => {
                 let [a] = areas.as_slice() else { return Err(CellError::Value) };
                 if none {

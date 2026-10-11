@@ -83,7 +83,8 @@ impl Scan<'_> {
                 let child = self.expr(x, sheet, array_context, depth + 1);
                 match op {
                     UnOp::At => Shape { array: false, affected: child.affected },
-                    UnOp::Spill => Shape { array: true, affected: child.affected },
+                    // A trim reference is a reference operator, like `:`.
+                    UnOp::Spill | UnOp::Trim(_) => Shape { array: true, affected: child.affected },
                     _ => Shape { array: child.array, affected: child.affected || (child.array && !array_context) },
                 }
             }

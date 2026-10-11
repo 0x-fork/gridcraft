@@ -706,3 +706,42 @@ fn visit_range_declines_when_a_formula_in_the_block_spills_into_it() {
 
     assert_eq!(walked, None, "walked a block holding a spill it can't see");
 }
+
+/// Trim references evaluate as `TRIMRANGE(range, code, code)`.
+#[test]
+fn trim_references() {
+    let mut t = T::new();
+    t.set("C3", "1");
+    t.set("D5", "2");
+    t.set("A20", "5");
+    t.set("A21", "6");
+    let cases = [
+        ("J1", "=ROWS(A1.:.F10)", "=ROWS(TRIMRANGE(A1:F10,3,3))", 3.0),
+        ("J2", "=COLUMNS(A1.:.F10)", "=COLUMNS(TRIMRANGE(A1:F10,3,3))", 2.0),
+        ("J3", "=ROWS(A1:.F10)", "=ROWS(TRIMRANGE(A1:F10,2,2))", 5.0),
+        ("J4", "=COLUMNS(A1:.F10)", "=COLUMNS(TRIMRANGE(A1:F10,2,2))", 4.0),
+        ("J5", "=ROWS(A1.:F10)", "=ROWS(TRIMRANGE(A1:F10,1,1))", 8.0),
+        ("J6", "=MIN(ROW(A1.:F10))", "=MIN(ROW(TRIMRANGE(A1:F10,1,1)))", 3.0),
+        ("J7", "=SUM(A:.A)", "=SUM(TRIMRANGE(A:A,2,2))", 11.0),
+        ("J8", "=ROWS(A:.A)", "=ROWS(TRIMRANGE(A:A,2,2))", 21.0),
+        ("J9", "=ROWS(A.:.A)", "=ROWS(TRIMRANGE(A:A,3,3))", 2.0),
+        ("J10", "=ROWS(20.:.30)", "=ROWS(TRIMRANGE(20:30,3,3))", 2.0),
+    ];
+    for (at, f, _, _) in cases {
+        t.set(at, f);
+    }
+    for (i, (at, f, same, want)) in cases.iter().enumerate() {
+        assert_eq!(t.num(at), *want, "{f}");
+        let k = format!("K{}", i + 1);
+        t.set(&k, same);
+        assert_eq!(t.num(&k), *want, "{same}");
+    }
+    // The trimmed block spills and follows edits to the full range.
+    t.set("L1", "=C1.:.F10");
+    assert_eq!((t.num("L1"), t.num("M3")), (1.0, 2.0));
+    t.set("A22", "4");
+    assert_eq!((t.num("J7"), t.num("J8")), (15.0, 22.0));
+    // Nothing but blanks.
+    t.set("K20", "=SUM(Q1:.Q9)");
+    assert_eq!(t.get("K20"), Value::Error(CellError::Calc));
+}
