@@ -242,6 +242,11 @@ the first renderer fails to start, it tries the other one once. The log file rec
 (lines starting with `graphics:`). `WGPU_BACKEND` still overrides it (and then nothing else is
 tried), e.g. `$env:WGPU_BACKEND = "gl"` or `"dx12"`.
 
+DirectX 12 shaders are compiled with FXC, which is part of Windows, so no `dxcompiler.dll` or
+`dxil.dll` is needed, and a copy another program put on `PATH` can no longer stop the app at start
+("Parent device is lost", #339). `$env:WGPU_DX12_COMPILER = "dxc"` (or `"auto"`) selects wgpu's DXC
+handling again for troubleshooting.
+
 ### macOS
 
 | Build | File | Notes |

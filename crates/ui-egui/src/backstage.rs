@@ -429,6 +429,20 @@ fn open_page(app: &mut SheetApp, ui: &mut Ui, out: &mut Outcome) {
     recent_list(app, ui, out, usize::MAX);
 }
 
+/// Review › Protect Workbook and File › Info › Protect Workbook: the protect dialog (with an
+/// optional password) when the structure is open; when it's locked, the password prompt if one
+/// was set, else unprotect right away.
+pub fn protect_workbook(app: &mut SheetApp) {
+    let (on, password) = app.session.active().map(|d| (d.wb.protected_structure, d.wb.structure_password.is_some())).unwrap_or((false, false));
+    if !on {
+        app.open_dialog("protectWorkbook", json!({}));
+    } else if password {
+        app.open_dialog("unprotectWorkbook", json!({}));
+    } else {
+        app.run_or_alert("review.protectWorkbook", json!({"on": false}));
+    }
+}
+
 fn info(app: &mut SheetApp, ui: &mut Ui, bs: &mut Backstage) {
     let t = Tokens::get(ui.ctx());
     let lang = app.ui.language;
@@ -458,7 +472,7 @@ fn info(app: &mut SheetApp, ui: &mut Ui, bs: &mut Backstage) {
     ui.add_space(18.0);
     ui.horizontal(|ui| {
         if square_button(ui, Icon::Lock, lang.tr("Protect Workbook")).clicked() {
-            app.run_or_alert("review.protectWorkbook", json!({"on": !protected}));
+            protect_workbook(app);
         }
         ui.add_space(12.0);
         ui.vertical(|ui| {
@@ -749,6 +763,7 @@ pub fn export_as(app: &mut SheetApp, fmt: &str) -> bool {
             }
         };
     }
+    app.store_view_state();
     match app.session.run("file.saveBytes", json!({"format": fmt})) {
         Ok(r) => {
             let bytes = r.get("base64").and_then(Json::as_str).and_then(gridcraft_engine::io::base64_decode);
