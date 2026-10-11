@@ -302,10 +302,41 @@ fn tab_letters_switch_to_their_ribbon_tabs() {
         key(&mut h, Key::F10); // arm
         letter(&mut h, k, false);
         assert_eq!(h.state().ui.ribbon_tab, tab, "letter {k:?}");
+        assert_eq!(h.state().keytips.prefix(), None, "terminal tab units finish cleanly");
         assert!(h.state().editor.is_none(), "tab letters must not begin a cell edit");
-        key(&mut h, Key::F10); // disarm
-        assert_eq!(h.state().keytips.prefix(), None);
     }
+}
+
+#[test]
+fn two_letter_unit_waits_after_first_letter_then_fires() {
+    let mut h = harness(blank());
+    key(&mut h, Key::F10);
+    letter(&mut h, Key::J, false);
+    // "J" is not a complete sequence, but "JI" starts with it: the matcher waits.
+    assert_eq!(h.state().keytips.prefix(), Some("J"));
+    assert_eq!(h.state().ui.ribbon_tab, "Home");
+    letter(&mut h, Key::I, false);
+    assert_eq!(h.state().ui.ribbon_tab, "Draw");
+    assert_eq!(h.state().keytips.prefix(), None);
+    assert!(h.state().editor.is_none(), "unit letters must not begin a cell edit");
+}
+
+#[test]
+fn two_letter_unit_fires_when_pressed_in_one_frame() {
+    let mut h = harness(blank());
+    key(&mut h, Key::F10);
+    events(
+        &mut h,
+        [
+            key_event(Key::J, true, Modifiers::NONE),
+            Event::Text("j".into()),
+            key_event(Key::I, true, Modifiers::NONE),
+            Event::Text("i".into()),
+            key_event(Key::J, false, Modifiers::NONE),
+            key_event(Key::I, false, Modifiers::NONE),
+        ],
+    );
+    assert_eq!(h.state().ui.ribbon_tab, "Draw");
 }
 
 #[test]

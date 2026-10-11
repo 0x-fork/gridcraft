@@ -98,11 +98,17 @@ impl KeyTips {
                             let next = format!("{}{key_name}", self.prefix.as_deref().unwrap_or_default(), key_name = key.name());
                             match keytip_table::lookup(&next) {
                                 Some(keytip_table::Entry::Tab(tab)) => {
-                                    self.prefix = Some(next);
+                                    // A tab with deeper sequences stays as an active level
+                                    // (its group badges show); a terminal unit like "JI"
+                                    // finishes and clears the prefix.
+                                    self.prefix = keytip_table::has_deeper(&next).then_some(next);
                                     actions.push(Action::Tab(tab));
                                 }
                                 Some(keytip_table::Entry::Continue) => self.prefix = Some(next),
                                 Some(keytip_table::Entry::Finish(action)) => self.finish(action, &mut actions),
+                                // No complete sequence, but deeper ones start here: wait for
+                                // more input (Excel's two-letter units like Draw's "JI").
+                                None if keytip_table::has_deeper(&next) => self.prefix = Some(next),
                                 // Unknown letters are consumed while a prefix is active but
                                 // leave it unchanged, as Excel does.
                                 None => {}

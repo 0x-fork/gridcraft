@@ -30,6 +30,9 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("A", Entry::Tab("Data")),
     ("R", Entry::Tab("Review")),
     ("W", Entry::Tab("View")),
+    // Draw is a two-letter unit in Excel: the badge shows "JI" as one keytip, and the
+    // matcher waits after "J" (implicit level — no table entry needed).
+    ("JI", Entry::Tab("Draw")),
     ("E", Entry::Tab("Home")),
     ("O", Entry::Tab("Home")),
     // Home tab groups.
@@ -59,12 +62,19 @@ pub fn has_deeper(prefix: &str) -> bool {
     SEQUENCES.iter().any(|(seq, _)| seq.len() > prefix.len() && seq.starts_with(prefix))
 }
 
-/// The one-letter sequence that switches to `tab_name`, if that tab has one.
+/// The sequence that switches to `tab_name`, if that tab has one (may be a multi-letter unit
+/// like Draw's "JI").
 pub fn tab_sequence(tab_name: &str) -> Option<&'static str> {
     SEQUENCES.iter().find_map(|(seq, entry)| match entry {
-        Entry::Tab(name) if *name == tab_name && seq.len() == 1 => Some(*seq),
+        Entry::Tab(name) if *name == tab_name => Some(*seq),
         _ => None,
     })
+}
+
+/// True if `seq` is a group level: an explicit Continue entry, or an implicit level that only
+/// exists because deeper sequences start with it (like "J" before Draw's "JI").
+pub fn is_group_level(seq: &str) -> bool {
+    matches!(lookup(seq), Some(Entry::Continue)) || (lookup(seq).is_none() && has_deeper(seq))
 }
 
 fn matches_target(action: &Action, target: &str) -> bool {
@@ -96,9 +106,9 @@ pub fn group_extension(prefix: &str, targets: &[&str]) -> Vec<&'static str> {
                 continue;
             }
             // The intermediate one key past the prefix is the group badge, if it is a
-            // group-level (Continue) sequence rather than the finish itself.
+            // group-level sequence (explicit or implicit) rather than the finish itself.
             let candidate = &seq[..prefix.len() + 1];
-            if matches!(lookup(candidate), Some(Entry::Continue)) && !out.contains(&candidate) {
+            if is_group_level(candidate) && !out.contains(&candidate) {
                 out.push(candidate);
             }
         }
@@ -114,8 +124,8 @@ pub fn item_letter(prefix: &str, target: &str) -> Option<&'static str> {
 /// Badge sequences for a command control: every sequence for `target` that continues from the
 /// current prefix (the painter strips the prefix, so the remaining letters show).
 pub fn control_badges(prefix: &str, target: &str) -> Vec<&'static str> {
-    if lookup(prefix).is_none() {
-        return Vec::new();
+    if prefix.is_empty() {
+        return Vec::new(); // empty prefix shows only tab badges
     }
     sequences_for(target).into_iter().filter(|seq| seq.len() > prefix.len() && seq.starts_with(prefix)).collect()
 }
@@ -126,11 +136,18 @@ mod tests {
 
     #[test]
     fn tab_letters_exist_for_standard_tabs() {
-        for (tab, letter) in [("Home", "H"), ("Insert", "N"), ("Page Layout", "P"), ("Formulas", "M"), ("Data", "A"), ("Review", "R"), ("View", "W")]
-        {
+        for (tab, letter) in [
+            ("Home", "H"),
+            ("Insert", "N"),
+            ("Page Layout", "P"),
+            ("Formulas", "M"),
+            ("Data", "A"),
+            ("Review", "R"),
+            ("View", "W"),
+            ("Draw", "JI"), // two-letter unit, shown as one badge
+        ] {
             assert_eq!(tab_sequence(tab), Some(letter), "tab {tab}");
         }
-        assert_eq!(tab_sequence("Draw"), None);
         assert_eq!(tab_sequence("Automate"), None);
     }
 
@@ -139,6 +156,16 @@ mod tests {
         assert_eq!(sequences_for("home.alignRight"), vec!["HAR"]);
         assert_eq!(sequences_for("dialog:pasteSpecial"), vec!["HVS", "ES"]);
         assert_eq!(sequences_for("home.autofitColumnWidth"), vec!["HOI", "OCA"]);
+    }
+
+    #[test]
+    fn implicit_levels_wait_for_deeper_sequences() {
+        assert!(has_deeper("J"), "JI is reachable only through the implicit J level");
+        assert!(is_group_level("J"), "implicit levels are group levels");
+        assert!(is_group_level("HV"), "explicit Continue levels are group levels");
+        assert!(!is_group_level("H"), "a terminal tab is not a group level");
+        assert!(!is_group_level("HVS"), "a finish is not a group level");
+        assert!(!has_deeper("X"));
     }
 
     #[test]
