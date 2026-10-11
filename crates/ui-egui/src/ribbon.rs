@@ -11,12 +11,33 @@ use crate::widgets::{big_button, color_palette, icon_button, small_button, split
 
 pub const TABS: &[&str] = &["Home", "Insert", "Draw", "Page Layout", "Formulas", "Data", "Review", "View", "Automate"];
 
+/// macOS draws the window into the title bar (`with_fullsize_content_view`) and AppKit paints the
+/// traffic lights itself, centred in its standard 28 pt title-bar band. Moving them would take
+/// AppKit calls (`unsafe`, forbidden here), so on macOS the title bar is that band: the lights sit
+/// vertically centred in it, with the controls beside them (#170).
+const MAC: bool = cfg!(target_os = "macos");
+pub const MAC_TITLE_BAR: f32 = 28.0;
+/// The traffic lights as AppKit lays them out: button diameter, centre-to-centre pitch and the
+/// first button's left edge (8–10 pt depending on the macOS version; the larger value keeps the
+/// gap after them from shrinking).
+const MAC_LIGHT: f32 = 12.0;
+const MAC_LIGHT_PITCH: f32 = 20.0;
+const MAC_LIGHTS_LEFT: f32 = 10.0;
+/// Where title-bar content starts on macOS: the end of the three lights plus the gap the lights
+/// keep from the top of the window.
+pub const MAC_CONTENT_LEFT: f32 = MAC_LIGHTS_LEFT + 2.0 * MAC_LIGHT_PITCH + MAC_LIGHT + (MAC_TITLE_BAR - MAC_LIGHT) / 2.0;
+
 /// Leave room for the macOS traffic lights when the content extends into the title bar.
-pub const TITLE_LEFT_PAD: f32 = if cfg!(target_os = "macos") { 76.0 } else { 8.0 };
+pub const TITLE_LEFT_PAD: f32 = if MAC { MAC_CONTENT_LEFT } else { 8.0 };
+const TITLE_BAR_H: f32 = if MAC { MAC_TITLE_BAR } else { 38.0 };
+/// The tallest title-bar controls, smaller on macOS to keep a margin in the shorter bar.
+const TITLE_CONTROL_H: f32 = if MAC { 22.0 } else { 26.0 };
+const _: () = assert!(TITLE_CONTROL_H < TITLE_BAR_H, "title-bar controls keep a margin above and below");
 
 pub fn title_bar(app: &mut SheetApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
-    egui::Panel::top("title_bar").exact_size(38.0).frame(egui::Frame::NONE.fill(t.window)).show(ui, |ui| {
+    let ch = TITLE_CONTROL_H;
+    egui::Panel::top("title_bar").exact_size(TITLE_BAR_H).frame(egui::Frame::NONE.fill(t.window)).show(ui, |ui| {
         let rect = ui.max_rect();
         // Dragging the empty title area moves the window.
         let bg = ui.interact(rect, ui.id().with("drag_title"), Sense::click_and_drag());
@@ -41,10 +62,10 @@ pub fn title_bar(app: &mut SheetApp, ui: &mut Ui) {
                 app.grid.toggle_autosave();
             }
             ui.add_space(6.0);
-            if icon_button(ui, Icon::Home, t.text_dim, "Home", vec2(26.0, 26.0)).clicked() {
+            if icon_button(ui, Icon::Home, t.text_dim, "Home", vec2(26.0, ch)).clicked() {
                 app.open_dialog("start", json!({}));
             }
-            if icon_button(ui, Icon::Save, t.text_dim, "Save (⌘S)", vec2(26.0, 26.0)).clicked()
+            if icon_button(ui, Icon::Save, t.text_dim, "Save (⌘S)", vec2(26.0, ch)).clicked()
                 // File operations must include the cell the user is still editing (as the File > Save menu item already does).
                 && app.commit_edit(0, 0, false, false)
             {
@@ -52,11 +73,10 @@ pub fn title_bar(app: &mut SheetApp, ui: &mut Ui) {
             }
             let can_undo = app.session.active().is_some_and(|d| !d.undo.is_empty());
             let can_redo = app.session.active().is_some_and(|d| !d.redo.is_empty());
-            if icon_button(ui, Icon::Undo, if can_undo { t.text_dim } else { t.text_disabled }, "Undo (⌘Z)", vec2(26.0, 26.0)).clicked() && can_undo
-            {
+            if icon_button(ui, Icon::Undo, if can_undo { t.text_dim } else { t.text_disabled }, "Undo (⌘Z)", vec2(26.0, ch)).clicked() && can_undo {
                 app.run_or_alert("edit.undo", json!({}));
             }
-            let undo_list = icon_button(ui, Icon::Chevron, t.text_dim, "Undo list", vec2(14.0, 26.0));
+            let undo_list = icon_button(ui, Icon::Chevron, t.text_dim, "Undo list", vec2(14.0, ch));
             egui::Popup::menu(&undo_list).show(|ui| {
                 let labels: Vec<String> =
                     app.session.active().map(|d| d.undo.iter().rev().take(20).map(|e| e.label.clone()).collect()).unwrap_or_default();
@@ -69,11 +89,10 @@ pub fn title_bar(app: &mut SheetApp, ui: &mut Ui) {
                     }
                 }
             });
-            if icon_button(ui, Icon::Redo, if can_redo { t.text_dim } else { t.text_disabled }, "Redo (⌘Y)", vec2(26.0, 26.0)).clicked() && can_redo
-            {
+            if icon_button(ui, Icon::Redo, if can_redo { t.text_dim } else { t.text_disabled }, "Redo (⌘Y)", vec2(26.0, ch)).clicked() && can_redo {
                 app.run_or_alert("edit.redo", json!({}));
             }
-            let more = icon_button(ui, Icon::More, t.text_dim, "More commands", vec2(26.0, 26.0));
+            let more = icon_button(ui, Icon::More, t.text_dim, "More commands", vec2(26.0, ch));
             egui::Popup::menu(&more).show(|ui| {
                 for (label, id) in [
                     ("New Workbook", "file.new"),
@@ -100,7 +119,7 @@ pub fn title_bar(app: &mut SheetApp, ui: &mut Ui) {
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(8.0);
-                if icon_button(ui, Icon::Search, t.text_dim, "Search commands (⌘⇧Space)", vec2(28.0, 26.0)).clicked() {
+                if icon_button(ui, Icon::Search, t.text_dim, "Search commands (⌘⇧Space)", vec2(28.0, ch)).clicked() {
                     app.open_dialog("commandSearch", json!({}));
                 }
                 let share = small_button(ui, Icon::Share, "Share", "Share: export or save a copy", true);
@@ -113,7 +132,7 @@ pub fn title_bar(app: &mut SheetApp, ui: &mut Ui) {
                         }
                     }
                 });
-                if icon_button(ui, Icon::Comment, t.text_dim, "Comments", vec2(28.0, 26.0)).clicked() {
+                if icon_button(ui, Icon::Comment, t.text_dim, "Comments", vec2(28.0, ch)).clicked() {
                     app.open_dialog("comments", json!({}));
                 }
             });
@@ -1932,4 +1951,17 @@ pub fn shortcut(app: &mut SheetApp, key: Key, m: Modifiers) {
 #[allow(dead_code)]
 fn unused(_: &Tokens, _: Icon) {
     let _ = icons::GREEN;
+}
+
+#[cfg(test)]
+mod title_bar_tests {
+    use super::*;
+
+    #[test]
+    fn mac_title_bar_centres_and_clears_the_traffic_lights() {
+        // The lights are centred in the bar, and content keeps the same gap after them.
+        let margin = (MAC_TITLE_BAR - MAC_LIGHT) / 2.0;
+        let lights_end = MAC_LIGHTS_LEFT + 2.0 * MAC_LIGHT_PITCH + MAC_LIGHT;
+        assert_eq!(MAC_CONTENT_LEFT - lights_end, margin);
+    }
 }
