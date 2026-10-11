@@ -1,6 +1,6 @@
 # Function parity: worksheet functions and formulas
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (created; measured against Microsoft's published Excel function list) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (FORECAST.ETS family added) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Excel's worksheet functions, category by category, against GridCraft's function library. Part of
 [target-app-parity.md](target-app-parity.md); gaps feed [gaps.md](gaps.md).
@@ -12,7 +12,7 @@ Excel's worksheet functions, category by category, against GridCraft's function 
   them), plus 14 text functions the page lists under combined entries (FIND/FINDB, LEFT/LEFTB,
   LEN/LENB, MID/MIDB, REPLACE/REPLACEB, RIGHT/RIGHTB, SEARCH/SEARCHB), BETA.INV, and COPILOT and
   PY (Microsoft 365 functions not on that page when fetched).
-- **Ours (501):** every function spec in `crates/functions/src/*.rs` (`f!("NAME", …)`) plus the
+- **Ours (505):** every function spec in `crates/functions/src/*.rs` (`f!("NAME", …)`) plus the
   evaluator's special forms in `crates/calc/src/eval.rs` (`SPECIAL_FUNCTIONS`: IF, IFS, CHOOSE,
   OFFSET, INDIRECT, INDEX, SUBTOTAL, AGGREGATE, TEXT, LET, LAMBDA, MAP, REDUCE, SCAN, BYROW, BYCOL,
   MAKEARRAY…), excluding the test-only `ADD2`. Every one is an Excel name.
@@ -23,11 +23,11 @@ Excel's worksheet functions, category by category, against GridCraft's function 
 
 ## Coverage
 
-**Measured: 501 / 523 by name (95.8%); 492 / 523 working (94.1%).**
+**Measured: 505 / 523 by name (96.6%); 496 / 523 working (94.8%).**
 
 | Category | Excel | Ours | Working | % working | Missing |
 |---|---|---|---|---|---|
-| Statistical | 111 | 107 | 107 | 96% | FORECAST.ETS, FORECAST.ETS.CONFINT, FORECAST.ETS.SEASONALITY, FORECAST.ETS.STAT |
+| Statistical | 111 | 111 | 111 | 100% | — |
 | Math and trigonometry | 80 | 79 | 79 | 99% | PERCENTOF |
 | Financial | 55 | 51 | 51 | 93% | ODDFPRICE, ODDFYIELD, ODDLPRICE, ODDLYIELD |
 | Engineering | 54 | 54 | 54 | 100% | — |
@@ -42,10 +42,10 @@ Excel's worksheet functions, category by category, against GridCraft's function 
 | Web | 3 | 3 | 1 | 33% | (WEBSERVICE, FILTERXML are stubs; ENCODEURL works) |
 | Add-in and Automation | 3 | 0 | 0 | 0% | CALL, EUROCONVERT, REGISTER.ID |
 | AI and Python | 2 | 0 | 0 | 0% | COPILOT, PY |
-| **Total** | **523** | **501** | **492** | **94.1%** | 22 missing, 9 stubs |
+| **Total** | **523** | **505** | **496** | **94.8%** | 18 missing, 9 stubs |
 
 By the Excel version that introduced them (working / total): before 2010 342 / 360, 2010
-56 / 56, 2013 49 / 51, 2016 1 / 5, 2019 6 / 6, 2021 11 / 11, 2024 22 / 23, Microsoft 365 5 / 11.
+56 / 56, 2013 49 / 51, 2016 5 / 5, 2019 6 / 6, 2021 11 / 11, 2024 22 / 23, Microsoft 365 5 / 11.
 Dynamic-array and LAMBDA-era functions (FILTER, SORT, UNIQUE, XLOOKUP, VSTACK, TAKE, GROUPBY,
 PIVOTBY, REGEXTEST…) are all present.
 
@@ -53,7 +53,6 @@ PIVOTBY, REGEXTEST…) are all present.
 
 | Function(s) | In scope? | Estimate | Note |
 |---|---|---|---|
-| FORECAST.ETS family (4) | yes | 4–6 h | AAA exponential smoothing with seasonality detection; needed for Forecast Sheet too |
 | ODDFPRICE, ODDFYIELD, ODDLPRICE, ODDLYIELD | yes | 2–4 h | Odd first/last period bond maths |
 | GETPIVOTDATA | yes | 2–3 h | Needs the pivot engine's result cache; also the "Generate GetPivotData" option |
 | TRIMRANGE, PERCENTOF, BAHTTEXT | yes | 1–2 h | TRIMRANGE also implies the `.:` trim-ref operators |
@@ -97,4 +96,5 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | FORECAST.ETS, .CONFINT, .SEASONALITY, .STAT added (AAA exponential smoothing; Excel's optimiser is undocumented, so last digits on noisy data may differ): 505 / 523 by name, 496 working |
 | 2026-10-10 | major | Created: 501 / 523 by name, 492 working, per category, against Microsoft's published list |
