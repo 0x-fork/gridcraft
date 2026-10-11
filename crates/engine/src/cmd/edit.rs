@@ -92,7 +92,7 @@ pub fn specs() -> Vec<CommandSpec> {
             has_doc,
             fill_series
         ),
-        cmd!("edit.flashFill", "Flash Fill", ["Home", "Editing", "Fill"], Some("Cmd+E"), "{range?}", has_doc, flash_fill),
+        cmd!("edit.flashFill", "Flash Fill", ["Home", "Editing", "Fill"], Some("Ctrl+E"), "{range?}", has_doc, flash_fill),
         cmd!(noundo "edit.find", "Find…", ["Home", "Editing", "Find & Select"], Some("Cmd+F"), "{what, matchCase?, wholeCell?, lookIn?: formulas|values, byColumns?, all?: bool, within?: sheet|workbook}", has_doc, find),
         cmd!(
             "edit.replace",

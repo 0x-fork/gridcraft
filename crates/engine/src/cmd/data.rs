@@ -29,7 +29,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "data.filter",
             "Filter",
             ["Data", "Sort & Filter"],
-            Some("Cmd+Shift+F"),
+            Some("Ctrl+Shift+L"),
             "{range?} toggles AutoFilter on the current region",
             has_doc,
             toggle_filter
