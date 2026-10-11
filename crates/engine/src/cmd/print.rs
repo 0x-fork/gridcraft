@@ -1267,7 +1267,7 @@ fn draw_objects(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, b: &Block) 
         }
         let (x, y, w, h) = place(r);
         let fill = rgb_of(shp.fill, wb);
-        let line = rgb_of(shp.line, wb).map(|c| (c, (0.75 * b.k).max(0.25)));
+        let line = rgb_of(shp.line, wb).filter(|_| !shp.format.no_line).map(|c| (c, (0.75 * b.k).max(0.25)));
         match shp.kind {
             ShapeKind::Ellipse => {
                 let pts: Vec<[f32; 2]> = (0..72)
@@ -1294,13 +1294,29 @@ fn draw_objects(pg: &mut Page, wb: &Workbook, si: usize, sh: &Sheet, b: &Block) 
             }
         }
         if !shp.text.is_empty() {
-            let size = 11.0 * b.scale;
-            let lines = wrap_lines(&shp.text, Font::Helvetica, size, (w - 4.0 * b.k).max(size));
-            let mut yy = y + 2.0 * b.k + size * 0.8;
+            use gridcraft_model::{ShapeTextAlign, ShapeTextAnchor};
+            let fm = &shp.format;
+            let text_box = shp.kind == ShapeKind::TextBox;
+            let size = fm.font_size.unwrap_or(11.0).clamp(1.0, 4000.0) * b.scale;
+            let font = Font::styled(Font::family_for(fm.font.as_deref().unwrap_or("")), fm.bold, fm.italic);
+            let color = fm.text_color.and_then(|c| rgb_of(c, wb)).unwrap_or([0, 0, 0]);
+            let align = fm.align.unwrap_or(if text_box { ShapeTextAlign::Left } else { ShapeTextAlign::Center });
+            let anchor = fm.anchor.unwrap_or(if text_box { ShapeTextAnchor::Top } else { ShapeTextAnchor::Middle });
+            let lines = wrap_lines(&shp.text, font, size, (w - 4.0 * b.k).max(size));
+            let block_h = lines.len().min(500) as f32 * size * 1.2;
+            let mut yy = match anchor {
+                ShapeTextAnchor::Top => y + 2.0 * b.k,
+                ShapeTextAnchor::Middle => y + (h - block_h) / 2.0,
+                ShapeTextAnchor::Bottom => y + h - 2.0 * b.k - block_h,
+            } + size * 0.8;
             for l in lines.iter().take(500) {
-                let lw = gridcraft_pdf::text_width(Font::Helvetica, size, l);
-                let lx = if shp.kind == ShapeKind::TextBox { x + 2.0 * b.k } else { x + (w - lw) / 2.0 };
-                pg.text(lx, yy, size, Font::Helvetica, [0, 0, 0], l);
+                let lw = gridcraft_pdf::text_width(font, size, l);
+                let lx = match align {
+                    ShapeTextAlign::Left => x + 2.0 * b.k,
+                    ShapeTextAlign::Center => x + (w - lw) / 2.0,
+                    ShapeTextAlign::Right => x + w - 2.0 * b.k - lw,
+                };
+                pg.text(lx, yy, size, font, color, l);
                 yy += size * 1.2;
             }
         }

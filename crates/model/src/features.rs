@@ -448,6 +448,50 @@ pub struct Shape {
     pub fill: Color,
     pub line: Color,
     pub text: String,
+    /// Outline visibility and text formatting (DrawingML `a:ln`, `a:bodyPr`, `a:pPr`, `a:rPr`).
+    #[serde(default)]
+    pub format: ShapeFormat,
+}
+
+/// Horizontal alignment of a shape's text (`a:pPr algn`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ShapeTextAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+/// Vertical anchor of a shape's text in its box (`a:bodyPr anchor`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ShapeTextAnchor {
+    #[default]
+    Top,
+    Middle,
+    Bottom,
+}
+
+/// How a shape's outline and text look. The text properties apply to the whole text (the first
+/// run's properties when a file has several).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ShapeFormat {
+    /// No outline (`a:ln/a:noFill`), whatever `Shape::line` says.
+    pub no_line: bool,
+    /// Text size in points (`a:rPr sz` / 100); `None` is the default size.
+    pub font_size: Option<f32>,
+    pub bold: bool,
+    pub italic: bool,
+    /// Typeface (`a:latin typeface`); `None` is the default font.
+    pub font: Option<String>,
+    /// Text fill colour; `None` is the default (black in text boxes).
+    pub text_color: Option<Color>,
+    /// Text outline (`a:rPr/a:ln`): colour and width in points.
+    pub text_outline: Option<(Color, f32)>,
+    /// `None`: the shape's default (left for text boxes, centred for other shapes).
+    pub align: Option<ShapeTextAlign>,
+    /// `None`: the shape's default (top for text boxes, middle for other shapes).
+    pub anchor: Option<ShapeTextAnchor>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

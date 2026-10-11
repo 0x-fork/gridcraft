@@ -448,3 +448,44 @@ fn chartex_parts_as_excel_expects_them() {
     let s = &back.sheet(0).unwrap().charts[0].series[0];
     assert_eq!((s.name.as_deref(), s.categories.as_deref(), s.values.as_str()), (Some("Data!$B$1"), Some("Data!$A$2:$A$5"), "Data!$B$2:$B$5"));
 }
+
+/// #377: a WordArt-style text box keeps its run size, bold, typeface, text fill and outline, its
+/// centring (horizontal and vertical) and its "no outline" shape line, through a round trip.
+#[test]
+fn text_box_formatting_is_read_and_written() {
+    let drawing = r#"<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><xdr:twoCellAnchor>
+      <xdr:from><xdr:col>1</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>2</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>7</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>8</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>
+      <xdr:sp macro="" textlink=""><xdr:nvSpPr><xdr:cNvPr id="2" name="TextBox 1"/><xdr:cNvSpPr txBox="1"/></xdr:nvSpPr>
+      <xdr:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:solidFill><a:schemeClr val="bg1"/></a:solidFill><a:ln w="9525" cmpd="sng"><a:noFill/></a:ln></xdr:spPr>
+      <xdr:txBody><a:bodyPr vertOverflow="clip" horzOverflow="clip" wrap="square" rtlCol="0" anchor="ctr"/><a:lstStyle/>
+      <a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="5400" b="1"><a:ln w="19050"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill></a:ln><a:solidFill><a:schemeClr val="bg1"/></a:solidFill><a:latin typeface="Arial Black"/></a:rPr><a:t>DRAFT</a:t></a:r></a:p></xdr:txBody></xdr:sp><xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>"#;
+    let srels = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>"#;
+    let bytes = minimal(
+        r#"<sheetData/><drawing r:id="rId1"/>"#,
+        &[("xl/worksheets/_rels/sheet1.xml.rels", srels), ("xl/drawings/drawing1.xml", drawing)],
+        "",
+        "",
+    );
+    let (wb, _) = read_xlsx(&bytes).unwrap();
+    let sp = &wb.sheet(0).unwrap().shapes[0];
+    assert_eq!(sp.kind, gridcraft_model::ShapeKind::TextBox);
+    assert_eq!(sp.text, "DRAFT");
+    let f = &sp.format;
+    assert!(f.no_line, "a:ln/a:noFill: no border");
+    assert_eq!(f.font_size, Some(54.0));
+    assert!(f.bold && !f.italic);
+    assert_eq!(f.font.as_deref(), Some("Arial Black"));
+    assert_eq!(f.text_color, Some(Color::Theme(0, 0)));
+    assert_eq!(f.text_outline, Some((Color::Theme(1, 0), 1.5)));
+    assert_eq!(f.align, Some(gridcraft_model::ShapeTextAlign::Center));
+    assert_eq!(f.anchor, Some(gridcraft_model::ShapeTextAnchor::Middle));
+
+    let (back, _) = read_xlsx(&crate::write_xlsx(&wb).unwrap()).unwrap();
+    let g = &back.sheet(0).unwrap().shapes[0].format;
+    let rgb = |c: Option<Color>| c.and_then(|c| c.resolve(&wb.theme));
+    assert_eq!((g.no_line, g.font_size, g.bold, g.font.as_deref()), (true, Some(54.0), true, Some("Arial Black")));
+    assert_eq!((g.align, g.anchor), (f.align, f.anchor));
+    assert_eq!(rgb(g.text_color), rgb(f.text_color));
+    assert_eq!(rgb(g.text_outline.map(|o| o.0)), rgb(f.text_outline.map(|o| o.0)));
+    assert_eq!(g.text_outline.map(|o| o.1), Some(1.5));
+}

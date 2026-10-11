@@ -195,6 +195,54 @@ fn area_mesh(v: &[Pos2], col: Color32) -> egui::Mesh {
     mesh
 }
 
+/// A shape's text with its formatting: size, bold/italic, typeface, colour, outline, horizontal
+/// alignment and vertical anchor. Shapes other than text boxes default to white text centred in
+/// the shape; text boxes to black text at the top left.
+fn paint_shape_text(p: &Painter, wb: &Workbook, sp: &gridcraft_engine::model::Shape, r: Rect, z: f32) {
+    use gridcraft_engine::model::{ShapeTextAlign, ShapeTextAnchor};
+    let f = &sp.format;
+    let text_box = sp.kind == ShapeKind::TextBox;
+    let align = f.align.unwrap_or(if text_box { ShapeTextAlign::Left } else { ShapeTextAlign::Center });
+    let anchor = f.anchor.unwrap_or(if text_box { ShapeTextAnchor::Top } else { ShapeTextAnchor::Middle });
+    let default_color = if text_box { Color32::BLACK } else { Color32::WHITE };
+    let color = f.text_color.and_then(|c| c.resolve(&wb.theme)).map(theme::color32).unwrap_or(default_color);
+    // Default 14 px (as before); a set size is in points.
+    let size = f.font_size.map_or(14.0, |pt| pt * 96.0 / 72.0).clamp(1.0, 2000.0) * z;
+    let family = theme::cell_family(f.font.as_deref().unwrap_or(""), f.bold, f.italic);
+    let inset = 4.0;
+    let width = (r.width() - 2.0 * inset).max(1.0);
+    let mut job = egui::text::LayoutJob::simple(sp.text.clone(), FontId::new(size, family), color, width);
+    job.halign = match align {
+        ShapeTextAlign::Left => egui::Align::LEFT,
+        ShapeTextAlign::Center => egui::Align::Center,
+        ShapeTextAlign::Right => egui::Align::RIGHT,
+    };
+    let g = p.layout_job(job);
+    let x = match align {
+        ShapeTextAlign::Left => r.left() + inset,
+        ShapeTextAlign::Center => r.center().x,
+        ShapeTextAlign::Right => r.right() - inset,
+    };
+    let y = match anchor {
+        ShapeTextAnchor::Top => r.top() + inset,
+        ShapeTextAnchor::Middle => r.center().y - g.size().y / 2.0,
+        ShapeTextAnchor::Bottom => r.bottom() - inset - g.size().y,
+    };
+    let pos = pos2(x, y);
+    let clip = p.with_clip_rect(r.intersect(p.clip_rect()));
+    // egui has no stroked text: the outline is the text drawn in the outline colour, offset in
+    // eight directions by the outline width, under the filled text.
+    if let Some((c, w)) = f.text_outline
+        && let Some(oc) = c.resolve(&wb.theme).map(theme::color32)
+    {
+        let d = (w * 96.0 / 72.0 * z / 2.0).clamp(0.5, 20.0);
+        for (dx, dy) in [(-1.0, -1.0), (0.0, -1.0), (1.0, -1.0), (-1.0, 0.0), (1.0, 0.0), (-1.0, 1.0), (0.0, 1.0), (1.0, 1.0)] {
+            clip.galley_with_override_text_color(pos + vec2(dx * d, dy * d), g.clone(), oc);
+        }
+    }
+    clip.galley(pos, g, color);
+}
+
 pub(crate) fn anchor_rect(geo: &Geo, sh: &Sheet, a: &Anchor) -> Rect {
     let x = geo.x(sh, a.cell.col) + a.dx * geo.z;
     let y = geo.y(sh, a.cell.row) + a.dy * geo.z;
@@ -221,7 +269,8 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
         let start = p.add(egui::Shape::Noop);
         let mut label = true;
         let fill = sp.fill.resolve(&wb.theme).map(theme::color32).unwrap_or(Color32::TRANSPARENT);
-        let line = sp.line.resolve(&wb.theme).map(theme::color32).unwrap_or(Color32::DARK_GRAY);
+        let line =
+            if sp.format.no_line { Color32::TRANSPARENT } else { sp.line.resolve(&wb.theme).map(theme::color32).unwrap_or(Color32::DARK_GRAY) };
         match sp.kind {
             ShapeKind::Rectangle | ShapeKind::TextBox => {
                 p.rect_filled(r, 0.0, fill);
@@ -270,15 +319,7 @@ pub(crate) fn paint_objects(app: &SheetApp, p: &Painter, geo: &Geo, wb: &Workboo
             }
         }
         if label && !sp.text.is_empty() && !app.editing_text_box(sp.id) {
-            let job = egui::text::LayoutJob::simple(
-                sp.text.clone(),
-                FontId::new(14.0 * geo.z, egui::FontFamily::Name(theme::CELL.into())),
-                if sp.kind == ShapeKind::TextBox { Color32::BLACK } else { Color32::WHITE },
-                r.width() - 8.0,
-            );
-            let g = p.layout_job(job);
-            let pos = if sp.kind == ShapeKind::TextBox { r.min + vec2(4.0, 4.0) } else { r.center() - g.size() / 2.0 };
-            p.galley(pos, g, Color32::BLACK);
+            paint_shape_text(p, wb, sp, r, geo.z);
         }
         if label && sp.kind == ShapeKind::TextBox && app.selected_chart == Some(sp.id) {
             selection_frame(p, r);
