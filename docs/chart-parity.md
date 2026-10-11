@@ -50,7 +50,7 @@ open PRs #158, #161, and issue #190.
 | Chart styles and colour palettes | ~16 styles × colour sets | style number stored, own palettes |
 | Chart sheets | yes | **missing** (skipped with a warning on open) |
 | Chart templates (`.crtx`) | yes | **missing** |
-| Recommended Charts | yes | partial (Insert ▸ Recommended) |
+| Recommended Charts | yes | dialog with recommendations from the data's shape (own heuristic) and an All Charts list, live previews (#215) |
 | Switch Row/Column, Select Data | yes | yes (Switch on charts read from files landed in #116) |
 | Sparklines (line, column, win/loss, markers, axis) | yes | line, column, win/loss |
 | PivotCharts | yes | Insert ▸ PivotChart (`insert.pivotChart`): bound to a PivotTable's report, rebuilt on refresh and layout changes, `c:pivotSource` round trip; no field buttons, innermost category level only |
@@ -79,5 +79,6 @@ back.
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-11 | minor | PivotCharts (`insert.pivotChart`) |
+| 2026-10-11 | minor | Recommended Charts dialog with previews (#215) |
 | 2026-10-10 | minor | Smooth lines (#62) and Switch Row/Column on file charts (#116) landed; chart resize bug (#190) |
 | 2026-10-10 | major | Created from a source audit: 25 kinds (25 of ~60 subtypes), element gaps, round-trip loss |

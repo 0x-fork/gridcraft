@@ -1193,7 +1193,7 @@ fn insert(app: &mut SheetApp, ui: &mut Ui) {
     });
     sep(ui);
     if big_button(ui, Icon::Chart, "Recommended\nCharts", "Recommended Charts", false).clicked() {
-        act(app, "insert.recommendedCharts", json!({}));
+        app.open_dialog("recommendedCharts", json!({}));
     }
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
