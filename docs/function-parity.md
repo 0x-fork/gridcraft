@@ -26,7 +26,7 @@ Excel's worksheet functions, category by category, against GridCraft's function 
 
 ## Coverage
 
-**Measured: 505 / 523 by name (96.6%); 496 / 523 working (94.8%).**
+**Measured: 509 / 523 by name (97.3%); 500 / 523 working (95.6%).**
 
 | Category | Excel | Ours | Working | % working | Missing |
 |---|---|---|---|---|---|
