@@ -1,6 +1,7 @@
 //! UI interaction tests: real egui input through the whole app (no GPU needed).
 
 use egui::{Event, Key, Modifiers, PointerButton};
+use egui_kittest::kittest::Queryable as _;
 use gridcraft_engine::Session;
 use gridcraft_engine::core::{CellRef, Value};
 use gridcraft_ui_egui::{SheetApp, grid::Geo};
@@ -264,6 +265,42 @@ fn language_switch_translates_the_ribbon_and_persists() {
     }
     h.state_mut().run("app.language.set", json!({"language": "en"})).unwrap();
     assert_eq!(h.state().ui.language, Language::En);
+}
+
+#[test]
+fn name_manager_new_and_edit_open_the_name_dialog_and_come_back() {
+    // #238: New… in the Name Manager did nothing (the manager put itself back over the dialog it
+    // had just opened).
+    let mut h = harness(blank());
+    h.state_mut().open_dialog("nameManager", json!({}));
+    h.run_steps(4);
+    h.get_by_label("New…").click();
+    h.run_steps(2);
+    assert_eq!(h.state().dialog.as_ref().map(|d| d.title.as_str()), Some("New Name"));
+    if let Some(d) = h.state_mut().dialog.as_mut() {
+        d.values.insert("name".into(), json!("Total"));
+        d.values.insert("refersTo".into(), json!("=Sheet1!$A$1"));
+    }
+    h.run_steps(1);
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    h.run_steps(2);
+    let names = |h: &egui_kittest::Harness<'static, SheetApp>| {
+        h.state().session.active().unwrap().wb.names.iter().map(|n| n.name.clone()).collect::<Vec<_>>()
+    };
+    assert_eq!(names(&h), ["Total"]);
+    assert_eq!(h.state().dialog.as_ref().map(|d| d.name()), Some("nameManager"), "OK returns to the Name Manager");
+
+    h.get_by_label("Edit…").click();
+    h.run_steps(2);
+    assert_eq!(h.state().dialog.as_ref().map(|d| d.title.as_str()), Some("Edit Name"));
+    if let Some(d) = h.state_mut().dialog.as_mut() {
+        d.values.insert("name".into(), json!("GrandTotal"));
+    }
+    h.run_steps(1);
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    h.run_steps(2);
+    assert_eq!(names(&h), ["GrandTotal"], "Edit renames instead of adding a second name");
+    assert_eq!(h.state().dialog.as_ref().map(|d| d.name()), Some("nameManager"));
 }
 
 #[test]
