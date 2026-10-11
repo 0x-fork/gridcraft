@@ -207,6 +207,11 @@ fn candidates(role: &str) -> Vec<(String, u32)> {
                 add(format!("{d}/dejavu/DejaVuSans.ttf"), 0);
                 add(format!("{d}/liberation/LiberationSans-Regular.ttf"), 0);
             }
+            // Fedora keeps each family in its own package folder (#54).
+            add("/usr/share/fonts/abattis-cantarell-fonts/Cantarell-Regular.otf".into(), 0);
+            add("/usr/share/fonts/google-noto/NotoSans-Regular.ttf".into(), 0);
+            add("/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf".into(), 0);
+            add("/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf".into(), 0);
         }
         "ui-bold" => {
             add(format!("{mac_sys}/HelveticaNeue.ttc"), 1);
@@ -216,6 +221,9 @@ fn candidates(role: &str) -> Vec<(String, u32)> {
                 add(format!("{d}/dejavu/DejaVuSans-Bold.ttf"), 0);
                 add(format!("{d}/liberation/LiberationSans-Bold.ttf"), 0);
             }
+            add("/usr/share/fonts/google-noto/NotoSans-Bold.ttf".into(), 0);
+            add("/usr/share/fonts/dejavu-sans-fonts/DejaVuSans-Bold.ttf".into(), 0);
+            add("/usr/share/fonts/liberation-sans-fonts/LiberationSans-Bold.ttf".into(), 0);
         }
         "cell" | "cell-bold" | "cell-italic" | "cell-bold-italic" => {
             let (carlito, calibri_win, calibri_mac, arial_mac, arial_win, lib, dejavu) = match role {
@@ -388,7 +396,15 @@ fn fallback_faces(han: HanOrder) -> Vec<(&'static str, Vec<(String, u32)>)> {
         HanOrder::Japanese => (ja, zh),
         HanOrder::Chinese => (zh, ja),
     };
-    vec![first, second, ("sys-cjk-hangul", cjk_hangul()), ("sys-thai", thai()), ("sys-hebrew", hebrew())]
+    vec![
+        first,
+        second,
+        ("sys-cjk-hangul", cjk_hangul()),
+        ("sys-thai", thai()),
+        ("sys-hebrew", hebrew()),
+        ("sys-symbols", symbols()),
+        ("sys-symbols-2", symbols_more()),
+    ]
 }
 
 /// Linux directories that hold CJK fonts across distributions: Debian/Ubuntu (`opentype/noto`,
@@ -513,6 +529,59 @@ fn hebrew() -> Vec<(String, u32)> {
     v
 }
 
+/// Symbol faces behind the UI font. Interface fonts such as Noto Sans and Cantarell (and egui's
+/// built-in Ubuntu) lack arrows, check marks, geometric shapes and keyboard symbols (▾ ✓ ✕ ▲ ↳ ⇧),
+/// which then render as empty boxes (#197, #54). DejaVu Sans covers most of them; the paths cover
+/// Debian/Ubuntu, Fedora and Arch layouts. [`load_fallback`] skips the file if Hebrew already
+/// loaded it.
+#[cfg(not(target_arch = "wasm32"))]
+fn symbols() -> Vec<(String, u32)> {
+    let win = std::env::var("WINDIR").map(|w| format!("{w}\\Fonts")).unwrap_or_else(|_| "C:\\Windows\\Fonts".into());
+    let mut v: Vec<(String, u32)> = vec![(format!("{win}\\seguisym.ttf"), 0), ("/System/Library/Fonts/Apple Symbols.ttf".into(), 0)];
+    for d in [
+        "/usr/share/fonts/truetype/dejavu",
+        "/usr/share/fonts/dejavu-sans-fonts",
+        "/usr/share/fonts/TTF",
+        "/usr/share/fonts/dejavu",
+        "/usr/share/fonts/truetype/ttf-dejavu",
+        "/usr/local/share/fonts/dejavu",
+        "/usr/local/share/fonts",
+    ] {
+        v.push((format!("{d}/DejaVuSans.ttf"), 0));
+    }
+    v
+}
+
+/// A second symbol face for what the first lacks (⌘ and other technical symbols): Noto Sans
+/// Symbols 2 where it is installed, or Segoe UI Symbol behind Segoe UI.
+#[cfg(not(target_arch = "wasm32"))]
+fn symbols_more() -> Vec<(String, u32)> {
+    let mut v: Vec<(String, u32)> = Vec::new();
+    for d in [
+        "/usr/share/fonts/noto",
+        "/usr/share/fonts/truetype/noto",
+        "/usr/share/fonts/opentype/noto",
+        "/usr/share/fonts/google-noto-sans-symbols-2-fonts",
+        "/usr/share/fonts/google-noto",
+        "/usr/local/share/fonts/noto",
+    ] {
+        v.push((format!("{d}/NotoSansSymbols2-Regular.ttf"), 0));
+    }
+    v
+}
+
+/// Whether any symbol fallback face is installed (tests skip their glyph checks without one).
+pub fn symbol_face_installed() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        symbols().iter().chain(symbols_more().iter()).any(|(p, _)| std::path::Path::new(p).exists())
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
+    }
+}
+
 pub fn apply(ctx: &egui::Context, dark: bool) {
     // Install both palettes before System can switch between the style slots.
     for theme in [egui::Theme::Light, egui::Theme::Dark] {
@@ -584,8 +653,14 @@ mod tests {
     #[test]
     fn language_reorders_only_the_han_faces() {
         let keys = |han| fallback_faces(han).into_iter().map(|(k, _)| k).collect::<Vec<_>>();
-        assert_eq!(keys(HanOrder::Japanese), ["sys-cjk-han-ja", "sys-cjk-han-zh", "sys-cjk-hangul", "sys-thai", "sys-hebrew"]);
-        assert_eq!(keys(HanOrder::Chinese), ["sys-cjk-han-zh", "sys-cjk-han-ja", "sys-cjk-hangul", "sys-thai", "sys-hebrew"]);
+        assert_eq!(
+            keys(HanOrder::Japanese),
+            ["sys-cjk-han-ja", "sys-cjk-han-zh", "sys-cjk-hangul", "sys-thai", "sys-hebrew", "sys-symbols", "sys-symbols-2"]
+        );
+        assert_eq!(
+            keys(HanOrder::Chinese),
+            ["sys-cjk-han-zh", "sys-cjk-han-ja", "sys-cjk-hangul", "sys-thai", "sys-hebrew", "sys-symbols", "sys-symbols-2"]
+        );
         assert_eq!(HanOrder::of(Language::Ja), HanOrder::Japanese);
         for l in [Language::En, Language::Zh, Language::Ko, Language::Ru, Language::PtBr] {
             assert_eq!(HanOrder::of(l), HanOrder::Chinese, "{l:?} shares the default order (no font rebuild)");
