@@ -268,6 +268,13 @@ fn language_switch_translates_the_ribbon_and_persists() {
         let restored: gridcraft_ui_egui::UiState = serde_json::from_str(&serde_json::to_string(&h.state().ui).unwrap()).unwrap();
         assert_eq!(restored.language, language);
     }
+    // Czech spells "Data" as English does, so the Czech table is checked on a label that differs.
+    h.state_mut().run("app.language.set", json!({"language": "cs"})).unwrap();
+    h.run_steps(2);
+    assert_eq!(h.state().ui.language, Language::Cs);
+    assert_eq!(Language::Cs.tr("Formulas"), "Vzorce");
+    let restored: gridcraft_ui_egui::UiState = serde_json::from_str(&serde_json::to_string(&h.state().ui).unwrap()).unwrap();
+    assert_eq!(restored.language, Language::Cs);
     h.state_mut().run("app.language.set", json!({"language": "en"})).unwrap();
     assert_eq!(h.state().ui.language, Language::En);
 }

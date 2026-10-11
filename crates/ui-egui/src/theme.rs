@@ -621,7 +621,7 @@ mod tests {
         assert_eq!(keys(HanOrder::Japanese), ["sys-cjk-han-ja", "sys-cjk-han-zh", "sys-cjk-hangul", "sys-thai", "sys-hebrew"]);
         assert_eq!(keys(HanOrder::Chinese), ["sys-cjk-han-zh", "sys-cjk-han-ja", "sys-cjk-hangul", "sys-thai", "sys-hebrew"]);
         assert_eq!(HanOrder::of(Language::Ja), HanOrder::Japanese);
-        for l in [Language::En, Language::Zh, Language::Ko, Language::Ru, Language::PtBr, Language::De] {
+        for l in [Language::En, Language::Zh, Language::Ko, Language::Ru, Language::PtBr, Language::De, Language::Cs] {
             assert_eq!(HanOrder::of(l), HanOrder::Chinese, "{l:?} shares the default order (no font rebuild)");
         }
     }
@@ -647,13 +647,15 @@ mod tests {
         // Real render check, per script: the proportional family (what cells and the UI use) must
         // resolve a sample string to a real glyph, not the tofu replacement char. Skips a script
         // whose face is absent (a minimal machine) and fails if a face is present but not wired in.
-        let cases: [(&str, Vec<(String, u32)>, &str); 6] = [
+        let cases: [(&str, Vec<(String, u32)>, &str); 7] = [
             ("sys-cjk-han-ja", cjk_han_japanese(), "カテゴリ"),
             ("sys-cjk-han-zh", cjk_han_simplified(), "页面布局 客户端配置"),
             ("sys-cjk-hangul", cjk_hangul(), "한글"),
             ("sys-thai", thai(), "ทดสอบ"),
             ("sys-hebrew", hebrew(), "עברית"),
             ("ui", candidates(UI), "Русский"),
+            // Czech interface labels: every Czech accented letter, in both cases.
+            ("ui", candidates(UI), "Příliš žluťoučký kůň úpěl ďábelské ódy ŘŠČŽÝÁÍÉÚŮĚŤĎŇÓ"),
         ];
         for language in [Language::En, Language::Ja] {
             let ctx = egui::Context::default();

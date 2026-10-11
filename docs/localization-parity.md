@@ -79,5 +79,6 @@ language (none so far) and of localized function names.
 |---|---|---|
 | 2026-10-11 | minor | German ribbon catalog (`i18n/de.rs`, 266 labels, ~12%); `de` locale tags (de-DE, de-AT, de-CH…) resolve to German. PR #163 (localized German formulas/numbers) still open |
 | 2026-10-11 | minor | Sheet Right-to-Left mirrors the grid (#146) |
+| 2026-10-11 | minor | Czech (cs) ribbon table: 266 labels (~12%), menus only |
 | 2026-10-10 | minor | Re-measured after #31, #104, #82, #38 merged: ribbon translated into ja, zh, ko, pt-BR and ru (266–268 labels, ~12%), system-language default, CJK/Thai/Hebrew font fallback; ~10% ready, 100–165 h |
 | 2026-10-10 | major | Created: English only, no catalog, ~2,200 strings, script-support gaps, open language PRs |

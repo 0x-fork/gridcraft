@@ -170,6 +170,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 | 2026-10-11 | minor | Progress log: XLSX threaded comments round trip (#300) |
 | 2026-10-11 | minor | Catalog 258 → 259 / 290: Allow Edit Ranges (#307) |
 | 2026-10-11 | minor | Worksheet functions 505 / 523 (FORECAST.ETS family); progress log row |
+| 2026-10-11 | minor | Czech (cs) listed under other shipped languages: ribbon only, ~12% |
 | 2026-10-10 | minor | Readiness-by-audience table with hours to ~95% per audience; full number unchanged (additive weighted sum) |
 | 2026-10-10 | minor | Added Mainstream practitioner (~50%) and Essentials user (~63%); languages updated for the 10-10 merges (ribbon in ja, zh, ko, pt-BR, ru); localization 5%→10%; full number re-checked (51.6, unchanged) |
 | 2026-10-10 | minor | Checked against the alpha gate (six core workflows pass): stays alpha |
