@@ -55,6 +55,25 @@ pub struct UiState {
     /// rather than failing the whole `UiState`.
     #[serde(deserialize_with = "i18n::lenient")]
     pub language: i18n::Language,
+    /// Interface size in percent on top of the desktop's scale (100 = Auto), applied as egui's
+    /// zoom factor so the ribbon, menus, dialogs and grid grow together. Kept within
+    /// [`INTERFACE_SCALE_MIN`]..=[`INTERFACE_SCALE_MAX`]; a malformed saved value reads as 100.
+    #[serde(deserialize_with = "lenient_interface_scale")]
+    pub interface_scale: u16,
+}
+
+pub const INTERFACE_SCALE_MIN: u16 = 75;
+pub const INTERFACE_SCALE_MAX: u16 = 200;
+
+/// A requested interface size, rounded and clamped to the supported range; `None` when it isn't
+/// a finite number.
+pub fn clamp_interface_scale(percent: f64) -> Option<u16> {
+    percent.is_finite().then(|| percent.round().clamp(INTERFACE_SCALE_MIN as f64, INTERFACE_SCALE_MAX as f64) as u16)
+}
+
+fn lenient_interface_scale<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u16, D::Error> {
+    let v = Json::deserialize(d)?;
+    Ok(v.as_f64().and_then(clamp_interface_scale).unwrap_or(100))
 }
 
 impl Default for UiState {
@@ -69,6 +88,7 @@ impl Default for UiState {
             status_bar: true,
             recent: vec![],
             language: i18n::Language::En,
+            interface_scale: 100,
         }
     }
 }
@@ -82,6 +102,11 @@ impl UiState {
         } else {
             egui::ThemePreference::Light
         }
+    }
+
+    /// The zoom factor for the interface size preference.
+    pub fn zoom_factor(&self) -> f32 {
+        clamp_interface_scale(self.interface_scale as f64).unwrap_or(100) as f32 / 100.0
     }
 
     pub fn theme_mode(&self) -> &'static str {
@@ -334,6 +359,21 @@ impl SheetApp {
                 }
                 Ok(json!({"mode": self.ui.theme_mode()}))
             }
+            "view.interfaceScale" => {
+                // `{"percent": 125}` or `{"percent": "auto"}`; out-of-range values are clamped.
+                let percent = match p.get("percent") {
+                    Some(Json::String(s)) if s.eq_ignore_ascii_case("auto") => Some(100),
+                    Some(v) => v.as_f64().and_then(clamp_interface_scale),
+                    None => None,
+                };
+                match percent {
+                    Some(v) => {
+                        self.ui.interface_scale = v;
+                        Ok(json!({"percent": v}))
+                    }
+                    None => Err(format!("missing `percent` ({INTERFACE_SCALE_MIN}–{INTERFACE_SCALE_MAX}, or \"auto\")")),
+                }
+            }
             "view.zoom100" => return Some(self.session.run("view.zoom", json!({"percent": 100})).inspect(|_| self.after_engine())),
             "app.language.set" => {
                 // `{"language": "ja"}`; `code` is accepted as an alias.
@@ -582,6 +622,16 @@ impl SheetApp {
             ctx.request_repaint();
         }
         self.effective_dark = ctx.theme() == egui::Theme::Dark;
+        // Interface size: the preference owns the zoom factor, so egui's own Ctrl/Cmd +/-/0 zoom
+        // keys stay off (they would also swallow GridCraft's shortcuts).
+        if ctx.options(|o| o.zoom_with_keyboard) {
+            ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        }
+        let zoom = self.ui.zoom_factor();
+        if (ctx.zoom_factor() - zoom).abs() > 0.001 {
+            ctx.set_zoom_factor(zoom);
+            ctx.request_repaint();
+        }
         control::poll(self, ctx);
         // Files read asynchronously (web file picker, dropped files).
         let arrived: Vec<(String, Vec<u8>)> = self
