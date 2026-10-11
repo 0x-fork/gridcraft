@@ -352,6 +352,9 @@ impl<'h> Evaluator<'h> {
     }
 
     fn unary(&mut self, op: UnOp, x: &Expr) -> Ev {
+        if let UnOp::Trim(mode) = op {
+            return self.trim_ref(mode, x);
+        }
         if op == UnOp::Spill {
             return match self.eval(x) {
                 Ev::R(areas) => match areas.as_slice() {
@@ -386,7 +389,7 @@ impl<'h> Evaluator<'h> {
                 UnOp::Neg => Value::number(-n),
                 UnOp::Plus => Value::number(n),
                 UnOp::Percent => Value::number(n / 100.0),
-                UnOp::At | UnOp::Spill => Value::number(n),
+                UnOp::At | UnOp::Spill | UnOp::Trim(_) => Value::number(n),
             },
             op == UnOp::Plus,
         ))

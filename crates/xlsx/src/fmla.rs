@@ -80,6 +80,13 @@ fn expr_to_file(e: Expr) -> String {
         Expr::Unary(gridcraft_formula::UnOp::Spill, r) => Expr::Call("_xlfn.ANCHORARRAY".into(), vec![*r]),
         // Nor an `@` operator: Excel writes `@x` as `_xlfn.SINGLE(x)`.
         Expr::Unary(gridcraft_formula::UnOp::At, x) => Expr::Call("_xlfn.SINGLE".into(), vec![*x]),
+        // Nor trim-reference operators: written as the equivalent `TRIMRANGE(range,n,n)`, which
+        // every Excel with trim references reads. (Excel's own file spelling of `A1:.E10` is
+        // not publicly documented; the `_xlfn._TRO_*` call forms are accepted on read.)
+        Expr::Unary(gridcraft_formula::UnOp::Trim(mode), x) => {
+            let code = Expr::Number(f64::from(mode.code()));
+            Expr::Call("_xlfn.TRIMRANGE".into(), vec![*x, code.clone(), code])
+        }
         other => other,
     });
     gridcraft_formula::print(&e)
@@ -124,6 +131,18 @@ mod tests {
         assert_eq!(text_to_file("=@Sheet1!$A$1:$A$3"), "_xlfn.SINGLE(Sheet1!$A$1:$A$3)");
         assert_eq!(from_file("_xlfn.SINGLE(A1:A3)*2"), "@A1:A3*2");
         assert_eq!(from_file("SUM(_xlfn.SINGLE(A1:A3)*B1:B3)"), "SUM(@A1:A3*B1:B3)");
+    }
+
+    #[test]
+    fn trim_references() {
+        assert_eq!(to_file(&Formula::new("SUM(A1:.E10)+SUM(Data!A.:A)")), "SUM(_xlfn.TRIMRANGE(A1:E10,2,2))+SUM(_xlfn.TRIMRANGE(Data!A:A,1,1))");
+        assert_eq!(text_to_file("=ROWS(1.:.5)"), "ROWS(_xlfn.TRIMRANGE(1:5,3,3))");
+        assert_eq!(from_file("SUM(_xlfn._TRO_TRAILING(A1:E10))+_xlfn._TRO_ALL($A:$B)"), "SUM(A1:.E10)+$A.:.$B");
+    }
+
+    #[test]
+    fn unbracketed_this_row_column() {
+        assert_eq!(from_file("Sales[[#This Row],Units]*[[#This Row],Price]"), "Sales[@Units]*[@Price]");
     }
 
     #[test]
