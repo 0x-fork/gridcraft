@@ -434,6 +434,29 @@ fn pending_sequences_go_live_when_the_command_lands() {
 }
 
 #[test]
+fn control_keytips_open_dropdowns_and_run_handlers() {
+    // HFF routes to the font control: its dropdown opens (popup items queryable).
+    let mut h = harness(blank());
+    sequence(&mut h, &[Key::H, Key::F, Key::F], false);
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "HFF must not raise an error box");
+    // "Calibri" appears twice: once on the combo button (the current font) and
+    // once inside the opened dropdown — a single node would mean it stayed closed.
+    assert!(h.query_all_by_label("Calibri").count() >= 2, "HFF must open the font dropdown");
+
+    // WVF toggles the formula bar: pure UI state, no engine command exists.
+    let mut h = harness(blank());
+    assert!(h.state().ui.formula_bar);
+    sequence(&mut h, &[Key::W, Key::V, Key::F], false);
+    assert!(!h.state().ui.formula_bar, "WVF must toggle the formula bar off");
+
+    // WJ runs the 100% handler with its percent param ({} would raise "missing percent").
+    let mut h = harness(blank());
+    sequence(&mut h, &[Key::W, Key::J], false);
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "WJ must run view.zoom with the percent param");
+    assert_eq!(h.state().keytips.prefix(), None);
+}
+
+#[test]
 fn every_sequence_terminates_without_panicking() {
     use gridcraft_ui_egui::keytips::keytip_table::SEQUENCES;
     for (seq, _entry) in SEQUENCES {

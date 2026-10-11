@@ -543,7 +543,8 @@ fn keytip_hem_() {
 fn keytip_hfc_() {
     let mut h = harness(blank());
     sequence(&mut h, "HFC", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HFC must invoke home.fontColor and surface its missing-params error");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "HFC must route to its control without an error box");
+    assert_eq!(h.state().keytips.prefix(), None);
 }
 
 #[test]
@@ -557,14 +558,14 @@ fn keytip_hfdc_() {
 fn keytip_hfdf_() {
     let mut h = harness(blank());
     sequence(&mut h, "HFDF", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HFDF must invoke edit.find and surface its missing-params error");
+    assert!(h.state().dialog.is_some(), "HFDF must open the find dialog");
 }
 
 #[test]
 fn keytip_hfdg_() {
     let mut h = harness(blank());
     sequence(&mut h, "HFDG", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HFDG must invoke edit.goTo and surface its missing-params error");
+    assert!(h.state().dialog.is_some(), "HFDG must open the goTo dialog");
 }
 
 #[test]
@@ -595,7 +596,7 @@ fn keytip_hfdp_() {
 fn keytip_hfdr_() {
     let mut h = harness(blank());
     sequence(&mut h, "HFDR", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HFDR must invoke edit.replace and surface its missing-params error");
+    assert!(h.state().dialog.is_some(), "HFDR must open the find dialog");
 }
 
 #[test]
@@ -609,7 +610,8 @@ fn keytip_hfds_() {
 fn keytip_hff_() {
     let mut h = harness(blank());
     sequence(&mut h, "HFF", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HFF must invoke home.fontName and surface its missing-params error");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "HFF must route to its control without an error box");
+    assert_eq!(h.state().keytips.prefix(), None);
 }
 
 #[test]
@@ -696,7 +698,7 @@ fn keytip_hfk_() {
 fn keytip_hfm_() {
     let mut h = harness(blank());
     sequence(&mut h, "HFM", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HFM must invoke home.numberFormat and surface its missing-params error");
+    assert!(h.state().dialog.is_some(), "HFM must open the formatCells dialog");
 }
 
 #[test]
@@ -737,14 +739,16 @@ fn keytip_hfqo_() {
 fn keytip_hfs_() {
     let mut h = harness(blank());
     sequence(&mut h, "HFS", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HFS must invoke home.fontSize and surface its missing-params error");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "HFS must route to its control without an error box");
+    assert_eq!(h.state().keytips.prefix(), None);
 }
 
 #[test]
 fn keytip_hh_() {
     let mut h = harness(blank());
     sequence(&mut h, "HH", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HH must invoke home.fillColor and surface its missing-params error");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "HH must route to its control without an error box");
+    assert_eq!(h.state().keytips.prefix(), None);
 }
 
 #[test]
@@ -912,7 +916,8 @@ fn keytip_hmu_() {
 fn keytip_hn_() {
     let mut h = harness(blank());
     sequence(&mut h, "HN", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HN must invoke home.numberFormat and surface its missing-params error");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "HN must route to its control without an error box");
+    assert_eq!(h.state().keytips.prefix(), None);
 }
 
 #[test]
@@ -926,7 +931,7 @@ fn keytip_hoa_() {
 fn keytip_hod_() {
     let mut h = harness(blank());
     sequence(&mut h, "HOD", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HOD must invoke home.columnWidth and surface its missing-params error");
+    assert!(h.state().dialog.is_some(), "HOD must open the defaultWidth dialog");
 }
 
 #[test]
@@ -940,7 +945,7 @@ fn keytip_hoe_() {
 fn keytip_hoh_() {
     let mut h = harness(blank());
     sequence(&mut h, "HOH", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HOH must invoke home.rowHeight and surface its missing-params error");
+    assert!(h.state().dialog.is_some(), "HOH must open the rowHeight dialog");
 }
 
 #[test]
@@ -954,7 +959,7 @@ fn keytip_hol_() {
 fn keytip_hom_() {
     let mut h = harness(blank());
     sequence(&mut h, "HOM", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HOM must invoke sheet.move and surface its missing-params error");
+    assert!(h.state().dialog.is_some(), "HOM must open the moveSheet dialog");
 }
 
 #[test]
@@ -968,7 +973,7 @@ fn keytip_hop_() {
 fn keytip_hor_() {
     let mut h = harness(blank());
     sequence(&mut h, "HOR", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HOR must invoke sheet.rename and surface its missing-params error");
+    assert!(h.state().dialog.is_some(), "HOR must open the renameSheet dialog");
 }
 
 #[test]
@@ -1024,7 +1029,7 @@ fn keytip_hous_() {
 fn keytip_how_() {
     let mut h = harness(blank());
     sequence(&mut h, "HOW", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HOW must invoke home.columnWidth and surface its missing-params error");
+    assert!(h.state().dialog.is_some(), "HOW must open the columnWidth dialog");
 }
 
 #[test]
@@ -1133,108 +1138,10 @@ fn keytip_hv_() {
 }
 
 #[test]
-fn keytip_hva_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "HVA", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HVA must invoke edit.pasteSpecial and surface its missing-params error");
-}
-
-#[test]
-fn keytip_hvb_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "HVB", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HVB must invoke edit.pasteSpecial and surface its missing-params error");
-}
-
-#[test]
-fn keytip_hve_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "HVE", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HVE must invoke edit.pasteSpecial and surface its missing-params error");
-}
-
-#[test]
-fn keytip_hvf_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "HVF", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HVF must invoke edit.pasteSpecial and surface its missing-params error");
-}
-
-#[test]
-fn keytip_hvi_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "HVI", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HVI must invoke edit.pasteSpecial and surface its missing-params error");
-}
-
-#[test]
-fn keytip_hvk_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "HVK", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HVK must invoke edit.pasteSpecial and surface its missing-params error");
-}
-
-#[test]
-fn keytip_hvm_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "HVM", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HVM must invoke edit.pasteSpecial and surface its missing-params error");
-}
-
-#[test]
-fn keytip_hvn_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "HVN", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HVN must invoke edit.pasteSpecial and surface its missing-params error");
-}
-
-#[test]
-fn keytip_hvo_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "HVO", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HVO must invoke edit.pasteSpecial and surface its missing-params error");
-}
-
-#[test]
 fn keytip_hvp_() {
     let mut h = harness(blank());
     sequence(&mut h, "HVP", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HVP must invoke edit.paste and surface its missing-params error");
-}
-
-#[test]
-fn keytip_hvr_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "HVR", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HVR must invoke edit.pasteSpecial and surface its missing-params error");
-}
-
-#[test]
-fn keytip_hvt_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "HVT", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HVT must invoke edit.pasteSpecial and surface its missing-params error");
-}
-
-#[test]
-fn keytip_hvu_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "HVU", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HVU must invoke edit.pasteSpecial and surface its missing-params error");
-}
-
-#[test]
-fn keytip_hvv_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "HVV", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HVV must invoke edit.pasteSpecial and surface its missing-params error");
-}
-
-#[test]
-fn keytip_hvw_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "HVW", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HVW must invoke edit.pasteSpecial and surface its missing-params error");
+    assert!(h.state().message.is_some() || h.state().toast.is_some(), "HVP must invoke edit.pasteSpecial and surface its missing-params error");
 }
 
 #[test]
@@ -1242,13 +1149,6 @@ fn keytip_hw_() {
     let mut h = harness(blank());
     sequence(&mut h, "HW", false);
     assert_eq!(h.state().keytips.prefix(), Some("HW"), "HW must stay armed waiting for more input");
-}
-
-#[test]
-fn keytip_hws_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "HWS", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "home.shrinkToFit"), "HWS must journal home.shrinkToFit");
 }
 
 #[test]
@@ -1580,21 +1480,21 @@ fn keytip_nzk_() {
 fn keytip_nzksl_() {
     let mut h = harness(blank());
     sequence(&mut h, "NZKSL", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "NZKSL must invoke insert.sparkline and surface its missing-params error");
+    assert!(h.state().dialog.is_some(), "NZKSL must open the sparkline dialog");
 }
 
 #[test]
 fn keytip_nzkso_() {
     let mut h = harness(blank());
     sequence(&mut h, "NZKSO", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "NZKSO must invoke insert.sparkline and surface its missing-params error");
+    assert!(h.state().dialog.is_some(), "NZKSO must open the sparkline dialog");
 }
 
 #[test]
 fn keytip_nzksw_() {
     let mut h = harness(blank());
     sequence(&mut h, "NZKSW", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "NZKSW must invoke insert.sparkline and surface its missing-params error");
+    assert!(h.state().dialog.is_some(), "NZKSW must open the sparkline dialog");
 }
 
 #[test]
@@ -2024,7 +1924,10 @@ fn keytip_ms_() {
 fn keytip_msp_() {
     let mut h = harness(blank());
     sequence(&mut h, "MSP", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "MSP must invoke edit.pasteSpecial and surface its missing-params error");
+    assert!(h.state().dialog.is_none(), "MSP must not open a dialog");
+    assert!(h.state().message.is_none(), "MSP must not open a message box");
+    assert!(h.state().toast.is_none(), "MSP must not raise a toast");
+    assert!(h.state().session.journal.is_empty(), "MSP must not journal");
 }
 
 #[test]
@@ -2094,7 +1997,7 @@ fn keytip_mus_() {
 fn keytip_mv_() {
     let mut h = harness(blank());
     sequence(&mut h, "MV", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "MV must invoke formulas.evaluateFormula and surface its missing-params error");
+    assert!(h.state().dialog.is_some(), "MV must open the evaluateFormula dialog");
 }
 
 #[test]
@@ -2567,7 +2470,7 @@ fn keytip_aw_() {
 fn keytip_awg_() {
     let mut h = harness(blank());
     sequence(&mut h, "AWG", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "AWG must invoke data.goalSeek and surface its missing-params error");
+    assert!(h.state().dialog.is_some(), "AWG must open the goalSeek dialog");
 }
 
 #[test]
@@ -2804,7 +2707,8 @@ fn keytip_wi_() {
 fn keytip_wj_() {
     let mut h = harness(blank());
     sequence(&mut h, "WJ", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "WJ must invoke view.zoom and surface its missing-params error");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "WJ must route to its control without an error box");
+    assert_eq!(h.state().keytips.prefix(), None);
 }
 
 #[test]
@@ -2853,7 +2757,7 @@ fn keytip_wp_() {
 fn keytip_wq_() {
     let mut h = harness(blank());
     sequence(&mut h, "WQ", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "WQ must invoke view.zoom and surface its missing-params error");
+    assert!(h.state().dialog.is_some(), "WQ must open the zoom dialog");
 }
 
 #[test]
@@ -2901,10 +2805,8 @@ fn keytip_wvc_() {
 fn keytip_wvf_() {
     let mut h = harness(blank());
     sequence(&mut h, "WVF", false);
-    assert!(h.state().dialog.is_none(), "WVF must not open a dialog");
-    assert!(h.state().message.is_none(), "WVF must not open a message box");
-    assert!(h.state().toast.is_none(), "WVF must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "WVF must not journal");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "WVF must route to its control without an error box");
+    assert_eq!(h.state().keytips.prefix(), None);
 }
 
 #[test]
@@ -3131,7 +3033,7 @@ fn keytip_9_() {
 
 #[test]
 fn generated_test_count_matches_the_table() {
-    const EXPECTED: usize = 412;
+    const EXPECTED: usize = 397;
     assert_eq!(gridcraft_ui_egui::keytips::keytip_table::SEQUENCES.len(), EXPECTED);
 }
 

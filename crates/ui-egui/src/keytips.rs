@@ -14,6 +14,10 @@ pub enum Action {
     /// The target command does not exist yet: the sequence is reserved, its badge shows, and
     /// invoking it is a silent no-op until the command lands (see keytips.json `pending`).
     Pending(&'static str),
+    /// Route the keytip to the matching ribbon control: open its dropdown or run its click
+    /// handler (which carries the right params), instead of firing the engine command with
+    /// empty params.
+    Control(&'static str),
 }
 
 #[derive(Default)]

@@ -57,6 +57,10 @@ pub struct UiState {
     /// Motion in the UI: the selection outline glides to a new selection (View ▸ Animations).
     pub animations: bool,
     pub recent: Vec<String>,
+    /// One-shot keytip request for a ribbon control: set when a keytip action resolves to
+    /// [`keytips::Action::Control`], consumed (and cleared) by the control's render site.
+    #[serde(skip)]
+    pub keytip_invoke: Option<&'static str>,
     /// Interface language. English by default (so tests and headless renders never depend on the
     /// host's locale); the desktop app starts from [`i18n::Language::system`] when `ui.json` has
     /// no usable language (see [`i18n::saved_language`]). An unknown saved value reads as English
@@ -95,6 +99,7 @@ impl Default for UiState {
             status_bar: true,
             animations: true,
             recent: vec![],
+            keytip_invoke: None,
             language: i18n::Language::En,
             interface_scale: 100,
         }
@@ -821,6 +826,9 @@ impl SheetApp {
 
     /// Per-frame logic (control channel, screenshots). Call before `ui`.
     pub fn logic(&mut self, ctx: &egui::Context) {
+        // A keytip control request lives one frame: the ribbon consumes it during `ui`, and
+        // anything that never reached a control (collapsed ribbon, tab switch) is dropped.
+        self.ui.keytip_invoke = None;
         if self.fonts_han.is_some_and(|han| han != theme::HanOrder::of(self.ui.language)) {
             self.fonts_ready = false;
             self.fonts_set = false;
@@ -1022,6 +1030,10 @@ impl SheetApp {
                         self.run_or_alert(id, json!({}));
                     }
                 }
+                // Route to the ribbon control that owns this keytip: it opens its dropdown or
+                // runs its click handler with the right params (the engine command alone would
+                // be missing them).
+                keytips::Action::Control(id) => self.ui.keytip_invoke = Some(id),
             }
         }
     }

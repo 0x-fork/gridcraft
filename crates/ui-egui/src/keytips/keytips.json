@@ -445,10 +445,10 @@
     },
     {
       "seq": "HFC",
-      "kind": "command",
+      "kind": "control",
       "target": "home.fontColor",
       "excel": "Font Color",
-      "note": ""
+      "note": "opens the font-color palette"
     },
     {
       "seq": "HFDC",
@@ -459,15 +459,15 @@
     },
     {
       "seq": "HFDF",
-      "kind": "command",
-      "target": "edit.find",
+      "kind": "dialog",
+      "target": "find",
       "excel": "Find",
       "note": ""
     },
     {
       "seq": "HFDG",
-      "kind": "command",
-      "target": "edit.goTo",
+      "kind": "dialog",
+      "target": "goTo",
       "excel": "Go To",
       "note": ""
     },
@@ -495,10 +495,10 @@
     },
     {
       "seq": "HFDR",
-      "kind": "command",
-      "target": "edit.replace",
+      "kind": "dialog",
+      "target": "find",
       "excel": "Replace",
-      "note": ""
+      "note": "opens Find and Replace"
     },
     {
       "seq": "HFDS",
@@ -509,10 +509,10 @@
     },
     {
       "seq": "HFF",
-      "kind": "command",
+      "kind": "control",
       "target": "home.fontName",
       "excel": "Font Selection",
-      "note": ""
+      "note": "opens the font dropdown"
     },
     {
       "seq": "HFG",
@@ -593,10 +593,10 @@
     },
     {
       "seq": "HFM",
-      "kind": "command",
-      "target": "home.numberFormat",
+      "kind": "dialog",
+      "target": "formatCells",
       "excel": "More Number Formats",
-      "note": "containment(Number Format)"
+      "note": "More Number Formats opens Format Cells"
     },
     {
       "seq": "HFP",
@@ -629,17 +629,17 @@
     },
     {
       "seq": "HFS",
-      "kind": "command",
+      "kind": "control",
       "target": "home.fontSize",
       "excel": "Font Size",
-      "note": ""
+      "note": "opens the font-size dropdown"
     },
     {
       "seq": "HH",
-      "kind": "command",
+      "kind": "control",
       "target": "home.fillColor",
       "excel": "Fill Color",
-      "note": ""
+      "note": "opens the fill-color palette"
     },
     {
       "seq": "HIC",
@@ -800,10 +800,10 @@
     },
     {
       "seq": "HN",
-      "kind": "command",
+      "kind": "control",
       "target": "home.numberFormat",
       "excel": "Number Format",
-      "note": ""
+      "note": "opens the number-format dropdown"
     },
     {
       "seq": "HOA",
@@ -814,8 +814,8 @@
     },
     {
       "seq": "HOD",
-      "kind": "command",
-      "target": "home.columnWidth",
+      "kind": "dialog",
+      "target": "defaultWidth",
       "excel": "Default Column Width",
       "note": "containment(Column Width)"
     },
@@ -828,8 +828,8 @@
     },
     {
       "seq": "HOH",
-      "kind": "command",
-      "target": "home.rowHeight",
+      "kind": "dialog",
+      "target": "rowHeight",
       "excel": "Row Height",
       "note": ""
     },
@@ -842,8 +842,8 @@
     },
     {
       "seq": "HOM",
-      "kind": "command",
-      "target": "sheet.move",
+      "kind": "dialog",
+      "target": "moveSheet",
       "excel": "Move or Copy Sheet",
       "note": ""
     },
@@ -856,8 +856,8 @@
     },
     {
       "seq": "HOR",
-      "kind": "command",
-      "target": "sheet.rename",
+      "kind": "dialog",
+      "target": "renameSheet",
       "excel": "Rename Sheet",
       "note": ""
     },
@@ -912,8 +912,8 @@
     },
     {
       "seq": "HOW",
-      "kind": "command",
-      "target": "home.columnWidth",
+      "kind": "dialog",
+      "target": "columnWidth",
       "excel": "Column Width",
       "note": ""
     },
@@ -1019,122 +1019,17 @@
       "note": "group level:"
     },
     {
-      "seq": "HVA",
-      "kind": "command",
-      "target": "edit.pasteSpecial",
-      "excel": "Paste Values and Number Formatting",
-      "note": "paste variant, params TBD: what=TBD(values+numfmt)"
-    },
-    {
-      "seq": "HVB",
-      "kind": "command",
-      "target": "edit.pasteSpecial",
-      "excel": "Paste No Borders",
-      "note": "paste variant, params TBD: what=TBD(no-borders)"
-    },
-    {
-      "seq": "HVE",
-      "kind": "command",
-      "target": "edit.pasteSpecial",
-      "excel": "Paste Values and Source Formatting",
-      "note": "paste variant, params TBD: what=TBD(values+src-fmt)"
-    },
-    {
-      "seq": "HVF",
-      "kind": "command",
-      "target": "edit.pasteSpecial",
-      "excel": "Paste Formula",
-      "note": "paste-variant TBD"
-    },
-    {
-      "seq": "HVI",
-      "kind": "command",
-      "target": "edit.pasteSpecial",
-      "excel": "Paste Linked Picture",
-      "note": "what=TBD(linked-picture)"
-    },
-    {
-      "seq": "HVK",
-      "kind": "command",
-      "target": "edit.pasteSpecial",
-      "excel": "Paste Keep Source Formatting",
-      "note": "paste variant, params TBD: what=TBD(keep-source)"
-    },
-    {
-      "seq": "HVM",
-      "kind": "command",
-      "target": "edit.pasteSpecial",
-      "excel": "Paste Destination Formatting",
-      "note": "paste variant, params TBD: what=TBD(dest)"
-    },
-    {
-      "seq": "HVN",
-      "kind": "command",
-      "target": "edit.pasteSpecial",
-      "excel": "Paste Link",
-      "note": "paste variant, params TBD: what=TBD(link)"
-    },
-    {
-      "seq": "HVO",
-      "kind": "command",
-      "target": "edit.pasteSpecial",
-      "excel": "Paste Formula and Formatting",
-      "note": "paste variant, params TBD: what=TBD(formula+formatting)"
-    },
-    {
       "seq": "HVP",
       "kind": "command",
-      "target": "edit.paste",
+      "target": "edit.pasteSpecial",
       "excel": "Paste",
       "note": ""
-    },
-    {
-      "seq": "HVR",
-      "kind": "command",
-      "target": "edit.pasteSpecial",
-      "excel": "Paste Formatting",
-      "note": "paste variant, params TBD: what=formats"
-    },
-    {
-      "seq": "HVT",
-      "kind": "command",
-      "target": "edit.pasteSpecial",
-      "excel": "Paste Transpose",
-      "note": "paste variant, params TBD: what=transpose"
-    },
-    {
-      "seq": "HVU",
-      "kind": "command",
-      "target": "edit.pasteSpecial",
-      "excel": "Paste Picture",
-      "note": "what=TBD(picture)"
-    },
-    {
-      "seq": "HVV",
-      "kind": "command",
-      "target": "edit.pasteSpecial",
-      "excel": "Paste Values",
-      "note": "paste variant, params TBD: what=values"
-    },
-    {
-      "seq": "HVW",
-      "kind": "command",
-      "target": "edit.pasteSpecial",
-      "excel": "Paste Keep Source Column Widths",
-      "note": "paste variant, params TBD: what=TBD(col-widths)"
     },
     {
       "seq": "HW",
       "kind": "continue",
       "excel": "Wrap Text Menu",
       "note": "group level: containment(Wrap Text)"
-    },
-    {
-      "seq": "HWS",
-      "kind": "command",
-      "target": "home.shrinkToFit",
-      "excel": "Shrink to Fit",
-      "note": "landed in the catalog; live since T7 probe"
     },
     {
       "seq": "HWW",
@@ -1440,22 +1335,22 @@
     },
     {
       "seq": "NZKSL",
-      "kind": "command",
-      "target": "insert.sparkline",
+      "kind": "dialog",
+      "target": "sparkline",
       "excel": "Line Sparkline",
       "note": ""
     },
     {
       "seq": "NZKSO",
-      "kind": "command",
-      "target": "insert.sparkline",
+      "kind": "dialog",
+      "target": "sparkline",
       "excel": "Column Sparkline",
       "note": ""
     },
     {
       "seq": "NZKSW",
-      "kind": "command",
-      "target": "insert.sparkline",
+      "kind": "dialog",
+      "target": "sparkline",
       "excel": "Win/Loss Sparkline",
       "note": ""
     },
@@ -1867,9 +1762,10 @@
     {
       "seq": "MSP",
       "kind": "command",
-      "target": "edit.pasteSpecial",
+      "target": "formulas.pasteName",
       "excel": "Paste Names",
-      "note": "paste-variant TBD"
+      "note": "reserved until the command lands",
+      "pending": true
     },
     {
       "seq": "MT",
@@ -1934,8 +1830,8 @@
     },
     {
       "seq": "MV",
-      "kind": "command",
-      "target": "formulas.evaluateFormula",
+      "kind": "dialog",
+      "target": "evaluateFormula",
       "excel": "Evaluate Formula",
       "note": ""
     },
@@ -2355,8 +2251,8 @@
     },
     {
       "seq": "AWG",
-      "kind": "command",
-      "target": "data.goalSeek",
+      "kind": "dialog",
+      "target": "goalSeek",
       "excel": "Goal Seek",
       "note": ""
     },
@@ -2572,10 +2468,10 @@
     },
     {
       "seq": "WJ",
-      "kind": "command",
+      "kind": "control",
       "target": "view.zoom",
       "excel": "Zoom To 100%",
-      "note": ""
+      "note": "runs the 100% zoom handler (percent param)"
     },
     {
       "seq": "WL",
@@ -2620,10 +2516,10 @@
     },
     {
       "seq": "WQ",
-      "kind": "command",
-      "target": "view.zoom",
+      "kind": "dialog",
+      "target": "zoom",
       "excel": "Zoom",
-      "note": ""
+      "note": "opens the Zoom dialog"
     },
     {
       "seq": "WR",
@@ -2664,11 +2560,10 @@
     },
     {
       "seq": "WVF",
-      "kind": "command",
+      "kind": "control",
       "target": "view.formulaBar",
-      "pending": true,
       "excel": "Toggle Formula Bar",
-      "note": "Toggle Formula Bar; reserved until the command lands"
+      "note": "toggles the formula bar"
     },
     {
       "seq": "WVH",

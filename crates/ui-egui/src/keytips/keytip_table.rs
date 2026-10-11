@@ -50,7 +50,7 @@ pub fn is_group_level(seq: &str) -> bool {
 
 fn matches_target(action: &Action, target: &str) -> bool {
     match action {
-        Action::Command(id) | Action::Pending(id) => *id == target,
+        Action::Command(id) | Action::Pending(id) | Action::Control(id) => *id == target,
         Action::Dialog(name) => format!("dialog:{name}") == target,
         Action::Tab(_) => false,
     }
@@ -200,7 +200,7 @@ mod tests {
     #[test]
     fn item_letter_is_one_level_deep() {
         assert_eq!(item_letter("HV", "dialog:pasteSpecial"), Some("HVS"));
-        assert_eq!(item_letter("HV", "edit.pasteSpecial"), Some("HVA"));
+        assert_eq!(item_letter("HV", "edit.pasteSpecial"), Some("HVP"));
         assert_eq!(item_letter("H", "dialog:pasteSpecial"), None, "the item badge waits for its group letter");
         assert_eq!(item_letter("HO", "home.autofitColumnWidth"), Some("HOI"));
     }

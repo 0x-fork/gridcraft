@@ -138,7 +138,7 @@ fn parse_and_probe(source: &str) -> Result<(Vec<Entry>, Probe), String> {
                     return Err(format!("{at}: tab target {target:?} is not one of {TABS:?}"));
                 }
             }
-            "command" | "dialog" => {
+            "command" | "dialog" | "control" => {
                 if target.is_empty() {
                     return Err(format!("{at}: {kind} needs a `target`"));
                 }
@@ -148,10 +148,10 @@ fn parse_and_probe(source: &str) -> Result<(Vec<Entry>, Probe), String> {
         }
         // A terminal Finish entry on a strict prefix makes the longer sequence
         // unreachable (the prefix fires and clears first), e.g. HC (Copy) kills HCP.
-        if kind == "command" || kind == "dialog" {
+        if matches!(kind.as_str(), "command" | "dialog" | "control") {
             for cut in 1..seq.len() {
                 let prefix = &seq[..cut];
-                if entries.iter().any(|e| e.seq == prefix && (e.kind == "command" || e.kind == "dialog")) {
+                if entries.iter().any(|e| e.seq == prefix && matches!(e.kind.as_str(), "command" | "dialog" | "control")) {
                     return Err(format!(
                         "{at}: seq {seq:?} is unreachable — {prefix:?} already fires first; the deeper item needs a menu (item-letter), not a trie sequence"
                     ));
@@ -221,6 +221,7 @@ fn render_table(entries: &[Entry]) -> String {
             "command" if e.pending => format!("Entry::Finish(Action::Pending({:?}))", e.target),
             "command" => format!("Entry::Finish(Action::Command({:?}))", e.target),
             "dialog" => format!("Entry::Finish(Action::Dialog({:?}))", e.target),
+            "control" => format!("Entry::Finish(Action::Control({:?}))", e.target),
             "continue" => "Entry::Continue".to_string(),
             // All kinds are validated during parse; anything else cannot occur.
             _ => String::new(),
@@ -289,6 +290,10 @@ fn render_tests(entries: &[Entry], probe: &Probe) -> String {
                 "sequence(&mut h, {seq:?}, false);\n    assert!(h.state().dialog.is_some(), \"{seq} must open the {dialog} dialog\");",
                 seq = e.seq,
                 dialog = e.target,
+            ),
+            "control" => format!(
+                "sequence(&mut h, {seq:?}, false);\n    assert!(h.state().message.is_none() && h.state().toast.is_none(), \"{seq} must route to its control without an error box\");\n    assert_eq!(h.state().keytips.prefix(), None);",
+                seq = e.seq,
             ),
             "continue" => format!(
                 "sequence(&mut h, {seq:?}, false);\n    assert_eq!(h.state().keytips.prefix(), Some({seq:?}), \"{seq} must stay armed waiting for more input\");",

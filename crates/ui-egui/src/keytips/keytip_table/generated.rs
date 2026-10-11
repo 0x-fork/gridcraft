@@ -72,16 +72,16 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("HEF", Entry::Finish(Action::Command("edit.clearFormats"))), // Excel: Clear Formats
     ("HEL", Entry::Finish(Action::Command("edit.clearHyperlinks"))), // Excel: Clear Hyperlinks
     ("HEM", Entry::Finish(Action::Command("edit.clearComments"))), // Excel: Clear Comments and Notes; containment(Clear Comments and Notes)
-    ("HFC", Entry::Finish(Action::Command("home.fontColor"))),  // Excel: Font Color
+    ("HFC", Entry::Finish(Action::Control("home.fontColor"))),  // Excel: Font Color; opens the font-color palette
     ("HFDC", Entry::Finish(Action::Command("home.conditionalFormat"))), // Excel: Find Conditional Formatting; containment(Conditional Formatting)
-    ("HFDF", Entry::Finish(Action::Command("edit.find"))),      // Excel: Find
-    ("HFDG", Entry::Finish(Action::Command("edit.goTo"))),      // Excel: Go To
+    ("HFDF", Entry::Finish(Action::Dialog("find"))),            // Excel: Find
+    ("HFDG", Entry::Finish(Action::Dialog("goTo"))),            // Excel: Go To
     ("HFDM", Entry::Finish(Action::Command("edit.find"))),      // Excel: Find Notes; containment(Find)
     ("HFDO", Entry::Finish(Action::Pending("home.selectObjects"))), // pending; Excel: Select Objects; Select Objects; reserved until the command lands
     ("HFDP", Entry::Finish(Action::Command("arrange.selectionPane"))), // Excel: Selection Pane
-    ("HFDR", Entry::Finish(Action::Command("edit.replace"))),       // Excel: Replace
+    ("HFDR", Entry::Finish(Action::Dialog("find"))),                // Excel: Replace; opens Find and Replace
     ("HFDS", Entry::Finish(Action::Command("edit.goToSpecial"))),   // Excel: Go To Special
-    ("HFF", Entry::Finish(Action::Command("home.fontName"))),       // Excel: Font Selection
+    ("HFF", Entry::Finish(Action::Control("home.fontName"))),       // Excel: Font Selection; opens the font dropdown
     ("HFG", Entry::Finish(Action::Command("home.increaseFontSize"))), // Excel: Increase Font Size
     ("HFI", Entry::Continue),                                       // Excel: Fill; group level: containment(Fill Up)
     ("HFIA", Entry::Finish(Action::Pending("home.fillAcrossWorksheets"))), // pending; Excel: Fill Across Worksheets; Fill Across Worksheets; reserved until the command lands
@@ -93,13 +93,13 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("HFIS", Entry::Finish(Action::Command("edit.fillSeries"))),           // Excel: Fill Series; containment(Series)
     ("HFIU", Entry::Finish(Action::Command("edit.fillUp"))),               // Excel: Fill Up
     ("HFK", Entry::Finish(Action::Command("home.decreaseFontSize"))),      // Excel: Decrease Font Size
-    ("HFM", Entry::Finish(Action::Command("home.numberFormat"))),          // Excel: More Number Formats; containment(Number Format)
+    ("HFM", Entry::Finish(Action::Dialog("formatCells"))),                 // Excel: More Number Formats; More Number Formats opens Format Cells
     ("HFP", Entry::Finish(Action::Command("edit.formatPainter"))),         // Excel: Format Painter
     ("HFQ", Entry::Continue),                                              // Excel: Orientation Menu; group level: containment(Orientation)
     ("HFQL", Entry::Finish(Action::Pending("home.angleClockwise"))), // pending; Excel: Angle Clockwise; Angle Clockwise; reserved until the command lands
     ("HFQO", Entry::Finish(Action::Pending("home.angleCounterclockwise"))), // pending; Excel: Angle Counterclockwise; Angle Counterclockwise; reserved until the command lands
-    ("HFS", Entry::Finish(Action::Command("home.fontSize"))),               // Excel: Font Size
-    ("HH", Entry::Finish(Action::Command("home.fillColor"))),               // Excel: Fill Color
+    ("HFS", Entry::Finish(Action::Control("home.fontSize"))),               // Excel: Font Size; opens the font-size dropdown
+    ("HH", Entry::Finish(Action::Control("home.fillColor"))),               // Excel: Fill Color; opens the fill-color palette
     ("HIC", Entry::Finish(Action::Command("home.insertColumns"))),          // Excel: Insert Columns; Insert Columns
     ("HIE", Entry::Finish(Action::Command("home.insertCells"))),            // Excel: Insert Copied Cells; Insert Cells (copied cells TBD)
     ("HII", Entry::Finish(Action::Command("home.insertCells"))),            // Excel: Insert Cells
@@ -123,15 +123,15 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("HMC", Entry::Finish(Action::Command("home.mergeCenter"))), // Excel: Merge & Center
     ("HMM", Entry::Finish(Action::Command("home.mergeCells"))), // Excel: Merge Cells
     ("HMU", Entry::Finish(Action::Command("home.unmergeCells"))), // Excel: Unmerge Cells
-    ("HN", Entry::Finish(Action::Command("home.numberFormat"))), // Excel: Number Format
+    ("HN", Entry::Finish(Action::Control("home.numberFormat"))), // Excel: Number Format; opens the number-format dropdown
     ("HOA", Entry::Finish(Action::Command("home.autofitRowHeight"))), // Excel: AutoFit Row Height
-    ("HOD", Entry::Finish(Action::Command("home.columnWidth"))), // Excel: Default Column Width; containment(Column Width)
+    ("HOD", Entry::Finish(Action::Dialog("defaultWidth"))), // Excel: Default Column Width; containment(Column Width)
     ("HOE", Entry::Finish(Action::Command("home.formatCells"))), // Excel: Format Cells
-    ("HOH", Entry::Finish(Action::Command("home.rowHeight"))), // Excel: Row Height
+    ("HOH", Entry::Finish(Action::Dialog("rowHeight"))), // Excel: Row Height
     ("HOL", Entry::Finish(Action::Command("home.lockCell"))), // Excel: Lock Cell; containment(Lock Cell)
-    ("HOM", Entry::Finish(Action::Command("sheet.move"))), // Excel: Move or Copy Sheet
+    ("HOM", Entry::Finish(Action::Dialog("moveSheet"))), // Excel: Move or Copy Sheet
     ("HOP", Entry::Finish(Action::Command("review.protectSheet"))), // Excel: Protect Sheet
-    ("HOR", Entry::Finish(Action::Command("sheet.rename"))), // Excel: Rename Sheet
+    ("HOR", Entry::Finish(Action::Dialog("renameSheet"))), // Excel: Rename Sheet
     ("HOT", Entry::Finish(Action::Command("sheet.tabColor"))), // Excel: Tab Color
     ("HOUC", Entry::Finish(Action::Command("home.hideColumns"))), // Excel: Hide Columns
     ("HOUH", Entry::Finish(Action::Command("sheet.unhide"))), // Excel: Unhide Sheet
@@ -139,7 +139,7 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("HOUO", Entry::Finish(Action::Command("home.unhideRows"))), // Excel: Unhide Rows
     ("HOUR", Entry::Finish(Action::Command("home.hideRows"))), // Excel: Hide Rows
     ("HOUS", Entry::Finish(Action::Command("sheet.hide"))), // Excel: Hide Sheet
-    ("HOW", Entry::Finish(Action::Command("home.columnWidth"))), // Excel: Column Width
+    ("HOW", Entry::Finish(Action::Dialog("columnWidth"))), // Excel: Column Width
     ("HP", Entry::Finish(Action::Command("home.percent"))), // Excel: Excel: Percentage Style
     ("HSC", Entry::Finish(Action::Command("data.clearFilter"))), // Excel: Clear Filter
     ("HSF", Entry::Finish(Action::Command("data.filter"))), // Excel: Filter
@@ -155,54 +155,39 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("HUI", Entry::Finish(Action::Command("formulas.autoSum"))), // Excel: Auto Min; AutoSum: Min (variant TBD)
     ("HUM", Entry::Finish(Action::Command("formulas.autoSum"))), // Excel: Auto Max; AutoSum: Max (variant TBD)
     ("HV", Entry::Continue),  // Excel: Paste; group level:
-    ("HVA", Entry::Finish(Action::Command("edit.pasteSpecial"))), // Excel: Paste Values and Number Formatting; paste variant, params TBD: what=TBD(values+numfmt)
-    ("HVB", Entry::Finish(Action::Command("edit.pasteSpecial"))), // Excel: Paste No Borders; paste variant, params TBD: what=TBD(no-borders)
-    ("HVE", Entry::Finish(Action::Command("edit.pasteSpecial"))), // Excel: Paste Values and Source Formatting; paste variant, params TBD: what=TBD(values+src-fmt)
-    ("HVF", Entry::Finish(Action::Command("edit.pasteSpecial"))), // Excel: Paste Formula; paste-variant TBD
-    ("HVI", Entry::Finish(Action::Command("edit.pasteSpecial"))), // Excel: Paste Linked Picture; what=TBD(linked-picture)
-    ("HVK", Entry::Finish(Action::Command("edit.pasteSpecial"))), // Excel: Paste Keep Source Formatting; paste variant, params TBD: what=TBD(keep-source)
-    ("HVM", Entry::Finish(Action::Command("edit.pasteSpecial"))), // Excel: Paste Destination Formatting; paste variant, params TBD: what=TBD(dest)
-    ("HVN", Entry::Finish(Action::Command("edit.pasteSpecial"))), // Excel: Paste Link; paste variant, params TBD: what=TBD(link)
-    ("HVO", Entry::Finish(Action::Command("edit.pasteSpecial"))), // Excel: Paste Formula and Formatting; paste variant, params TBD: what=TBD(formula+formatting)
-    ("HVP", Entry::Finish(Action::Command("edit.paste"))),        // Excel: Paste
-    ("HVR", Entry::Finish(Action::Command("edit.pasteSpecial"))), // Excel: Paste Formatting; paste variant, params TBD: what=formats
-    ("HVT", Entry::Finish(Action::Command("edit.pasteSpecial"))), // Excel: Paste Transpose; paste variant, params TBD: what=transpose
-    ("HVU", Entry::Finish(Action::Command("edit.pasteSpecial"))), // Excel: Paste Picture; what=TBD(picture)
-    ("HVV", Entry::Finish(Action::Command("edit.pasteSpecial"))), // Excel: Paste Values; paste variant, params TBD: what=values
-    ("HVW", Entry::Finish(Action::Command("edit.pasteSpecial"))), // Excel: Paste Keep Source Column Widths; paste variant, params TBD: what=TBD(col-widths)
-    ("HW", Entry::Continue),                                      // Excel: Wrap Text Menu; group level: containment(Wrap Text)
-    ("HWS", Entry::Finish(Action::Command("home.shrinkToFit"))),  // Excel: Shrink to Fit; landed in the catalog; live since T7 probe
-    ("HWW", Entry::Finish(Action::Command("home.wrapText"))),     // Excel: Wrap Text
-    ("HX", Entry::Finish(Action::Command("edit.cut"))),           // Excel: Cut
-    ("NC1", Entry::Finish(Action::Command("insert.chart"))),      // Excel: Column Chart; Column chart (kind TBD)
+    ("HVP", Entry::Finish(Action::Command("edit.pasteSpecial"))), // Excel: Paste
+    ("HW", Entry::Continue),  // Excel: Wrap Text Menu; group level: containment(Wrap Text)
+    ("HWW", Entry::Finish(Action::Command("home.wrapText"))), // Excel: Wrap Text
+    ("HX", Entry::Finish(Action::Command("edit.cut"))), // Excel: Cut
+    ("NC1", Entry::Finish(Action::Command("insert.chart"))), // Excel: Column Chart; Column chart (kind TBD)
     ("NC2", Entry::Finish(Action::Command("review.newComment"))), // Excel: New Comment
     ("NCM", Entry::Finish(Action::Command("review.newComment"))), // Excel: Excel: New Comment (modern)
-    ("NCB", Entry::Finish(Action::Command("insert.checkbox"))),   // Excel: Checkbox
-    ("ND", Entry::Finish(Action::Command("insert.chart"))),       // Excel: Scatter Chart; Scatter (kind TBD)
-    ("NE", Entry::Finish(Action::Pending("insert.equation"))),    // pending; Excel: Equations; Equations; reserved until the command lands
-    ("NF", Entry::Continue),                                      // Excel: Online Pictures; group level: containment(Picture)
-    ("NFP", Entry::Continue),                                     // Excel: From Picture Menu; group level: containment(Picture)
-    ("NFPF", Entry::Finish(Action::Command("insert.picture"))),   // Excel: Picture From File; containment(Picture)
+    ("NCB", Entry::Finish(Action::Command("insert.checkbox"))), // Excel: Checkbox
+    ("ND", Entry::Finish(Action::Command("insert.chart"))), // Excel: Scatter Chart; Scatter (kind TBD)
+    ("NE", Entry::Finish(Action::Pending("insert.equation"))), // pending; Excel: Equations; Equations; reserved until the command lands
+    ("NF", Entry::Continue),  // Excel: Online Pictures; group level: containment(Picture)
+    ("NFP", Entry::Continue), // Excel: From Picture Menu; group level: containment(Picture)
+    ("NFPF", Entry::Finish(Action::Command("insert.picture"))), // Excel: Picture From File; containment(Picture)
     ("NH1", Entry::Finish(Action::Command("pageLayout.headerFooter"))), // Excel: Header & Footer
     ("NHF", Entry::Finish(Action::Command("pageLayout.headerFooter"))), // Excel: Header & Footer
-    ("NHI", Entry::Finish(Action::Command("insert.chart"))),      // Excel: Hierarchy Chart; Hierarchy (kind TBD)
-    ("NI1", Entry::Finish(Action::Command("insert.chart"))),      // Excel: Waterfall Chart; Waterfall (kind TBD)
-    ("NI2", Entry::Finish(Action::Command("insert.link"))),       // Excel: Link
-    ("NJ", Entry::Finish(Action::Pending("insert.object"))),      // pending; Excel: Object; insert.object missing; reserved until the command lands
-    ("NM1T", Entry::Finish(Action::Command("insert.picture"))),   // Excel: SmartArt Picture; containment(Picture)
-    ("NM2", Entry::Finish(Action::Command("insert.chart"))),      // Excel: Map Chart; Map (kind TBD)
-    ("NN1", Entry::Finish(Action::Command("insert.chart"))),      // Excel: Line Chart; Line chart (kind TBD)
-    ("NNS", Entry::Finish(Action::Command("insert.icons"))),      // Excel: Icons
-    ("NP", Entry::Continue),                                      // Excel: Picture; group level:
-    ("NPB", Entry::Finish(Action::Command("insert.picture"))),    // Excel: Picture from File; containment(Picture)
-    ("NPF", Entry::Finish(Action::Command("insert.picture"))),    // Excel: Place in Cell; Picture in cell (source TBD)
-    ("NPI", Entry::Finish(Action::Command("insert.picture"))),    // Excel: Place in Cell Menu; Picture in cell (source TBD)
-    ("NPO", Entry::Finish(Action::Command("insert.picture"))),    // Excel: Place over Cells Menu; Picture over cells (source TBD)
-    ("NQ", Entry::Finish(Action::Command("insert.chart"))),       // Excel: Pie Chart; Pie (kind TBD)
+    ("NHI", Entry::Finish(Action::Command("insert.chart"))), // Excel: Hierarchy Chart; Hierarchy (kind TBD)
+    ("NI1", Entry::Finish(Action::Command("insert.chart"))), // Excel: Waterfall Chart; Waterfall (kind TBD)
+    ("NI2", Entry::Finish(Action::Command("insert.link"))), // Excel: Link
+    ("NJ", Entry::Finish(Action::Pending("insert.object"))), // pending; Excel: Object; insert.object missing; reserved until the command lands
+    ("NM1T", Entry::Finish(Action::Command("insert.picture"))), // Excel: SmartArt Picture; containment(Picture)
+    ("NM2", Entry::Finish(Action::Command("insert.chart"))), // Excel: Map Chart; Map (kind TBD)
+    ("NN1", Entry::Finish(Action::Command("insert.chart"))), // Excel: Line Chart; Line chart (kind TBD)
+    ("NNS", Entry::Finish(Action::Command("insert.icons"))), // Excel: Icons
+    ("NP", Entry::Continue),  // Excel: Picture; group level:
+    ("NPB", Entry::Finish(Action::Command("insert.picture"))), // Excel: Picture from File; containment(Picture)
+    ("NPF", Entry::Finish(Action::Command("insert.picture"))), // Excel: Place in Cell; Picture in cell (source TBD)
+    ("NPI", Entry::Finish(Action::Command("insert.picture"))), // Excel: Place in Cell Menu; Picture in cell (source TBD)
+    ("NPO", Entry::Finish(Action::Command("insert.picture"))), // Excel: Place over Cells Menu; Picture over cells (source TBD)
+    ("NQ", Entry::Finish(Action::Command("insert.chart"))), // Excel: Pie Chart; Pie (kind TBD)
     ("NR", Entry::Finish(Action::Command("insert.recommendedCharts"))), // Excel: Recommended Charts
-    ("NSA", Entry::Finish(Action::Command("insert.chart"))),      // Excel: Statistical Chart; Statistical chart (kind TBD)
+    ("NSA", Entry::Finish(Action::Command("insert.chart"))), // Excel: Statistical Chart; Statistical chart (kind TBD)
     ("NSC", Entry::Finish(Action::Pending("insert.screenshot"))), // pending; Excel: Screenshot Menu; Screenshot; reserved until the command lands
-    ("NSD", Entry::Finish(Action::Command("insert.chart"))),      // Excel: Combo Chart; Combo (kind TBD)
+    ("NSD", Entry::Finish(Action::Command("insert.chart"))), // Excel: Combo Chart; Combo (kind TBD)
     ("NSF", Entry::Finish(Action::Pending("insert.slicer"))), // pending; Excel: Slicer; insert.slicer missing (gap #8); reserved until the command lands
     ("NSH", Entry::Finish(Action::Command("insert.shape"))),  // Excel: Shapes
     ("NSP", Entry::Finish(Action::Command("insert.recommendedPivotTables"))), // Excel: Recommended PivotTables
@@ -215,9 +200,9 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("NW", Entry::Finish(Action::Pending("insert.wordArt"))),   // pending; Excel: WordArt; WordArt; reserved until the command lands
     ("NX", Entry::Finish(Action::Command("insert.textBox"))),   // Excel: Text Box
     ("NZK", Entry::Continue),                                   // Excel: Sparklines Menu; group level:
-    ("NZKSL", Entry::Finish(Action::Command("insert.sparkline"))), // Excel: Line Sparkline
-    ("NZKSO", Entry::Finish(Action::Command("insert.sparkline"))), // Excel: Column Sparkline
-    ("NZKSW", Entry::Finish(Action::Command("insert.sparkline"))), // Excel: Win/Loss Sparkline
+    ("NZKSL", Entry::Finish(Action::Dialog("sparkline"))),      // Excel: Line Sparkline
+    ("NZKSO", Entry::Finish(Action::Dialog("sparkline"))),      // Excel: Column Sparkline
+    ("NZKSW", Entry::Finish(Action::Dialog("sparkline"))),      // Excel: Win/Loss Sparkline
     ("NZTX", Entry::Finish(Action::Command("insert.textBox"))), // Excel: Text Box
     ("NZT", Entry::Finish(Action::Command("insert.textBox"))),  // Excel: Excel: Text Box (modern)
     ("PAE", Entry::Finish(Action::Command("arrange.sendBackward"))), // Excel: Send Backward
@@ -278,7 +263,7 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("MR", Entry::Continue),                                             // Excel: Recently Used Menu; group level: containment(Recently Used)
     ("MRF", Entry::Finish(Action::Command("formulas.insertFunction"))),  // Excel: Recently Used - Insert Function; containment(Insert Function)
     ("MS", Entry::Continue),                                             // Excel: Use in Formula Menu; group level: containment(Use in Formula)
-    ("MSP", Entry::Finish(Action::Command("edit.pasteSpecial"))),        // Excel: Paste Names; paste-variant TBD
+    ("MSP", Entry::Finish(Action::Pending("formulas.pasteName"))),       // pending; Excel: Paste Names; reserved until the command lands
     ("MT", Entry::Continue),                                             // Excel: Text Menu; group level: containment(Text)
     ("MTF", Entry::Finish(Action::Command("formulas.insertFunction"))),  // Excel: Text - Insert Function; containment(Insert Function)
     ("MU", Entry::Continue),                                             // Excel: AutoSum Menu; group level:
@@ -288,7 +273,7 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("MUI", Entry::Finish(Action::Command("formulas.autoSum"))),         // Excel: Min; AutoSum: Min (variant TBD)
     ("MUM", Entry::Finish(Action::Command("formulas.autoSum"))),         // Excel: Max; AutoSum: Max (variant TBD)
     ("MUS", Entry::Finish(Action::Command("formulas.autoSum"))),         // Excel: Sum
-    ("MV", Entry::Finish(Action::Command("formulas.evaluateFormula"))),  // Excel: Evaluate Formula
+    ("MV", Entry::Finish(Action::Dialog("evaluateFormula"))),            // Excel: Evaluate Formula
     ("MW", Entry::Finish(Action::Command("formulas.watchWindow"))),      // Excel: Watch Window
     ("MX", Entry::Continue), // Excel: Calculation Options Menu; group level: containment(Calculation Options)
     ("MXA", Entry::Finish(Action::Command("formulas.calculationOptions"))), // Excel: Automatic Calculation; Calculation options: Automatic
@@ -347,7 +332,7 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("AVR", Entry::Finish(Action::Pending("data.clearValidationCircles"))), // pending; Excel: Clear Validation Circles; reserved until the command lands
     ("AVV", Entry::Finish(Action::Command("data.validation"))),             // Excel: Data Validation
     ("AW", Entry::Continue),                                                // group: group: What-If (goalSeek/scenarioManager/dataTable)
-    ("AWG", Entry::Finish(Action::Command("data.goalSeek"))),               // Excel: Goal Seek
+    ("AWG", Entry::Finish(Action::Dialog("goalSeek"))),                     // Excel: Goal Seek
     ("AWS", Entry::Finish(Action::Command("data.scenarioManager"))),        // Excel: Scenario Manager
     ("AWT", Entry::Finish(Action::Command("data.dataTable"))),              // Excel: Data Table
     ("AX", Entry::Finish(Action::Pending("data.existingConnections"))), // pending; Excel: Existing Connections; gap #12; reserved until the command lands
@@ -377,21 +362,21 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("WG", Entry::Finish(Action::Command("view.zoomToSelection"))),   // Excel: Zoom To Selection
     ("WH", Entry::Finish(Action::Command("view.hideWindow"))),        // Excel: Hide Window
     ("WI", Entry::Finish(Action::Command("view.pageBreakPreview"))),  // Excel: Page Break Preview
-    ("WJ", Entry::Finish(Action::Command("view.zoom"))),              // Excel: Zoom To 100%
+    ("WJ", Entry::Finish(Action::Control("view.zoom"))),              // Excel: Zoom To 100%; runs the 100% zoom handler (percent param)
     ("WL", Entry::Finish(Action::Command("view.normal"))),            // Excel: Normal View; containment(Normal)
     ("WM", Entry::Continue),                                          // Excel: Macros Menu; group level: containment(Macros)
     ("WMR", Entry::Finish(Action::Command("view.macros"))),           // Excel: Record Macro; Record Macro (macros menu)
     ("WMV", Entry::Finish(Action::Command("view.macros"))),           // Excel: View Macros; containment(Macros)
     ("WN", Entry::Finish(Action::Command("view.newWindow"))),         // Excel: New Window
     ("WP", Entry::Finish(Action::Command("view.pageLayout"))),        // Excel: Page Layout View
-    ("WQ", Entry::Finish(Action::Command("view.zoom"))),              // Excel: Zoom
+    ("WQ", Entry::Finish(Action::Dialog("zoom"))),                    // Excel: Zoom; opens the Zoom dialog
     ("WR", Entry::Finish(Action::Command("view.ruler"))),             // Excel: Ruler
     ("WS", Entry::Finish(Action::Command("view.split"))),             // Excel: Split
     ("WT", Entry::Finish(Action::Pending("view.resetWindowPosition"))), // pending; Excel: Reset Window Position; reserved until the command lands
     ("WU", Entry::Finish(Action::Command("view.unhideWindow"))),      // Excel: Unhide Window
     ("WVC", Entry::Finish(Action::Pending("view.focusCell"))),        // pending; Excel: Focus Cell Menu; Focus Cell; reserved until the command lands
-    ("WVF", Entry::Finish(Action::Pending("view.formulaBar"))), // pending; Excel: Toggle Formula Bar; Toggle Formula Bar; reserved until the command lands
-    ("WVH", Entry::Finish(Action::Command("view.headings"))),   // Excel: Toggle Headings; containment(Headings)
+    ("WVF", Entry::Finish(Action::Control("view.formulaBar"))),       // Excel: Toggle Formula Bar; toggles the formula bar
+    ("WVH", Entry::Finish(Action::Command("view.headings"))),         // Excel: Toggle Headings; containment(Headings)
     ("WVL", Entry::Finish(Action::Pending("view.synchronousScrolling"))), // pending; Excel: Synchronous Scrolling; Synchronous Scrolling; reserved until the command lands
     ("WVN", Entry::Finish(Action::Pending("view.navigation"))), // pending; Excel: Navigation; Navigation pane; reserved until the command lands
     ("WVR", Entry::Finish(Action::Command("view.ruler"))),      // Excel: Ruler

@@ -343,6 +343,21 @@ fn anchor_keytip(app: &SheetApp, ui: &Ui, response: &egui::Response, targets: &[
     }
 }
 
+/// Consume a one-shot keytip request for control `id` (set by `Action::Control`).
+fn invoke(app: &mut SheetApp, id: &str) -> bool {
+    if app.ui.keytip_invoke == Some(id) {
+        app.ui.keytip_invoke = None;
+        true
+    } else {
+        false
+    }
+}
+
+/// Force-open command for a popup: either a keytip invoke (open it) or a click (toggle).
+fn popup_command(forced: bool, clicked: bool) -> Option<egui::SetOpenCommand> {
+    if forced { Some(egui::SetOpenCommand::Bool(true)) } else { clicked.then_some(egui::SetOpenCommand::Toggle) }
+}
+
 fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[(&str, &str, serde_json::Value)]) {
     for (label, id, p) in items {
         if *label == "-" {
@@ -534,7 +549,8 @@ fn home(app: &mut SheetApp, ui: &mut Ui) {
             if f {
                 act(app, "home.fillColor", json!({"color": fill}));
             }
-            egui::Popup::menu(&fa).show(|ui| {
+            let forced = invoke(app, "home.fillColor");
+            egui::Popup::menu(&fa).open_memory(popup_command(forced, fa.clicked())).show(|ui| {
                 if let Some(c) = color_palette(ui, &theme_colors(app), "No Fill") {
                     if c != "none" {
                         app.grid.last_fill = c.clone();
@@ -550,7 +566,8 @@ fn home(app: &mut SheetApp, ui: &mut Ui) {
             if c {
                 act(app, "home.fontColor", json!({"color": fc}));
             }
-            egui::Popup::menu(&ca).show(|ui| {
+            let forced = invoke(app, "home.fontColor");
+            egui::Popup::menu(&ca).open_memory(popup_command(forced, ca.clicked())).show(|ui| {
                 if let Some(c) = color_palette(ui, &theme_colors(app), "Automatic") {
                     if c != "none" {
                         app.grid.last_font_color = c.clone();
@@ -929,16 +946,15 @@ fn home(app: &mut SheetApp, ui: &mut Ui) {
 fn font_combo(app: &mut SheetApp, ui: &mut Ui, st: &Style) {
     let mut name = st.font.name.clone();
     let before = name.clone();
-    let resp = egui::ComboBox::from_id_salt("font_name").width(150.0).selected_text(egui::RichText::new(&name).font(theme::ui_font(12.5))).show_ui(
-        ui,
-        |ui| {
-            for f in FONTS {
-                let fam = theme::cell_family(f, false, false);
-                ui.selectable_value(&mut name, f.to_string(), egui::RichText::new(*f).font(egui::FontId::new(14.0, fam)));
-            }
-        },
-    );
-    control_keytip(app, ui, &resp.response, "home.fontName");
+    let resp = ui.add_sized([150.0, 24.0], egui::Button::new(egui::RichText::new(&name).font(theme::ui_font(12.5))));
+    control_keytip(app, ui, &resp, "home.fontName");
+    let forced = invoke(app, "home.fontName");
+    egui::Popup::menu(&resp).open_memory(popup_command(forced, resp.clicked())).show(|ui| {
+        for f in FONTS {
+            let fam = theme::cell_family(f, false, false);
+            ui.selectable_value(&mut name, f.to_string(), egui::RichText::new(*f).font(egui::FontId::new(14.0, fam)));
+        }
+    });
     if name != before {
         act(app, "home.fontName", json!({"name": name}));
     }
@@ -968,15 +984,14 @@ fn size_combo(app: &mut SheetApp, ui: &mut Ui, st: &Style) {
     let mut size = st.font.size;
     let before = size;
     let label = if size.fract() == 0.0 { format!("{}", size as i32) } else { format!("{size}") };
-    let resp = egui::ComboBox::from_id_salt("font_size").width(52.0).selected_text(egui::RichText::new(label).font(theme::ui_font(12.5))).show_ui(
-        ui,
-        |ui| {
-            for s in [8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 36.0, 48.0, 72.0] {
-                ui.selectable_value(&mut size, s, format!("{}", s as i32));
-            }
-        },
-    );
-    control_keytip(app, ui, &resp.response, "home.fontSize");
+    let resp = ui.add_sized([52.0, 24.0], egui::Button::new(egui::RichText::new(label).font(theme::ui_font(12.5))));
+    control_keytip(app, ui, &resp, "home.fontSize");
+    let forced = invoke(app, "home.fontSize");
+    egui::Popup::menu(&resp).open_memory(popup_command(forced, resp.clicked())).show(|ui| {
+        for s in [8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 36.0, 48.0, 72.0] {
+            ui.selectable_value(&mut size, s, format!("{}", s as i32));
+        }
+    });
     if size != before {
         act(app, "home.fontSize", json!({"size": size}));
     }
@@ -989,26 +1004,24 @@ fn number_combo(app: &mut SheetApp, ui: &mut Ui, st: &Style) {
     let lang = app.ui.language;
     let sample = app.session.active().and_then(|d| d.wb.active().map(|sh| sh.value(d.selection.active))).unwrap_or_default();
     let mut picked: Option<&str> = None;
-    let resp = egui::ComboBox::from_id_salt("number_format")
-        .width(150.0)
-        .selected_text(egui::RichText::new(lang.tr(&current)).font(theme::ui_font(12.5)))
-        .show_ui(ui, |ui| {
-            for name in
-                ["General", "Number", "Currency", "Accounting", "Short Date", "Long Date", "Time", "Percentage", "Fraction", "Scientific", "Text"]
-            {
-                let code = gridcraft_engine::cmd::format::format_code_for(name);
-                let preview = app.session.active().map(|d| gridcraft_engine::display::format(&sample, code, &d.wb).text).unwrap_or_default();
-                let r = ui.add(egui::Button::selectable(current == name, format!("{:<12}   {preview}", lang.tr(name))).min_size(vec2(240.0, 22.0)));
-                if r.clicked() {
-                    picked = Some(name);
-                }
+    let resp = ui.add_sized([150.0, 24.0], egui::Button::new(egui::RichText::new(lang.tr(&current)).font(theme::ui_font(12.5))));
+    control_keytip(app, ui, &resp, "home.numberFormat");
+    let forced = invoke(app, "home.numberFormat");
+    egui::Popup::menu(&resp).open_memory(popup_command(forced, resp.clicked())).show(|ui| {
+        for name in ["General", "Number", "Currency", "Accounting", "Short Date", "Long Date", "Time", "Percentage", "Fraction", "Scientific", "Text"]
+        {
+            let code = gridcraft_engine::cmd::format::format_code_for(name);
+            let preview = app.session.active().map(|d| gridcraft_engine::display::format(&sample, code, &d.wb).text).unwrap_or_default();
+            let r = ui.add(egui::Button::selectable(current == name, format!("{:<12}   {preview}", lang.tr(name))).min_size(vec2(240.0, 22.0)));
+            if r.clicked() {
+                picked = Some(name);
             }
-            ui.separator();
-            if ui.button(lang.tr("More Number Formats…")).clicked() {
-                picked = Some("__more");
-            }
-        });
-    anchor_keytip(app, ui, &resp.response, &["home.numberFormat"]);
+        }
+        ui.separator();
+        if ui.button(lang.tr("More Number Formats…")).clicked() {
+            picked = Some("__more");
+        }
+    });
     match picked {
         Some("__more") => app.open_dialog("formatCells", json!({"tab": "Number"})),
         Some(n) => act(app, "home.numberFormat", json!({"format": n})),
@@ -1657,7 +1670,7 @@ fn formulas(app: &mut SheetApp, ui: &mut Ui) {
             app.open_dialog("defineName", json!({}));
         }
         let use_in = small_button(ui, Icon::Function, "Use in Formula", "Use in Formula", true);
-        anchor_keytip(app, ui, &use_in, &["edit.pasteSpecial"]);
+        anchor_keytip(app, ui, &use_in, &["formulas.useInFormula"]);
         egui::Popup::menu(&use_in).show(|ui| {
             let names: Vec<String> = app.session.active().map(|d| d.wb.names.iter().map(|n| n.name.clone()).collect()).unwrap_or_default();
             for n in names {
@@ -1965,7 +1978,9 @@ fn view(app: &mut SheetApp, ui: &mut Ui) {
         (Icon::PageBreak, "Page Break\nPreview", "view.pageBreakPreview"),
         (Icon::PageLayout, "Page\nLayout", "view.pageLayout"),
     ] {
-        if big_button(ui, icon, label, label, false).clicked() {
+        let __k = big_button(ui, icon, label, label, false);
+        control_keytip(app, ui, &__k, cmd);
+        if __k.clicked() {
             act(app, cmd, json!({}));
         }
     }
@@ -1977,19 +1992,27 @@ fn view(app: &mut SheetApp, ui: &mut Ui) {
     ui.vertical(|ui| {
         // Rulers exist only in Page Layout view.
         let mut ruler = !app.session.hide_ruler;
-        if ui.add_enabled(page_layout, egui::Checkbox::new(&mut ruler, lang.tr("Ruler"))).changed() {
+        let ruler_resp = ui.add_enabled(page_layout, egui::Checkbox::new(&mut ruler, lang.tr("Ruler")));
+        control_keytip(app, ui, &ruler_resp, "view.ruler");
+        if ruler_resp.changed() {
             act(app, "view.ruler", json!({"on": ruler}));
         }
         let mut fb = app.session.prefs.formula_bar;
-        if ui.checkbox(&mut fb, lang.tr("Formula Bar")).changed() {
-            act(app, "view.formulaBar", json!({"on": fb}));
+        let resp = ui.checkbox(&mut fb, lang.tr("Formula Bar"));
+        control_keytip(app, ui, &resp, "view.formulaBar");
+        if resp.changed() || invoke(app, "view.formulaBar") {
+            act(app, "view.formulaBar", json!({"on": !fb}));
         }
         let mut g = s.0;
-        if ui.checkbox(&mut g, lang.tr("Gridlines")).changed() {
+        let resp = ui.checkbox(&mut g, lang.tr("Gridlines"));
+        control_keytip(app, ui, &resp, "view.gridlines");
+        if resp.changed() {
             act(app, "view.gridlines", json!({"on": g}));
         }
         let mut h = s.1;
-        if ui.checkbox(&mut h, lang.tr("Headings")).changed() {
+        let resp = ui.checkbox(&mut h, lang.tr("Headings"));
+        control_keytip(app, ui, &resp, "view.headings");
+        if resp.changed() {
             act(app, "view.headings", json!({"on": h}));
         }
     });
@@ -2001,7 +2024,7 @@ fn view(app: &mut SheetApp, ui: &mut Ui) {
     }
     let __k = big_button(ui, Icon::Search, "100%", "Zoom to 100%", false);
     control_keytip(app, ui, &__k, "view.zoom");
-    if __k.clicked() {
+    if __k.clicked() || invoke(app, "view.zoom") {
         act(app, "view.zoom", json!({"percent": 100}));
     }
     let __k = big_button(ui, Icon::Zoom, "Zoom to\nSelection", "Zoom to Selection", false);
