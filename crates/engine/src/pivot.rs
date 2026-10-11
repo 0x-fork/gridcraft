@@ -1397,6 +1397,7 @@ pub fn chart_series(sheet: &str, origin: CellRef, out: &Output) -> Vec<Series> {
                 secondary: false,
                 kind: None,
                 smooth: false,
+                trendlines: Vec::new(),
             })
         })
         .collect()

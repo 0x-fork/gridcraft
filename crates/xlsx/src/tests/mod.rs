@@ -10,6 +10,7 @@ mod pivot_tests;
 mod richdata_tests;
 mod roundtrip;
 mod smooth_roundtrip;
+mod trendline_roundtrip;
 mod xls_tests;
 mod xlsb_tests;
 

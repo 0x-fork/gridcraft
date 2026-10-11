@@ -15,7 +15,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add Chart Element",
             ["Chart Design", "Chart Layouts"],
             None,
-            "{chart?, element: title|legend|dataLabels|gridlines|axisTitles|smooth, on?: bool, position?: bottom|top|left|right}",
+            "{chart?, element: title|legend|dataLabels|gridlines|axisTitles|smooth|trendline, on?: bool, position?: bottom|top|left|right; trendline: series?: index (default all), type?: linear|exponential|linearForecast|movingAverage|logarithmic|power|polynomial, order?: 2..6, period?: 2..255, forward?, backward?, displayEquation?, displayRSquared?}",
             has_doc,
             add_element
         ),
@@ -316,10 +316,66 @@ fn add_element(s: &mut Session, p: &Json) -> Result<Json> {
                     s.smooth = on;
                 }
             }
+            "trendline" => {
+                let only = u32_param(p, "series").map(|i| i as usize);
+                if only.is_some_and(|i| i >= c.series.len()) {
+                    return Err(bad("chart.addElement", "no such series"));
+                }
+                let targets: Vec<usize> = (0..c.series.len()).filter(|i| only.is_none_or(|o| o == *i)).collect();
+                if !on {
+                    for i in targets {
+                        if let Some(se) = c.series.get_mut(i) {
+                            se.trendlines.clear();
+                        }
+                    }
+                    return Ok(());
+                }
+                let t = trendline_param(p)?;
+                let eligible: Vec<usize> =
+                    targets.into_iter().filter(|i| gridcraft_chart::supports_trendline(gridcraft_chart::series_plot_kind(c, *i))).collect();
+                if eligible.is_empty() {
+                    return Err(bad("chart.addElement", "trendlines need a 2-D column, bar, line, area, scatter or bubble series"));
+                }
+                for i in eligible {
+                    if let Some(se) = c.series.get_mut(i) {
+                        se.trendlines.push(t.clone());
+                    }
+                }
+            }
             other => return Err(bad("chart.addElement", format!("unknown element `{other}`"))),
         }
         Ok(())
     })
+}
+
+/// The trendline described by `chart.addElement`'s trendline parameters (Excel's Add Chart
+/// Element ▸ Trendline choices, plus the Format Trendline options).
+fn trendline_param(p: &Json) -> Result<Trendline> {
+    let num = |k: &str| f64_param(p, k).filter(|v| v.is_finite() && *v >= 0.0).unwrap_or(0.0);
+    let mut t = Trendline {
+        forward: num("forward"),
+        backward: num("backward"),
+        display_equation: bool_param(p, "displayEquation").unwrap_or(false),
+        display_r_squared: bool_param(p, "displayRSquared").unwrap_or(false),
+        ..Trendline::default()
+    };
+    t.kind = match str_param(p, "type").unwrap_or("linear") {
+        "linear" => TrendlineKind::Linear,
+        // Excel's Linear Forecast: a linear trendline projected two periods ahead.
+        "linearForecast" => {
+            if t.forward == 0.0 {
+                t.forward = 2.0;
+            }
+            TrendlineKind::Linear
+        }
+        "exponential" => TrendlineKind::Exponential,
+        "logarithmic" => TrendlineKind::Logarithmic,
+        "power" => TrendlineKind::Power,
+        "polynomial" => TrendlineKind::Polynomial(u32_param(p, "order").unwrap_or(2).clamp(2, 6) as u8),
+        "movingAverage" => TrendlineKind::MovingAverage(u32_param(p, "period").unwrap_or(2).clamp(2, 255)),
+        other => return Err(bad("chart.addElement", format!("unknown trendline type `{other}`"))),
+    };
+    Ok(t)
 }
 
 fn quick_layout(s: &mut Session, p: &Json) -> Result<Json> {

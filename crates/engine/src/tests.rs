@@ -1738,6 +1738,45 @@ fn switch_row_column_on_a_chart_read_from_a_file() {
 }
 
 #[test]
+fn chart_trendlines_are_added_saved_and_removed() {
+    use gridcraft_model::TrendlineKind;
+    let mut s = s();
+    chart_data(&mut s);
+    s.execute("insert.chart", json!({"type": "line", "range": "A1:E7"})).unwrap();
+    let chart = |s: &Session| s.doc().unwrap().wb.active().unwrap().charts[0].clone();
+    s.execute("chart.addElement", json!({"element": "trendline", "series": 1, "type": "linearForecast", "displayEquation": true})).unwrap();
+    s.execute("chart.addElement", json!({"element": "trendline", "series": 1, "type": "polynomial", "order": 9})).unwrap();
+    s.execute("chart.addElement", json!({"element": "trendline", "series": 3, "type": "movingAverage", "period": 3})).unwrap();
+    let c = chart(&s);
+    assert!(c.series[0].trendlines.is_empty());
+    let t = &c.series[1].trendlines;
+    assert_eq!((t.len(), t[0].kind, t[0].forward, t[0].display_equation), (2, TrendlineKind::Linear, 2.0, true));
+    assert_eq!(t[1].kind, TrendlineKind::Polynomial(6), "order clamps to Excel's 2..6");
+    assert_eq!(c.series[3].trendlines[0].kind, TrendlineKind::MovingAverage(3));
+    let info = s.execute("document.inspect", json!({})).unwrap();
+    assert_eq!(info["sheets"][0]["charts"][0]["trendlines"], json!(["Linear", "Polynomial(6)", "MovingAverage(3)"]));
+    assert!(s.execute("chart.addElement", json!({"element": "trendline", "series": 9})).is_err());
+    assert!(s.execute("chart.addElement", json!({"element": "trendline", "type": "cubic"})).is_err());
+    reopen(&mut s);
+    let after = chart(&s);
+    assert_eq!(after.series[1].trendlines, c.series[1].trendlines);
+    assert_eq!(after.series[3].trendlines, c.series[3].trendlines);
+    s.execute("chart.addElement", json!({"element": "trendline", "on": false})).unwrap();
+    assert!(chart(&s).series.iter().all(|se| se.trendlines.is_empty()));
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(chart(&s).series[1].trendlines.len(), 2);
+}
+
+#[test]
+fn trendlines_are_refused_on_charts_that_cannot_show_them() {
+    let mut s = s();
+    chart_data(&mut s);
+    s.execute("insert.chart", json!({"type": "pie", "range": "A1:B7"})).unwrap();
+    assert!(s.execute("chart.addElement", json!({"element": "trendline"})).is_err());
+    assert!(s.doc().unwrap().wb.active().unwrap().charts[0].series[0].trendlines.is_empty());
+}
+
+#[test]
 fn switch_row_column_with_whole_column_refs_is_bounded() {
     let mut s = s();
     s.execute("range.setValues", json!({"range": "A1", "values": [["", "North", "South"], ["Mon", 10, 14], ["Tue", 12, 15], ["Wed", 14, 16]]}))
