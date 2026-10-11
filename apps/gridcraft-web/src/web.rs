@@ -3,6 +3,7 @@
 use gridcraft_engine::Session;
 use gridcraft_ui_egui::{Inbox, Services, SheetApp};
 use wasm_bindgen::JsCast as _;
+use wasm_bindgen::JsValue;
 
 const CANVAS_ID: &str = "gridcraft_canvas";
 const LOADING_ID: &str = "gridcraft_loading";
@@ -226,17 +227,130 @@ fn print_pdf(bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-/// Triggers a browser download of `bytes`.
+fn mime_for(name: &str) -> &'static str {
+    match name.rsplit('.').next().map(str::to_ascii_lowercase).as_deref() {
+        Some("xlsx") => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        Some("xlsm") => "application/vnd.ms-excel.sheet.macroEnabled.12",
+        Some("xlsb") => "application/vnd.ms-excel.sheet.binary.macroEnabled.12",
+        Some("ods") => "application/vnd.oasis.opendocument.spreadsheet",
+        Some("csv") => "text/csv",
+        Some("tsv" | "txt") => "text/plain",
+        Some("pdf") => "application/pdf",
+        Some("html" | "htm") => "text/html",
+        Some("json") => "application/json",
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Trigger a browser save dialog or download of `bytes` named after `name`.
+
 fn download(name: &str, bytes: &[u8]) -> Result<(), String> {
     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
     let window = web_sys::window().ok_or("no window")?;
+
+    let show_picker_fn: Option<js_sys::Function> =
+        js_sys::Reflect::get(&window, &JsValue::from_str("showSaveFilePicker")).ok().and_then(|v| v.dyn_into().ok());
+
+    if let Some(picker_fn) = show_picker_fn {
+        let ext = std::path::Path::new(name).extension().and_then(|e| e.to_str()).unwrap_or("xlsx").to_ascii_lowercase();
+        let dot_ext = format!(".{ext}");
+        let mime = mime_for(name);
+
+        let accept_obj = js_sys::Object::new();
+        let exts_arr = js_sys::Array::new();
+        exts_arr.push(&JsValue::from_str(&dot_ext));
+        let _ = js_sys::Reflect::set(&accept_obj, &JsValue::from_str(mime), &exts_arr);
+
+        let type_desc = match ext.as_str() {
+            "xlsx" => "Excel Workbook (*.xlsx)",
+            "xlsm" => "Excel Macro-Enabled Workbook (*.xlsm)",
+            "xlsb" => "Excel Binary Workbook (*.xlsb)",
+            "ods" => "OpenDocument Spreadsheet (*.ods)",
+            "csv" => "CSV (Comma delimited) (*.csv)",
+            "tsv" => "Tab Delimited Text (*.tsv)",
+            "txt" => "Plain Text (*.txt)",
+            "pdf" => "PDF Document (*.pdf)",
+            "html" | "htm" => "HTML Document (*.html)",
+            "json" => "JSON Document (*.json)",
+            "png" => "PNG Image (*.png)",
+            "jpg" | "jpeg" => "JPEG Image (*.jpeg)",
+            _ => "Spreadsheet",
+        };
+
+        let type_obj = js_sys::Object::new();
+        let _ = js_sys::Reflect::set(&type_obj, &JsValue::from_str("description"), &JsValue::from_str(type_desc));
+        let _ = js_sys::Reflect::set(&type_obj, &JsValue::from_str("accept"), &accept_obj);
+
+        let types_arr = js_sys::Array::new();
+        types_arr.push(&type_obj);
+
+        let picker_opts = js_sys::Object::new();
+        let _ = js_sys::Reflect::set(&picker_opts, &JsValue::from_str("suggestedName"), &JsValue::from_str(name));
+        let _ = js_sys::Reflect::set(&picker_opts, &JsValue::from_str("types"), &types_arr);
+
+        let prom_val = picker_fn.call1(&window, &picker_opts).map_err(js)?;
+        let prom: js_sys::Promise = prom_val.dyn_into().map_err(|_| "not a promise".to_string())?;
+
+        let bytes_vec = bytes.to_vec();
+        wasm_bindgen_futures::spawn_local(async move {
+            match wasm_bindgen_futures::JsFuture::from(prom).await {
+                Ok(handle_val) => {
+                    if let Err(e) = write_file_handle(&handle_val, &bytes_vec).await {
+                        log::error!("failed writing to file handle: {e}");
+                    } else {
+                        log::info!("Successfully saved file through save file picker");
+                    }
+                }
+                Err(e) => {
+                    let err_name = js_sys::Reflect::get(&e, &JsValue::from_str("name")).ok().and_then(|v| v.as_string()).unwrap_or_default();
+                    if err_name == "AbortError" {
+                        log::info!("Save file dialog cancelled by user");
+                    } else {
+                        log::error!("showSaveFilePicker error: {e:?}");
+                    }
+                }
+            }
+        });
+        return Ok(());
+    }
+
+    // Fallback for browsers without showSaveFilePicker (e.g. Firefox, Safari):
+    trigger_anchor_download(&window, name, bytes)
+}
+
+async fn write_file_handle(handle: &JsValue, bytes: &[u8]) -> Result<(), String> {
+    let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
+    let create_fn: js_sys::Function = js_sys::Reflect::get(handle, &JsValue::from_str("createWritable"))
+        .map_err(js)?
+        .dyn_into()
+        .map_err(|_| "createWritable is not a function".to_string())?;
+    let stream_prom: js_sys::Promise = create_fn.call0(handle).map_err(js)?.dyn_into().map_err(|_| "not a promise".to_string())?;
+    let stream = wasm_bindgen_futures::JsFuture::from(stream_prom).await.map_err(js)?;
+
+    let write_fn: js_sys::Function =
+        js_sys::Reflect::get(&stream, &JsValue::from_str("write")).map_err(js)?.dyn_into().map_err(|_| "write is not a function".to_string())?;
+    let uint8 = js_sys::Uint8Array::from(bytes);
+    let write_prom: js_sys::Promise = write_fn.call1(&stream, &uint8).map_err(js)?.dyn_into().map_err(|_| "not a promise".to_string())?;
+    wasm_bindgen_futures::JsFuture::from(write_prom).await.map_err(js)?;
+
+    let close_fn: js_sys::Function =
+        js_sys::Reflect::get(&stream, &JsValue::from_str("close")).map_err(js)?.dyn_into().map_err(|_| "close is not a function".to_string())?;
+    let close_prom: js_sys::Promise = close_fn.call0(&stream).map_err(js)?.dyn_into().map_err(|_| "not a promise".to_string())?;
+    wasm_bindgen_futures::JsFuture::from(close_prom).await.map_err(js)?;
+    Ok(())
+}
+
+fn trigger_anchor_download(window: &web_sys::Window, name: &str, bytes: &[u8]) -> Result<(), String> {
+    let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
     let document = window.document().ok_or("no document")?;
     let parts = js_sys::Array::of1(&js_sys::Uint8Array::from(bytes));
     let opts = web_sys::BlobPropertyBag::new();
-    opts.set_type(if name.ends_with(".csv") { "text/csv" } else { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    opts.set_type(mime_for(name));
     let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts).map_err(js)?;
     let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(js)?;
-    let a: web_sys::HtmlAnchorElement = document.create_element("a").map_err(js)?.dyn_into().map_err(|_| "not an anchor")?;
+    let a: web_sys::HtmlAnchorElement = document.create_element("a").map_err(js)?.dyn_into().map_err(|_| "not an anchor".to_string())?;
     a.set_href(&url);
     a.set_download(name);
     a.style().set_property("display", "none").map_err(js)?;
