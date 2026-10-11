@@ -14,6 +14,7 @@ Excel's worksheet functions, category by category, against GridCraft's function 
   PY (Microsoft 365 functions not on that page when fetched).
 - **Ours (505):** every function spec in `crates/functions/src/*.rs` (`f!("NAME", …)`) plus the
 - **Ours (503):** every function spec in `crates/functions/src/*.rs` (`f!("NAME", …)`) plus the
+- **Ours (502):** every function spec in `crates/functions/src/*.rs` (`f!("NAME", …)`) plus the
   evaluator's special forms in `crates/calc/src/eval.rs` (`SPECIAL_FUNCTIONS`: IF, IFS, CHOOSE,
   OFFSET, INDIRECT, INDEX, SUBTOTAL, AGGREGATE, TEXT, LET, LAMBDA, MAP, REDUCE, SCAN, BYROW, BYCOL,
   MAKEARRAY…), excluding the test-only `ADD2`. Every one is an Excel name.
@@ -32,7 +33,7 @@ Excel's worksheet functions, category by category, against GridCraft's function 
 | Math and trigonometry | 80 | 79 | 79 | 99% | PERCENTOF |
 | Financial | 55 | 55 | 55 | 100% | — |
 | Engineering | 54 | 54 | 54 | 100% | — |
-| Text | 50 | 47 | 47 | 94% | BAHTTEXT, DETECTLANGUAGE, TRANSLATE |
+| Text | 50 | 48 | 48 | 96% | DETECTLANGUAGE, TRANSLATE |
 | Lookup and reference | 40 | 36 | 36 | 90% | GETPIVOTDATA, IMAGE, RTD, TRIMRANGE |
 | Compatibility | 40 | 40 | 40 | 100% | — |
 | Date and time | 25 | 25 | 25 | 100% | — |
@@ -57,6 +58,7 @@ PIVOTBY, REGEXTEST…) are all present.
 | FORECAST.ETS family (4) | yes | 4–6 h | AAA exponential smoothing with seasonality detection; needed for Forecast Sheet too |
 | GETPIVOTDATA | yes | 2–3 h | Needs the pivot engine's result cache; also the "Generate GetPivotData" option |
 | TRIMRANGE, BAHTTEXT | yes | 1–2 h | TRIMRANGE also implies the `.:` trim-ref operators |
+| TRIMRANGE, PERCENTOF | yes | 1–2 h | TRIMRANGE also implies the `.:` trim-ref operators |
 | IMAGE | yes | 3–5 h | Pictures in cells (see PR #105); fetching URLs needs a privacy decision |
 | CUBE* (7), WEBSERVICE, FILTERXML | partly | 4–8 h | FILTERXML can work offline; CUBE needs an OLAP/data-model source |
 | TRANSLATE, DETECTLANGUAGE, STOCKHISTORY, COPILOT, PY | no (cloud) | — | Microsoft cloud services; open equivalents only by owner decision |
@@ -98,4 +100,5 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 |---|---|---|
 | 2026-10-11 | minor | ODDFPRICE, ODDFYIELD, ODDLPRICE, ODDLYIELD added: Financial 55 / 55; 505 / 523 by name, 496 working |
 | 2026-10-11 | minor | PERCENTOF and EUROCONVERT added: 503 / 523 by name, 494 working |
+| 2026-10-11 | minor | BAHTTEXT added: 502 / 523 by name, 493 working |
 | 2026-10-10 | major | Created: 501 / 523 by name, 492 working, per category, against Microsoft's published list |
