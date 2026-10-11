@@ -97,6 +97,8 @@ fn load_prefs(app: &mut SheetApp) {
     }
     // First run (or a ui.json without a usable language): follow the desktop's language.
     app.ui.language = gridcraft_ui_egui::i18n::Language::system();
+    // ...and its light or dark appearance (#239), until a theme is chosen and saved in ui.json.
+    app.ui.system_theme = true;
     let Some(dir) = config_dir() else { return };
     if let Ok(b) = std::fs::read(dir.join("ui.json"))
         && let Ok(ui) = serde_json::from_slice::<gridcraft_ui_egui::UiState>(&b)

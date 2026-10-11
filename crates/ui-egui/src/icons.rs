@@ -108,6 +108,8 @@ pub enum Icon {
     Share,
     Search,
     Settings,
+    /// Light/dark appearance: a circle, its right half filled.
+    Appearance,
     Sheet,
     Book,
     Folder,
@@ -595,6 +597,16 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, c: Color32) {
         Icon::Settings => {
             g.circle(8.0, 8.0, 5.0, None, Some(c));
             g.circle(8.0, 8.0, 2.0, Some(c), None);
+        }
+        Icon::Appearance => {
+            g.circle(8.0, 8.0, 5.5, None, Some(c));
+            let half: Vec<(f32, f32)> = (0..=12)
+                .map(|i| {
+                    let a = std::f32::consts::PI * (i as f32 / 12.0 - 0.5);
+                    (8.0 + 5.5 * a.cos(), 8.0 + 5.5 * a.sin())
+                })
+                .collect();
+            g.poly(&half, c);
         }
         Icon::Book => {
             g.rect(2.0, 2.0, 12.0, 12.0, Some(GREEN), None);
