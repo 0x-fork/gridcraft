@@ -2360,3 +2360,74 @@ fn editing_a_date_cell_shows_a_date_not_the_serial() {
     let d = s2.doc().unwrap();
     assert_eq!(crate::display::edit_text(&d.wb, d.wb.active().unwrap(), at), "42");
 }
+
+/// A workbook with 42 in A1, saved as `.xlsx` and encrypted with `password`.
+fn encrypted_book(password: &str) -> Vec<u8> {
+    let mut src = s();
+    src.execute("cell.set", json!({"cell": "A1", "input": "42"})).unwrap();
+    let xlsx = crate::io::save_bytes(&src.doc().unwrap().wb, "book.xlsx").unwrap();
+    gridcraft_xlsx::testing::encrypt_workbook(&xlsx, password)
+}
+
+#[test]
+fn encrypted_workbooks_open_with_their_password() {
+    const PW: &str = "synthetic-pw-5521";
+    let b64 = crate::io::base64_encode(&encrypted_book(PW));
+    let open = |s: &mut Session, password: Option<&str>| {
+        let mut p = json!({"name": "Secret.xlsx", "base64": b64});
+        if let Some(pw) = password {
+            p["password"] = json!(pw);
+        }
+        s.execute("file.open", p)
+    };
+    let mut s = Session::new();
+
+    // Programmatic open without a password: an error carrying the marker, never a dialog.
+    let err = open(&mut s, None).unwrap_err().to_string();
+    assert!(err.contains(crate::io::PASSWORD_REQUIRED), "{err}");
+    assert!(err.contains("Secret.xlsx"), "{err}");
+    assert!(s.take_ui_requests().is_empty(), "programmatic calls never open dialogs");
+    assert!(s.documents().is_empty());
+
+    // Wrong and empty passwords are "incorrect", and the password is never quoted.
+    for wrong in ["not-it", ""] {
+        let err = open(&mut s, Some(wrong)).unwrap_err().to_string();
+        assert!(err.contains(crate::io::WRONG_PASSWORD), "{err}");
+        assert!(wrong.is_empty() || !err.contains(wrong), "{err}");
+    }
+    assert!(s.documents().is_empty());
+
+    // The right password opens it: no save path, the file name as title, the notice first.
+    let r = open(&mut s, Some(PW)).unwrap();
+    assert_eq!(r["warnings"][0], crate::io::DECRYPTED_NOTICE);
+    assert_eq!(r["title"], "Secret.xlsx");
+    assert_eq!(v(&s, "A1"), Value::Number(42.0));
+    assert_eq!(s.doc().unwrap().path, None);
+    // The notice belongs in the info bar, not a message box.
+    assert!(!s.take_ui_requests().iter().any(|r| matches!(r, crate::UiRequest::Message(_))));
+    let journal = serde_json::to_string(&s.journal).unwrap();
+    assert!(!journal.contains(PW), "the password never reaches the journal");
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn a_decrypted_workbook_never_overwrites_its_encrypted_original() {
+    const PW: &str = "synthetic-pw-5522";
+    #[allow(clippy::disallowed_methods)] // native-only test: a unique temp dir name
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let dir = std::env::temp_dir().join(format!("gridcraft-encrypted-{}-{nonce}", std::process::id()));
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("Secret.xlsx");
+    let bytes = encrypted_book(PW);
+    std::fs::write(&path, &bytes).unwrap();
+
+    let mut s = s();
+    s.execute("file.open", json!({"path": path, "password": PW})).unwrap();
+    assert_eq!(s.doc().unwrap().path, None);
+    s.take_ui_requests();
+    s.execute("cell.set", json!({"cell": "A1", "input": "43"})).unwrap();
+    s.execute("file.save", json!({})).unwrap();
+    assert!(s.take_ui_requests().iter().any(|r| matches!(r, crate::UiRequest::Dialog(name, _) if name == "saveAs")));
+    assert_eq!(std::fs::read(&path).unwrap(), bytes, "the encrypted original is untouched");
+    std::fs::remove_dir_all(dir).unwrap();
+}
