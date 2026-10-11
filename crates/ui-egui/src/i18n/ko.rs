@@ -192,6 +192,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Unfreeze Panes" => "틀 고정 취소",
         "Dark Mode" => "다크 모드",
         "Interface language" => "인터페이스 언어",
+        "Interface size" => "인터페이스 크기",
+        "Auto" => "자동",
         "Command\nPalette" => "명령\n팔레트",
         "Agent\nControl" => "에이전트\n제어",
         "Action\nJournal" => "작업\n기록",

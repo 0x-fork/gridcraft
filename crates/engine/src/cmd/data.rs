@@ -248,7 +248,7 @@ fn do_sort(s: &mut Session, r: RangeRef, header: bool, keys: Vec<SortKey>, by_co
                     let pos = |v: &Value| v.as_text().and_then(|t| list.iter().position(|x| x.eq_ignore_ascii_case(t))).unwrap_or(usize::MAX);
                     pos(va).cmp(&pos(vb))
                 } else if case && va.is_text() && vb.is_text() {
-                    va.as_text().unwrap_or("").cmp(vb.as_text().unwrap_or(""))
+                    sort_compare(va, vb).then_with(|| case_order(va.as_text().unwrap_or(""), vb.as_text().unwrap_or("")))
                 } else {
                     sort_compare(va, vb)
                 };
@@ -431,7 +431,16 @@ fn toggle_filter(s: &mut Session, p: &Json) -> Result<Json> {
             Ok(json!({"filter": false}))
         });
     }
-    let r = data_range(s, p)?;
+    let mut r = data_range(s, p)?;
+    // A selected header row filters the data below it (#201).
+    if p.get("range").is_none() && r.height() == 1 {
+        let d = s.doc()?;
+        let sh = d.wb.active().ok_or(EngineError::NoDocument)?;
+        let below = current_region(sh, r.start).end.row;
+        if below > r.end.row {
+            r = RangeRef::new(r.start, CellRef::new(below, r.end.col));
+        }
+    }
     edit(s, |cx| {
         cx.sheet_mut(sheet)?.autofilter = Some(AutoFilter { range: r, criteria: vec![] });
         Ok(json!({"filter": true, "range": r.a1()}))
@@ -653,6 +662,12 @@ pub fn filter_values(wb: &Workbook, sheet: usize, col: u32) -> Vec<(String, bool
     seen.into_iter().map(|((_, t), on)| (t, on)).collect()
 }
 
+/// Case-sensitive tie-break for text that is equal ignoring case: as in Excel, lowercase sorts
+/// before uppercase at the first letter that differs in case.
+fn case_order(a: &str, b: &str) -> Ordering {
+    a.chars().zip(b.chars()).find(|(x, y)| x != y).map_or(Ordering::Equal, |(x, y)| y.is_lowercase().cmp(&x.is_lowercase()))
+}
+
 fn sort_key(v: &Value) -> (u8, i64, String) {
     match v {
         Value::Number(n) => (0, (n * 1e6) as i64, String::new()),
@@ -685,8 +700,11 @@ fn remove_duplicates(s: &mut Session, p: &Json) -> Result<Json> {
         let Some(sh) = cx.wb.sheet(sheet) else { return Ok(()) };
         let mut seen = std::collections::HashSet::new();
         let mut keep: Vec<u32> = Vec::new();
+        // Cells are compared by the text they show, as in Excel: the same date in two formats
+        // isn't a duplicate, while 1.01 and 1.02 shown as 1.0 are.
+        let shown = |c: CellRef| crate::display::format(&sh.value(c), cx.wb.styles.get(sh.style_id(c)).num_fmt.as_str(), &cx.wb).text;
         for row in start..=r.end.row {
-            let key: Vec<String> = cols.iter().map(|c| sh.value(CellRef::new(row, *c)).display().to_lowercase()).collect();
+            let key: Vec<String> = cols.iter().map(|c| shown(CellRef::new(row, *c)).to_lowercase()).collect();
             if seen.insert(key) {
                 keep.push(row);
             } else {

@@ -1157,15 +1157,17 @@ fn add_cf(s: &mut Session, p: &Json) -> Result<Json> {
     };
     let rule = match kind.as_str() {
         "cellIs" => {
+            // Excel's file and VBA names (`lessThan`, …) are accepted too.
             let op = match g("operator").as_deref().unwrap_or("greater") {
                 "between" => CfOperator::Between,
                 "notBetween" => CfOperator::NotBetween,
                 "equal" => CfOperator::Equal,
                 "notEqual" => CfOperator::NotEqual,
-                "less" => CfOperator::Less,
-                "greaterOrEqual" => CfOperator::GreaterOrEqual,
-                "lessOrEqual" => CfOperator::LessOrEqual,
-                _ => CfOperator::Greater,
+                "less" | "lessThan" => CfOperator::Less,
+                "greaterOrEqual" | "greaterThanOrEqual" => CfOperator::GreaterOrEqual,
+                "lessOrEqual" | "lessThanOrEqual" => CfOperator::LessOrEqual,
+                "greater" | "greaterThan" => CfOperator::Greater,
+                other => return Err(bad("home.conditionalFormat", format!("unknown operator `{other}`"))),
             };
             let a = rule.get("value").map(super::edit::json_to_input).unwrap_or_default();
             let b = rule.get("value2").map(super::edit::json_to_input);

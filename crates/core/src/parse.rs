@@ -263,7 +263,8 @@ fn parse_date(t: &str, sys: DateSystem) -> Option<(f64, &'static str)> {
 }
 
 fn valid_ymd(sys: DateSystem, y: i64, m: i64, d: i64) -> Option<f64> {
-    if !(1..=12).contains(&m) || d < 1 {
+    // Dates before 1900 stay text (`DATE()` would add 1900 to such a year).
+    if !(1..=12).contains(&m) || d < 1 || y < 1900 {
         return None;
     }
     let max = crate::date::days_in_month_in(sys, y as i32, m as u32) as i64;
@@ -290,6 +291,8 @@ pub fn current_year() -> i64 {
 fn parse_datetime(t: &str, sys: DateSystem) -> Option<(f64, Option<&'static str>)> {
     if let Some((tf, secs, ampm)) = parse_time(t) {
         let f = match (secs, ampm) {
+            // 24 hours or more: elapsed hours, so 25:00 shows as 25:00:00, not 1:00.
+            _ if tf >= 1.0 => "[h]:mm:ss",
             (false, false) => "h:mm",
             (true, false) => "h:mm:ss",
             (false, true) => "h:mm AM/PM",
@@ -352,11 +355,18 @@ mod tests {
         assert_eq!(p("7-Oct-2026").value, Value::Number(46302.0));
         assert_eq!(p("Oct 7, 2026").value, Value::Number(46302.0));
         assert_eq!(p("2/30/2026").value, Value::text("2/30/2026"));
+        assert_eq!(p("7/4/1776").value, Value::text("7/4/1776"));
+        assert_eq!(p("1776-07-04").value, Value::text("1776-07-04"));
+        assert_eq!(p("4-Jul-1776").value, Value::text("4-Jul-1776"));
+        assert_eq!(p("12/31/1899").value, Value::text("12/31/1899"));
+        assert_eq!(p("1/1/1900").value, Value::Number(1.0));
         assert_eq!(p("12:00").value, Value::Number(0.5));
         assert_eq!(p("6:00 PM").value, Value::Number(0.75));
         assert_eq!(p("12:00 AM").value, Value::Number(0.0));
         assert_eq!(p("10/7/2026 18:00").value, Value::Number(46302.75));
         assert_eq!(p("25:00").value, Value::Number(25.0 / 24.0));
+        assert_eq!(p("25:00").format, Some("[h]:mm:ss"));
+        assert_eq!(p("23:59").format, Some("h:mm"));
     }
 
     #[test]

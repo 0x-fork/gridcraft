@@ -168,13 +168,12 @@ pub fn handle(app: &mut SheetApp, ctx: &egui::Context, method: &str, p: &Json) -
             let mut v: Vec<Json> = app.session.commands().into_iter().map(|c| serde_json::to_value(c).unwrap_or_default()).collect();
             for (id, label, params) in [
                 ("ui.ribbonTab", "Ribbon Tab", ""),
-                ("view.formulaBar", "Formula Bar", ""),
                 ("view.collapseRibbon", "Collapse Ribbon", ""),
                 ("view.darkMode", "Dark Mode", ""),
                 ("view.theme", "Display Theme", ""),
-                ("view.zoom100", "100%", ""),
+                ("view.interfaceScale", "Interface Size", "{percent: 75–200 | \"auto\"} (100 = auto; clamped)"),
                 ("ui.dialog", "Open Dialog", ""),
-                ("app.language.set", "Interface Language", "{language: \"en\"|\"zh\"|\"ja\"|\"ko\"|\"ru\"|\"pt\"} (alias: code)"),
+                ("app.language.set", "Interface Language", "{language: \"en\"|\"zh\"|\"ja\"|\"ko\"|\"ru\"|\"pt\"|\"de\"} (alias: code)"),
                 ("app.language.english", "Interface Language: English", ""),
                 ("app.language.japanese", "Interface Language: Japanese", ""),
             ] {
@@ -196,12 +195,16 @@ pub fn handle(app: &mut SheetApp, ctx: &egui::Context, method: &str, p: &Json) -
                 app.ui.system_theme = false;
             }
             if let Some(v) = p.get("formulaBar").and_then(Json::as_bool) {
-                app.ui.formula_bar = v;
+                let _ = app.run("view.formulaBar", json!({"on": v}));
             }
             if let Some(v) = p.get("ribbonCollapsed").and_then(Json::as_bool) {
                 app.ui.ribbon_collapsed = v;
             }
-            ok(serde_json::to_value(&app.ui).unwrap_or_default())
+            let mut out = serde_json::to_value(&app.ui).unwrap_or_default();
+            if let Some(o) = out.as_object_mut() {
+                o.insert("formulaBar".into(), json!(app.session.prefs.formula_bar));
+            }
+            ok(out)
         }
         "ui.dialog" => {
             app.open_dialog(s("name").unwrap_or(""), p.clone());

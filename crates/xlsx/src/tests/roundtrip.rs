@@ -600,3 +600,74 @@ fn spill_and_calc_errors_are_cached_as_value_errors() {
         assert_eq!(cell.child("v").unwrap().text, value);
     }
 }
+
+/// `CT_IconSet` needs one `cfvo` per icon (at least two); a rule without stored thresholds
+/// gets Excel's defaults, one without the lower bound gets it prepended (#235).
+#[test]
+fn icon_sets_always_write_one_cfvo_per_icon() {
+    let mut wb = Workbook::new();
+    let s = wb.sheet_mut(0).unwrap();
+    for (i, (set, thresholds)) in [
+        ("3Arrows", vec![]),
+        ("4Rating", vec![CfValueKind::Number(2.0), CfValueKind::Number(5.0), CfValueKind::Number(8.0)]),
+        ("9Bogus", vec![CfValueKind::Percent(50.0)]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        s.cond_formats.push(CondFormat {
+            ranges: vec![rr(&format!("A{}", i + 1))],
+            rule: CfRule::IconSet { set: set.into(), thresholds, reverse: false, show_value: true },
+            priority: i as u32 + 1,
+            stop_if_true: false,
+        });
+    }
+    let bytes = write_xlsx(&wb).unwrap();
+    let (xml, _) = sheet1_xml(&bytes);
+    assert!(
+        xml.contains(
+            "<iconSet iconSet=\"3Arrows\"><cfvo type=\"percent\" val=\"0\"/><cfvo type=\"percent\" val=\"33\"/><cfvo type=\"percent\" val=\"67\"/></iconSet>"
+        ),
+        "{xml}"
+    );
+    assert!(
+        xml.contains("<iconSet iconSet=\"4Rating\"><cfvo type=\"percent\" val=\"0\"/><cfvo type=\"num\" val=\"2\"/><cfvo type=\"num\" val=\"5\"/><cfvo type=\"num\" val=\"8\"/></iconSet>"),
+        "{xml}"
+    );
+    assert!(xml.contains("<iconSet iconSet=\"9Bogus\"><cfvo type=\"percent\" val=\"0\"/>"), "{xml}");
+    let (back, _) = read_xlsx(&bytes).unwrap();
+    let rules: Vec<usize> = back
+        .sheet(0)
+        .unwrap()
+        .cond_formats
+        .iter()
+        .map(|cf| match &cf.rule {
+            CfRule::IconSet { thresholds, .. } => thresholds.len(),
+            _ => 0,
+        })
+        .collect();
+    assert_eq!(rules, [3, 4, 5]);
+}
+
+/// Files have no `@` operator: Excel writes `@x` as `_xlfn.SINGLE(x)` in a dynamic-array
+/// formula, and reads it back as `@x`.
+#[test]
+fn implicit_intersection_is_written_as_single() {
+    let mut wb = Workbook::new();
+    let s = wb.sheet_mut(0).unwrap();
+    for (r, n) in [(0, 1.0), (1, 3.0), (2, 5.0)] {
+        s.set_value(CellRef::new(r, 0), Value::Number(n));
+    }
+    s.cells.set(at("D3"), Cell { value: Value::Number(10.0), ..Cell::formula(Formula::new("@A1:A3*2")) });
+    s.cells.set(at("D4"), Cell { value: Value::Number(2.0), ..Cell::formula(Formula::new("A1*2")) });
+    let bytes = write_xlsx(&wb).unwrap();
+    let (xml, metadata) = sheet1_xml(&bytes);
+    assert!(xml.contains("<c r=\"D3\" cm=\"1\"><f t=\"array\" ref=\"D3\">_xlfn.SINGLE(A1:A3)*2</f><v>10</v>"), "{xml}");
+    assert!(xml.contains("<c r=\"D4\"><f>A1*2</f>"), "{xml}");
+    assert!(!xml.contains('@'), "{xml}");
+    assert!(metadata);
+    let (back, _) = read_xlsx(&bytes).unwrap();
+    let sh = back.sheet(0).unwrap();
+    assert_eq!(sh.cell(at("D3")).and_then(|c| c.formula.as_ref()).map(|f| f.text.as_str()), Some("@A1:A3*2"));
+    assert_eq!(sh.cell(at("D3")).and_then(|c| c.formula.as_ref()).and_then(|f| f.array), None);
+}
