@@ -67,10 +67,24 @@ pub fn specs() -> Vec<CommandSpec> {
             has_doc,
             insert_chart
         ),
-        cmd!("insert.recommendedCharts", "Recommended Charts", ["Insert", "Charts"], None, "{range?}", has_doc, |s, p| insert_chart(
-            s,
-            &with(p, "type", json!("auto"))
-        )),
+        cmd!(
+            "insert.recommendedCharts",
+            "Recommended Charts",
+            ["Insert", "Charts"],
+            None,
+            "{range?, type?, subtype?} (no type: the first of insert.chartRecommendations; the ribbon button opens the dialog)",
+            has_doc,
+            |s, p| insert_chart(s, &if p.get("type").is_some() { p.clone() } else { with(p, "type", json!("auto")) })
+        ),
+        cmd!(
+            query "insert.chartRecommendations",
+            "Chart Recommendations",
+            [],
+            None,
+            "{range?} → [{type, subtype, label}] chart types that suit the data's shape, best first",
+            has_doc,
+            |s, p| Ok(Json::Array(recommend_charts(s, p)?.into_iter().map(|(t, sub, label)| json!({"type": t, "subtype": sub, "label": label})).collect()))
+        ),
         cmd!(
             "chart.set",
             "Chart Properties",
@@ -555,7 +569,12 @@ pub fn series_from_range(sh: &Sheet, r: RangeRef, by_rows: bool) -> Vec<Series> 
 /// Most cells a chart's source block may span (bounds the series it builds).
 const MAX_CHART_CELLS: u64 = 1_000_000;
 
-fn insert_chart(s: &mut Session, p: &Json) -> Result<Json> {
+/// Chart types that suit the shape of the data, best first, as `(type, subtype, label)` for
+/// `insert.chart`. Our own heuristic from the shape of the block (series count, points per
+/// series, text categories, negative values), not a copy of Excel's ranking: two numeric columns
+/// without labels → scatter; one short series → column, pie, bar; long series → line; several
+/// series → clustered and stacked columns and bars, line.
+pub fn recommend_charts(s: &Session, p: &Json) -> Result<Vec<(&'static str, &'static str, &'static str)>> {
     let r = block(s, p)?;
     if r.count() > MAX_CHART_CELLS {
         return Err(bad("insert.chart", "range too large for a chart"));
@@ -563,15 +582,78 @@ fn insert_chart(s: &mut Session, p: &Json) -> Result<Json> {
     let sheet = target_sheet(s, p)?;
     let d = s.doc()?;
     let sh = d.wb.sheet(sheet).ok_or(EngineError::NoDocument)?;
+    let by_rows = r.width() > r.height() + 1;
+    let series = series_from_range(sh, r, by_rows);
+    let ranges: Vec<RangeRef> = series
+        .iter()
+        .filter_map(|x| match gridcraft_formula::parse(&x.values) {
+            Ok(gridcraft_formula::Expr::Ref(rf)) => Some(rf.range()),
+            _ => None,
+        })
+        .collect();
+    let points = ranges.first().map_or(0, RangeRef::count);
+    let (mut any_number, mut non_negative) = (false, true);
+    for n in ranges.iter().flat_map(|rr| rr.iter()).filter_map(|c| sh.value(c).as_f64()) {
+        any_number = true;
+        non_negative &= n >= 0.0;
+    }
+    if series.is_empty() || !any_number {
+        return Err(EngineError::Other("Select data for the chart first.".into()));
+    }
+    let labelled = series.first().is_some_and(|x| x.categories.is_some());
+    const COLUMN: (&str, &str, &str) = ("column", "", "Clustered Column");
+    const BAR: (&str, &str, &str) = ("bar", "", "Clustered Bar");
+    const LINE: (&str, &str, &str) = ("line", "", "Line");
+    const LINE_MARKERS: (&str, &str, &str) = ("line", "markers", "Line with Markers");
+    const PIE: (&str, &str, &str) = ("pie", "", "Pie");
+    const DOUGHNUT: (&str, &str, &str) = ("doughnut", "", "Doughnut");
+    const AREA: (&str, &str, &str) = ("area", "", "Area");
+    const SCATTER: (&str, &str, &str) = ("scatter", "", "Scatter");
+    const STACKED_COLUMN: (&str, &str, &str) = ("column", "stacked", "Stacked Column");
+    const STACKED_BAR: (&str, &str, &str) = ("bar", "stacked", "Stacked Bar");
+    let mut out = Vec::new();
+    if series.len() == 2 && !labelled && !by_rows {
+        out.extend([SCATTER, LINE_MARKERS, COLUMN]);
+    } else if series.len() == 1 {
+        if points > 12 {
+            out.extend([LINE, COLUMN, AREA]);
+        } else {
+            out.extend([COLUMN, BAR]);
+            if non_negative && points >= 2 {
+                out.extend([PIE, DOUGHNUT]);
+            }
+            out.push(LINE_MARKERS);
+        }
+    } else if points > 12 {
+        out.extend([LINE, COLUMN, AREA, STACKED_COLUMN]);
+    } else {
+        out.extend([COLUMN, BAR, STACKED_COLUMN, LINE_MARKERS, STACKED_BAR]);
+    }
+    Ok(out)
+}
+
+/// The chart `insert.chart` would insert for these params, without inserting it: the sheet it
+/// goes on and the chart (previews in the Recommended Charts dialog).
+pub fn build_chart(s: &Session, p: &Json) -> Result<(usize, Chart)> {
+    let r = block(s, p)?;
+    if r.count() > MAX_CHART_CELLS {
+        return Err(bad("insert.chart", "range too large for a chart"));
+    }
     let mut t = str_param(p, "type").unwrap_or("column").to_string();
+    let mut sub = str_param(p, "subtype").unwrap_or("").to_string();
+    if t == "auto" {
+        let first = recommend_charts(s, p)?.into_iter().next().unwrap_or(("column", "", ""));
+        t = first.0.into();
+        sub = first.1.into();
+    }
+    let sheet = target_sheet(s, p)?;
+    let d = s.doc()?;
+    let sh = d.wb.sheet(sheet).ok_or(EngineError::NoDocument)?;
     // Excel plots series by the longer dimension (more rows → series in columns).
     let data_h = r.height();
     let data_w = r.width();
     let by_rows = data_w > data_h + 1;
-    if t == "auto" {
-        t = if data_h > 12 && data_w <= 3 { "line".into() } else { "column".into() };
-    }
-    let kind = chart_kind(&t, str_param(p, "subtype").unwrap_or(""));
+    let kind = chart_kind(&t, &sub);
     let series = series_from_range(sh, r, by_rows);
     if series.is_empty() {
         return Err(EngineError::Other("Select data for the chart first.".into()));
@@ -607,6 +689,12 @@ fn insert_chart(s: &mut Session, p: &Json) -> Result<Json> {
         source: Some(format!("{}!{}", gridcraft_formula::quote_sheet(&sh.name), r.a1())),
         by_rows,
     };
+    Ok((sheet, chart))
+}
+
+fn insert_chart(s: &mut Session, p: &Json) -> Result<Json> {
+    let (sheet, chart) = build_chart(s, p)?;
+    let id = chart.id;
     edit(s, |cx| {
         cx.sheet_mut(sheet)?.charts.push(chart);
         Ok(json!({"chart": id}))

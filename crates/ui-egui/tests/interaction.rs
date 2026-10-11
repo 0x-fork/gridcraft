@@ -1,6 +1,7 @@
 //! UI interaction tests: real egui input through the whole app (no GPU needed).
 
 use egui::{Event, Key, Modifiers, PointerButton};
+use egui_kittest::kittest::Queryable as _;
 use gridcraft_engine::Session;
 use gridcraft_engine::core::{CellRef, Value};
 use gridcraft_ui_egui::{SheetApp, grid::Geo};
@@ -211,6 +212,33 @@ fn language_switch_translates_the_ribbon_and_persists() {
     }
     h.state_mut().run("app.language.set", json!({"language": "en"})).unwrap();
     assert_eq!(h.state().ui.language, Language::En);
+}
+
+#[test]
+fn recommended_charts_dialog_inserts_the_chosen_chart() {
+    // #215: Recommended Charts opens a dialog of chart types for the data instead of inserting a
+    // column chart straight away; OK inserts the one picked.
+    let mut s = blank();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Fruit", "Sales"], ["Apples", 5], ["Pears", 3], ["Plums", 2]]})).unwrap();
+    s.execute("selection.set", json!({"range": "A1:B4"})).unwrap();
+    let mut h = harness(s);
+    h.state_mut().open_dialog("recommendedCharts", json!({}));
+    h.run_steps(4);
+    assert_eq!(h.state().dialog.as_ref().map(|d| d.name()), Some("recommendedCharts"));
+    h.get_by_label("Pie").click();
+    h.run_steps(2);
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    h.run_steps(2);
+    assert!(h.state().dialog.is_none());
+    let kinds: Vec<_> = h.state().session.active().unwrap().wb.active().unwrap().charts.iter().map(|c| c.kind).collect();
+    assert_eq!(kinds, [gridcraft_engine::model::ChartKind::Pie]);
+    assert!(h.state().selected_chart.is_some(), "the new chart is selected");
+
+    // Without numbers there is nothing to recommend: a message, no dialog.
+    h.state_mut().session.run("selection.set", json!({"range": "A1:A4"})).unwrap();
+    h.state_mut().open_dialog("recommendedCharts", json!({}));
+    assert!(h.state().dialog.is_none());
+    assert!(h.state().message.is_some());
 }
 
 #[test]

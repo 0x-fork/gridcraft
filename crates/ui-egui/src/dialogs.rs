@@ -4,7 +4,9 @@
 //! Every dialog is also reachable programmatically: `ui.dialog {name}` opens one,
 //! `ui.dialog.set {field, value}` edits a field and `ui.dialog.confirm` presses OK.
 
-use egui::{Color32, Key, vec2};
+use egui::{Color32, Key, Sense, Stroke, StrokeKind, vec2};
+
+use crate::icons::{self, Icon};
 use serde_json::{Map, Value as Json, json};
 
 use crate::SheetApp;
@@ -517,6 +519,21 @@ impl Dialog {
                 };
                 d
             }
+            "recommendedCharts" => {
+                // Insert › Recommended Charts: chart types for the selected data, with previews.
+                let recs = match app.session.run("insert.chartRecommendations", json!({})) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        app.message = Some(("Insert Chart".into(), crate::clean_error(&e)));
+                        return None;
+                    }
+                };
+                let mut d = Dialog::custom("recommendedCharts", "Insert Chart", json!({}));
+                d.tab = if p("tab").as_str() == Some("All Charts") { "All Charts".into() } else { "Recommended Charts".into() };
+                d.result = Some(recs);
+                select_chart(&mut d, 0);
+                d
+            }
             "journal" => Dialog::custom("journal", "Action Journal", json!({})),
             "statistics" => {
                 let mut d = Dialog::custom("statistics", "Workbook Statistics", json!({}));
@@ -659,6 +676,7 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
         "formatCells" => 560.0,
         "about" => 660.0,
         "insertFunction" | "commandSearch" | "nameManager" | "manageRules" | "journal" | "agents" => 520.0,
+        "recommendedCharts" => 600.0,
         _ => 380.0,
     };
     let window = egui::Window::new(d.title.clone())
@@ -679,6 +697,7 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
                 "sort" => sort(app, ui, &mut d, &mut confirm),
                 "nameManager" => name_manager(app, ui),
                 "manageRules" => manage_rules(app, ui),
+                "recommendedCharts" => recommended_charts(app, ui, &mut d, &mut confirm, &mut open),
                 "commandSearch" => command_search(app, ui, &mut d, &mut confirm),
                 "goalSeek" => goal_seek(app, ui, &mut d, &mut confirm),
                 "spelling" => spelling(app, ui, &mut d, &mut open),
@@ -1508,6 +1527,126 @@ fn name_manager(app: &mut SheetApp, ui: &mut egui::Ui) {
     });
     if ui.button("New…").clicked() {
         app.open_dialog("defineName", json!({}));
+    }
+}
+
+/// Every chart type the All Charts tab offers: `(type, subtype, label)` for `insert.chart`.
+const ALL_CHARTS: [(&str, &str, &str); 20] = [
+    ("column", "", "Clustered Column"),
+    ("column", "stacked", "Stacked Column"),
+    ("column", "stacked100", "100% Stacked Column"),
+    ("bar", "", "Clustered Bar"),
+    ("bar", "stacked", "Stacked Bar"),
+    ("bar", "stacked100", "100% Stacked Bar"),
+    ("line", "", "Line"),
+    ("line", "markers", "Line with Markers"),
+    ("line", "stacked", "Stacked Line"),
+    ("pie", "", "Pie"),
+    ("doughnut", "", "Doughnut"),
+    ("area", "", "Area"),
+    ("area", "stacked", "Stacked Area"),
+    ("scatter", "", "Scatter"),
+    ("scatter", "lines", "Scatter with Lines"),
+    ("radar", "", "Radar"),
+    ("histogram", "", "Histogram"),
+    ("waterfall", "", "Waterfall"),
+    ("funnel", "", "Funnel"),
+    ("combo", "", "Combo"),
+];
+
+/// The chart types listed on the dialog's current tab.
+fn chart_choices(d: &Dialog) -> Vec<(String, String, String)> {
+    if d.tab == "All Charts" {
+        return ALL_CHARTS.iter().map(|(t, s, l)| (t.to_string(), s.to_string(), l.to_string())).collect();
+    }
+    let field = |x: &Json, k: &str| x.get(k).and_then(Json::as_str).unwrap_or("").to_string();
+    d.result
+        .as_ref()
+        .and_then(Json::as_array)
+        .map(|a| a.iter().map(|x| (field(x, "type"), field(x, "subtype"), field(x, "label"))).collect())
+        .unwrap_or_default()
+}
+
+/// Selects entry `i` of the current tab: OK inserts it.
+fn select_chart(d: &mut Dialog, i: usize) {
+    let Some((t, sub, _)) = chart_choices(d).into_iter().nth(i) else { return };
+    d.list_index = i;
+    d.values.insert("type".into(), json!(t));
+    d.values.insert("subtype".into(), json!(sub));
+}
+
+fn chart_icon(t: &str) -> Icon {
+    match t {
+        "column" | "bar" | "histogram" | "waterfall" | "funnel" | "combo" => Icon::ChartBar,
+        "line" | "area" | "radar" => Icon::ChartLine,
+        "pie" | "doughnut" => Icon::ChartPie,
+        "scatter" | "bubble" => Icon::ChartScatter,
+        _ => Icon::Chart,
+    }
+}
+
+fn recommended_charts(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, open: &mut bool) {
+    ui.horizontal(|ui| {
+        for tab in ["Recommended Charts", "All Charts"] {
+            if ui.selectable_label(d.tab == tab, tab).clicked() && d.tab != tab {
+                d.tab = tab.to_string();
+                select_chart(d, 0);
+            }
+        }
+    });
+    ui.separator();
+    let choices = chart_choices(d);
+    let t = crate::theme::Tokens::get(ui.ctx());
+    ui.horizontal_top(|ui| {
+        ui.vertical(|ui| {
+            ui.set_width(190.0);
+            egui::ScrollArea::vertical().id_salt("chart_choices").max_height(300.0).show(ui, |ui| {
+                for (i, (kind, _, label)) in choices.iter().enumerate() {
+                    let resp = ui
+                        .horizontal(|ui| {
+                            let (r, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
+                            icons::paint(ui.painter(), r.shrink(2.0), chart_icon(kind), t.text);
+                            ui.selectable_label(i == d.list_index, label.as_str())
+                        })
+                        .inner;
+                    if resp.clicked() {
+                        select_chart(d, i);
+                    }
+                    if resp.double_clicked() {
+                        select_chart(d, i);
+                        *confirm = true;
+                    }
+                }
+            });
+        });
+        ui.add_space(12.0);
+        ui.vertical(|ui| {
+            let label = choices.get(d.list_index).map(|c| c.2.clone()).unwrap_or_default();
+            ui.strong(label);
+            let (rect, _) = ui.allocate_exact_size(vec2(360.0, 216.0), Sense::hover());
+            ui.painter().rect_filled(rect, 2.0, Color32::WHITE);
+            ui.painter().rect_stroke(rect, 2.0, Stroke::new(1.0, t.separator), StrokeKind::Inside);
+            let params = json!({"type": d.values.get("type").cloned().unwrap_or(Json::Null), "subtype": d.values.get("subtype").cloned().unwrap_or(Json::Null)});
+            if let Some(doc) = app.session.active()
+                && let Ok((sheet, chart)) = gridcraft_engine::cmd::insert::build_chart(&app.session, &params)
+            {
+                crate::chartview::paint_chart(ui.painter(), rect, &doc.wb, sheet, &chart);
+            }
+        });
+    });
+    ok_cancel(ui, confirm, open);
+    if *confirm {
+        *confirm = false;
+        let params =
+            json!({"type": d.values.get("type").cloned().unwrap_or(Json::Null), "subtype": d.values.get("subtype").cloned().unwrap_or(Json::Null)});
+        match app.run("insert.chart", params) {
+            Ok(r) => {
+                // The new chart is selected, as after inserting any object.
+                app.selected_chart = r.get("chart").and_then(Json::as_u64).and_then(|id| u32::try_from(id).ok());
+                *open = false;
+            }
+            Err(e) => app.message = Some((d.title.clone(), crate::clean_error(&e))),
+        }
     }
 }
 

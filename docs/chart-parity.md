@@ -1,6 +1,6 @@
 # Chart parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (created from a source audit of the chart model, renderer and XLSX chart parts) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (Recommended Charts dialog, #215) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Excel's chart types and chart elements against GridCraft. Part of
 [target-app-parity.md](target-app-parity.md). **Breadth ~50%, ready ~30%, 40–60 h** (estimated).
@@ -50,7 +50,7 @@ open PRs #158, #161, and issue #190.
 | Chart styles and colour palettes | ~16 styles × colour sets | style number stored, own palettes |
 | Chart sheets | yes | **missing** (skipped with a warning on open) |
 | Chart templates (`.crtx`) | yes | **missing** |
-| Recommended Charts | yes | partial (Insert ▸ Recommended) |
+| Recommended Charts | yes | dialog with recommendations from the data's shape (own heuristic) and an All Charts list, live previews (#215) |
 | Switch Row/Column, Select Data | yes | yes (Switch on charts read from files landed in #116) |
 | Sparklines (line, column, win/loss, markers, axis) | yes | line, column, win/loss |
 | PivotCharts | yes | **missing** |
@@ -78,5 +78,6 @@ back.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Recommended Charts dialog with previews (#215) |
 | 2026-10-10 | minor | Smooth lines (#62) and Switch Row/Column on file charts (#116) landed; chart resize bug (#190) |
 | 2026-10-10 | major | Created from a source audit: 25 kinds (25 of ~60 subtypes), element gaps, round-trip loss |

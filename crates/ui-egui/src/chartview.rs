@@ -29,6 +29,21 @@ impl gridcraft_chart::Measure for EguiMeasure<'_> {
     }
 }
 
+/// Paints `chart` (not necessarily on the sheet: the Recommended Charts preview) scaled to fit
+/// `rect`.
+pub fn paint_chart(p: &Painter, rect: Rect, wb: &Workbook, sheet: usize, chart: &gridcraft_engine::model::Chart) {
+    let (w, h) = (chart.anchor.width.max(1.0), chart.anchor.height.max(1.0));
+    let z = (rect.width() / w).min(rect.height() / h);
+    if !(z.is_finite() && z > 0.0) {
+        return;
+    }
+    let origin = rect.center() - vec2(w * z, h * z) / 2.0;
+    let data = gridcraft_chart::resolve(wb, sheet, chart);
+    let m = EguiMeasure { painter: p, z };
+    let prims = gridcraft_chart::render(chart, &data, w, h, &m);
+    paint_prims(&p.with_clip_rect(rect.intersect(p.clip_rect())), origin, &prims, z);
+}
+
 /// Paints chart primitives at `origin`, scaled by `z`.
 pub fn paint_prims(p: &Painter, origin: Pos2, prims: &[Prim], z: f32) {
     let pt = |x: f32, y: f32| pos2(origin.x + x * z, origin.y + y * z);

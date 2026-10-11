@@ -53,6 +53,33 @@ fn entering_empty_cells_preserves_whole_sheet_formatting() {
 }
 
 #[test]
+fn chart_recommendations_follow_the_data_shape() {
+    // #215: Recommended Charts lists chart types for the data; programmatic insert stays dialog-free.
+    let mut s = s();
+    let kinds = |s: &mut Session, range: &str| -> Vec<String> {
+        let r = s.execute("insert.chartRecommendations", json!({"range": range})).unwrap();
+        r.as_array().unwrap().iter().map(|x| format!("{}{}", x["type"].as_str().unwrap(), x["subtype"].as_str().unwrap())).collect()
+    };
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Fruit", "Sales"], ["Apples", 5], ["Pears", 3], ["Plums", 2]]})).unwrap();
+    assert_eq!(kinds(&mut s, "A1:B4"), ["column", "bar", "pie", "doughnut", "linemarkers"]);
+    s.execute("range.setValues", json!({"range": "D1", "values": [[1, 2], [2, 4.5], [3, 5.5], [4, 9]]})).unwrap();
+    assert_eq!(kinds(&mut s, "D1:E4").first().map(String::as_str), Some("scatter"), "two numeric columns: scatter first");
+    s.execute("range.setValues", json!({"range": "G1", "values": [["Q", "North", "South"], ["Q1", 1, -2], ["Q2", 3, 4]]})).unwrap();
+    let multi = kinds(&mut s, "G1:I3");
+    assert_eq!(multi.first().map(String::as_str), Some("column"));
+    assert!(!multi.iter().any(|k| k == "pie"), "several series: no pie");
+    assert!(s.execute("insert.chartRecommendations", json!({"range": "K1:K3"})).is_err(), "no numbers, no chart");
+
+    // Without a type the command inserts the first recommendation; with one, that type.
+    s.execute("insert.recommendedCharts", json!({"range": "D1:E4"})).unwrap();
+    s.execute("insert.recommendedCharts", json!({"range": "A1:B4", "type": "pie"})).unwrap();
+    let d = s.doc().unwrap();
+    let kinds: Vec<_> = d.wb.active().unwrap().charts.iter().map(|c| c.kind).collect();
+    assert_eq!(kinds, [gridcraft_model::ChartKind::Scatter, gridcraft_model::ChartKind::Pie]);
+    assert!(s.ui_requests.is_empty(), "programmatic calls never open the dialog");
+}
+
+#[test]
 fn entry_and_text_paste_use_inherited_formats_and_cell_overrides() {
     let mut s = s();
     s.execute("home.bold", json!({"range": "B:B", "on": true})).unwrap();
