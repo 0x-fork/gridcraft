@@ -207,66 +207,6 @@ fn keytip_wvg_() {
 }
 
 #[test]
-fn keytip_0_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "0", false);
-    assert!(h.state().dialog.is_none(), "0 must not open a dialog");
-    assert!(h.state().message.is_none(), "0 must not open a message box");
-    assert!(h.state().toast.is_none(), "0 must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "0 must not journal");
-}
-
-#[test]
-fn keytip_1_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "1", false);
-    assert!(h.state().dialog.is_none(), "1 must not open a dialog");
-    assert!(h.state().message.is_none(), "1 must not open a message box");
-    assert!(h.state().toast.is_none(), "1 must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "1 must not journal");
-}
-
-#[test]
-fn keytip_2_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "2", false);
-    assert!(h.state().dialog.is_none(), "2 must not open a dialog");
-    assert!(h.state().message.is_none(), "2 must not open a message box");
-    assert!(h.state().toast.is_none(), "2 must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "2 must not journal");
-}
-
-#[test]
-fn keytip_3_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "3", false);
-    assert!(h.state().dialog.is_none(), "3 must not open a dialog");
-    assert!(h.state().message.is_none(), "3 must not open a message box");
-    assert!(h.state().toast.is_none(), "3 must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "3 must not journal");
-}
-
-#[test]
-fn keytip_4_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "4", false);
-    assert!(h.state().dialog.is_none(), "4 must not open a dialog");
-    assert!(h.state().message.is_none(), "4 must not open a message box");
-    assert!(h.state().toast.is_none(), "4 must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "4 must not journal");
-}
-
-#[test]
-fn keytip_5_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "5", false);
-    assert!(h.state().dialog.is_none(), "5 must not open a dialog");
-    assert!(h.state().message.is_none(), "5 must not open a message box");
-    assert!(h.state().toast.is_none(), "5 must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "5 must not journal");
-}
-
-#[test]
 fn keytip_h0_() {
     let mut h = harness(blank());
     sequence(&mut h, "H0", false);
@@ -2517,30 +2457,10 @@ fn keytip_rv_() {
 }
 
 #[test]
-fn keytip_rw_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "RW", false);
-    assert!(h.state().dialog.is_none(), "RW must not open a dialog");
-    assert!(h.state().message.is_none(), "RW must not open a message box");
-    assert!(h.state().toast.is_none(), "RW must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "RW must not journal");
-}
-
-#[test]
 fn keytip_wa_() {
     let mut h = harness(blank());
     sequence(&mut h, "WA", false);
     assert!(h.state().session.journal.iter().any(|(id, _)| id == "view.arrangeAll"), "WA must journal view.arrangeAll");
-}
-
-#[test]
-fn keytip_wb_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "WB", false);
-    assert!(h.state().dialog.is_none(), "WB must not open a dialog");
-    assert!(h.state().message.is_none(), "WB must not open a message box");
-    assert!(h.state().toast.is_none(), "WB must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "WB must not journal");
 }
 
 #[test]
@@ -2713,16 +2633,6 @@ fn keytip_wvh_() {
 }
 
 #[test]
-fn keytip_wvl_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "WVL", false);
-    assert!(h.state().dialog.is_none(), "WVL must not open a dialog");
-    assert!(h.state().message.is_none(), "WVL must not open a message box");
-    assert!(h.state().toast.is_none(), "WVL must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "WVL must not journal");
-}
-
-#[test]
 fn keytip_wvn_() {
     let mut h = harness(blank());
     sequence(&mut h, "WVN", false);
@@ -2737,16 +2647,6 @@ fn keytip_wvr_() {
     let mut h = harness(blank());
     sequence(&mut h, "WVR", false);
     assert!(h.state().session.journal.iter().any(|(id, _)| id == "view.ruler"), "WVR must journal view.ruler");
-}
-
-#[test]
-fn keytip_wvv_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "WVV", false);
-    assert!(h.state().dialog.is_none(), "WVV must not open a dialog");
-    assert!(h.state().message.is_none(), "WVV must not open a message box");
-    assert!(h.state().toast.is_none(), "WVV must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "WVV must not journal");
 }
 
 #[test]
@@ -2806,16 +2706,6 @@ fn keytip_fc_() {
 }
 
 #[test]
-fn keytip_fd_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "FD", false);
-    assert!(h.state().dialog.is_none(), "FD must not open a dialog");
-    assert!(h.state().message.is_none(), "FD must not open a message box");
-    assert!(h.state().toast.is_none(), "FD must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "FD must not journal");
-}
-
-#[test]
 fn keytip_fea_() {
     let mut h = harness(blank());
     sequence(&mut h, "FEA", false);
@@ -2827,16 +2717,6 @@ fn keytip_fec_() {
     let mut h = harness(blank());
     sequence(&mut h, "FEC", false);
     assert!(h.state().session.journal.iter().any(|(id, _)| id == "file.saveAs"), "FEC must journal file.saveAs");
-}
-
-#[test]
-fn keytip_fh_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "FH", false);
-    assert!(h.state().dialog.is_none(), "FH must not open a dialog");
-    assert!(h.state().message.is_none(), "FH must not open a message box");
-    assert!(h.state().toast.is_none(), "FH must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "FH must not journal");
 }
 
 #[test]
@@ -2868,16 +2748,6 @@ fn keytip_fp_() {
 }
 
 #[test]
-fn keytip_ft_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "FT", false);
-    assert!(h.state().dialog.is_none(), "FT must not open a dialog");
-    assert!(h.state().message.is_none(), "FT must not open a message box");
-    assert!(h.state().toast.is_none(), "FT must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "FT must not journal");
-}
-
-#[test]
 fn keytip_q_() {
     let mut h = harness(blank());
     sequence(&mut h, "Q", false);
@@ -2888,48 +2758,8 @@ fn keytip_q_() {
 }
 
 #[test]
-fn keytip_6_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "6", false);
-    assert!(h.state().dialog.is_none(), "6 must not open a dialog");
-    assert!(h.state().message.is_none(), "6 must not open a message box");
-    assert!(h.state().toast.is_none(), "6 must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "6 must not journal");
-}
-
-#[test]
-fn keytip_7_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "7", false);
-    assert!(h.state().dialog.is_none(), "7 must not open a dialog");
-    assert!(h.state().message.is_none(), "7 must not open a message box");
-    assert!(h.state().toast.is_none(), "7 must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "7 must not journal");
-}
-
-#[test]
-fn keytip_8_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "8", false);
-    assert!(h.state().dialog.is_none(), "8 must not open a dialog");
-    assert!(h.state().message.is_none(), "8 must not open a message box");
-    assert!(h.state().toast.is_none(), "8 must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "8 must not journal");
-}
-
-#[test]
-fn keytip_9_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "9", false);
-    assert!(h.state().dialog.is_none(), "9 must not open a dialog");
-    assert!(h.state().message.is_none(), "9 must not open a message box");
-    assert!(h.state().toast.is_none(), "9 must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "9 must not journal");
-}
-
-#[test]
 fn generated_test_count_matches_the_table() {
-    const EXPECTED: usize = 381;
+    const EXPECTED: usize = 364;
     assert_eq!(gridcraft_ui_egui::keytips::keytip_table::SEQUENCES.len(), EXPECTED);
 }
 

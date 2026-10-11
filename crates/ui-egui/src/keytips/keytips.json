@@ -125,54 +125,6 @@
    "target": "view.gridlines"
   },
   {
-   "seq": "0",
-   "kind": "command",
-   "target": "qat.10",
-   "pending": true,
-   "excel": "Quick Access Toolbar position 10",
-   "note": "QAT navigation does not exist yet"
-  },
-  {
-   "seq": "1",
-   "kind": "command",
-   "target": "qat.1",
-   "pending": true,
-   "excel": "Quick Access Toolbar position 1",
-   "note": "QAT navigation does not exist yet"
-  },
-  {
-   "seq": "2",
-   "kind": "command",
-   "target": "qat.2",
-   "pending": true,
-   "excel": "Quick Access Toolbar position 2",
-   "note": "QAT navigation does not exist yet"
-  },
-  {
-   "seq": "3",
-   "kind": "command",
-   "target": "qat.3",
-   "pending": true,
-   "excel": "Quick Access Toolbar position 3",
-   "note": "QAT navigation does not exist yet"
-  },
-  {
-   "seq": "4",
-   "kind": "command",
-   "target": "qat.4",
-   "pending": true,
-   "excel": "Quick Access Toolbar position 4",
-   "note": "QAT navigation does not exist yet"
-  },
-  {
-   "seq": "5",
-   "kind": "command",
-   "target": "qat.5",
-   "pending": true,
-   "excel": "Quick Access Toolbar position 5",
-   "note": "QAT navigation does not exist yet"
-  },
-  {
    "seq": "H0",
    "kind": "command",
    "target": "home.increaseDecimal",
@@ -2283,27 +2235,11 @@
    "note": "Previous Comment; reserved until the command lands"
   },
   {
-   "seq": "RW",
-   "kind": "command",
-   "target": "review.shareWorkbook",
-   "pending": true,
-   "excel": "Share Workbook",
-   "note": "reserved until the command lands"
-  },
-  {
    "seq": "WA",
    "kind": "command",
    "target": "view.arrangeAll",
    "excel": "Arrange All",
    "note": ""
-  },
-  {
-   "seq": "WB",
-   "kind": "command",
-   "target": "view.sideBySide",
-   "pending": true,
-   "excel": "View Side by Side",
-   "note": "reserved until the command lands"
   },
   {
    "seq": "WC",
@@ -2467,14 +2403,6 @@
    "note": "containment(Headings)"
   },
   {
-   "seq": "WVL",
-   "kind": "command",
-   "target": "view.synchronousScrolling",
-   "pending": true,
-   "excel": "Synchronous Scrolling",
-   "note": "Synchronous Scrolling; reserved until the command lands"
-  },
-  {
    "seq": "WVN",
    "kind": "command",
    "target": "view.navigation",
@@ -2488,14 +2416,6 @@
    "target": "view.ruler",
    "excel": "Ruler",
    "note": ""
-  },
-  {
-   "seq": "WVV",
-   "kind": "command",
-   "target": "view.sideBySide",
-   "pending": true,
-   "excel": "View Side by Side",
-   "note": "reserved until the command lands"
   },
   {
    "seq": "WW",
@@ -2553,14 +2473,6 @@
    "excel": "Close workbook"
   },
   {
-   "seq": "FD",
-   "kind": "command",
-   "target": "file.account",
-   "pending": true,
-   "excel": "Account page",
-   "note": "Account page; reserved until the command lands"
-  },
-  {
    "seq": "FEA",
    "kind": "command",
    "target": "file.exportPdf",
@@ -2573,14 +2485,6 @@
    "target": "file.saveAs",
    "excel": "Export: change file type",
    "note": "Export: change file type"
-  },
-  {
-   "seq": "FH",
-   "kind": "command",
-   "target": "file.home",
-   "pending": true,
-   "excel": "File Home page (recent/pinned/shared/new blank)",
-   "note": "File Home page; reserved until the command lands"
   },
   {
    "seq": "FI",
@@ -2611,52 +2515,12 @@
    "note": "containment(Print)"
   },
   {
-   "seq": "FT",
-   "kind": "command",
-   "target": "file.options",
-   "pending": true,
-   "excel": "Options dialog",
-   "note": "Options dialog; reserved until the command lands"
-  },
-  {
    "seq": "Q",
    "kind": "command",
    "target": "ui.search",
    "pending": true,
    "excel": "Search / Tell Me",
    "note": "Alt+Q search box does not exist yet (issue #49)"
-  },
-  {
-   "seq": "6",
-   "kind": "command",
-   "target": "qat.6",
-   "pending": true,
-   "excel": "Quick Access Toolbar position 6",
-   "note": "QAT navigation does not exist yet"
-  },
-  {
-   "seq": "7",
-   "kind": "command",
-   "target": "qat.7",
-   "pending": true,
-   "excel": "Quick Access Toolbar position 7",
-   "note": "QAT navigation does not exist yet"
-  },
-  {
-   "seq": "8",
-   "kind": "command",
-   "target": "qat.8",
-   "pending": true,
-   "excel": "Quick Access Toolbar position 8",
-   "note": "QAT navigation does not exist yet"
-  },
-  {
-   "seq": "9",
-   "kind": "command",
-   "target": "qat.9",
-   "pending": true,
-   "excel": "Quick Access Toolbar position 9",
-   "note": "QAT navigation does not exist yet"
   }
  ]
 }

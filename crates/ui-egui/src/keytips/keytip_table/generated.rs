@@ -27,18 +27,12 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("HOI", Entry::Finish(Action::Command("home.autofitColumnWidth"))),
     ("OCA", Entry::Finish(Action::Command("home.autofitColumnWidth"))), // Legacy Format menu.
     ("WVG", Entry::Finish(Action::Command("view.gridlines"))),
-    ("0", Entry::Finish(Action::Pending("qat.10"))), // pending; Excel: Quick Access Toolbar position 10; QAT navigation does not exist yet
-    ("1", Entry::Finish(Action::Pending("qat.1"))),  // pending; Excel: Quick Access Toolbar position 1; QAT navigation does not exist yet
-    ("2", Entry::Finish(Action::Pending("qat.2"))),  // pending; Excel: Quick Access Toolbar position 2; QAT navigation does not exist yet
-    ("3", Entry::Finish(Action::Pending("qat.3"))),  // pending; Excel: Quick Access Toolbar position 3; QAT navigation does not exist yet
-    ("4", Entry::Finish(Action::Pending("qat.4"))),  // pending; Excel: Quick Access Toolbar position 4; QAT navigation does not exist yet
-    ("5", Entry::Finish(Action::Pending("qat.5"))),  // pending; Excel: Quick Access Toolbar position 5; QAT navigation does not exist yet
     ("H0", Entry::Finish(Action::Command("home.increaseDecimal"))), // Excel: Increase Decimals; containment(Increase Decimal)
-    ("H1", Entry::Finish(Action::Command("home.bold"))), // Excel: Bold
-    ("H2", Entry::Finish(Action::Command("home.italic"))), // Excel: Italic
-    ("H3", Entry::Finish(Action::Command("home.underline"))), // Excel: Excel: Underline; fires immediately (not a menu)
-    ("H5", Entry::Finish(Action::Command("home.decreaseIndent"))), // Excel: Decrease Indent
-    ("H6", Entry::Finish(Action::Command("home.increaseIndent"))), // Excel: Increase Indent
+    ("H1", Entry::Finish(Action::Command("home.bold"))),            // Excel: Bold
+    ("H2", Entry::Finish(Action::Command("home.italic"))),          // Excel: Italic
+    ("H3", Entry::Finish(Action::Command("home.underline"))),       // Excel: Excel: Underline; fires immediately (not a menu)
+    ("H5", Entry::Finish(Action::Command("home.decreaseIndent"))),  // Excel: Decrease Indent
+    ("H6", Entry::Finish(Action::Command("home.increaseIndent"))),  // Excel: Increase Indent
     ("H9", Entry::Finish(Action::Command("home.decreaseDecimal"))), // Excel: Decrease Decimals; containment(Decrease Decimal)
     ("HAN", Entry::Finish(Action::Command("home.accounting"))), // Excel: Accounting Format; fires immediately in Excel; deeper aliases dropped as unreachable
     ("HAS", Entry::Finish(Action::Command("home.addIns"))),     // Excel: Add-ins; containment(Add-ins)
@@ -335,9 +329,7 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("RS", Entry::Finish(Action::Dialog("spelling"))),              // Excel: Spelling
     ("RTN", Entry::Finish(Action::Command("review.newNote"))),      // Excel: New Note
     ("RV", Entry::Finish(Action::Pending("review.previousComment"))), // pending; Excel: Previous Comment; Previous Comment; reserved until the command lands
-    ("RW", Entry::Finish(Action::Pending("review.shareWorkbook"))),   // pending; Excel: Share Workbook; reserved until the command lands
     ("WA", Entry::Finish(Action::Command("view.arrangeAll"))),        // Excel: Arrange All
-    ("WB", Entry::Finish(Action::Pending("view.sideBySide"))),        // pending; Excel: View Side by Side; reserved until the command lands
     ("WC", Entry::Finish(Action::Command("view.customViews"))),       // Excel: Custom Views
     ("WF", Entry::Continue),                                          // Excel: Freeze Panes Menu; group level:
     ("WFC", Entry::Finish(Action::Command("view.freezeFirstColumn"))), // Excel: Freeze First Column
@@ -361,30 +353,21 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("WVC", Entry::Finish(Action::Pending("view.focusCell"))),        // pending; Excel: Focus Cell Menu; Focus Cell; reserved until the command lands
     ("WVF", Entry::Finish(Action::Control("view.formulaBar"))),       // Excel: Toggle Formula Bar; toggles the formula bar
     ("WVH", Entry::Finish(Action::Command("view.headings"))),         // Excel: Toggle Headings; containment(Headings)
-    ("WVL", Entry::Finish(Action::Pending("view.synchronousScrolling"))), // pending; Excel: Synchronous Scrolling; Synchronous Scrolling; reserved until the command lands
-    ("WVN", Entry::Finish(Action::Pending("view.navigation"))), // pending; Excel: Navigation; Navigation pane; reserved until the command lands
-    ("WVR", Entry::Finish(Action::Command("view.ruler"))),      // Excel: Ruler
-    ("WVV", Entry::Finish(Action::Pending("view.sideBySide"))), // pending; Excel: View Side by Side; reserved until the command lands
-    ("WW", Entry::Finish(Action::Command("view.switchWindows"))), // Excel: Switch Windows
+    ("WVN", Entry::Finish(Action::Pending("view.navigation"))),       // pending; Excel: Navigation; Navigation pane; reserved until the command lands
+    ("WVR", Entry::Finish(Action::Command("view.ruler"))),            // Excel: Ruler
+    ("WW", Entry::Finish(Action::Command("view.switchWindows"))),     // Excel: Switch Windows
     ("JAM", Entry::Finish(Action::Command("chart.formatSelection"))), // Excel: Chart format: Format Selection pane; containment(Format Selection)
-    ("JCA", Entry::Finish(Action::Command("chart.addElement"))), // Excel: Chart: Add Chart Element; containment(Add Chart Element)
-    ("JCC", Entry::Finish(Action::Command("chart.changeType"))), // Excel: Chart: Change Chart Type; containment(Change Chart Type)
-    ("JTS", Entry::Finish(Action::Command("table.style"))),     // Excel: Table: table style
+    ("JCA", Entry::Finish(Action::Command("chart.addElement"))),      // Excel: Chart: Add Chart Element; containment(Add Chart Element)
+    ("JCC", Entry::Finish(Action::Command("chart.changeType"))),      // Excel: Chart: Change Chart Type; containment(Change Chart Type)
+    ("JTS", Entry::Finish(Action::Command("table.style"))),           // Excel: Table: table style
     ("JTV", Entry::Finish(Action::Command("table.summarizePivot"))), // Excel: Table: Summarize with PivotTable; containment(Summarize with PivotTable)
     ("FA", Entry::Finish(Action::Command("file.saveAs"))), // Excel: Save / Save As page; fires immediately in Excel; deeper aliases dropped as unreachable
     ("FC", Entry::Finish(Action::Command("file.close"))),  // Excel: Close workbook
-    ("FD", Entry::Finish(Action::Pending("file.account"))), // pending; Excel: Account page; Account page; reserved until the command lands
     ("FEA", Entry::Finish(Action::Command("file.exportPdf"))), // Excel: Export: create PDF/XPS; Export: create PDF/XPS
     ("FEC", Entry::Finish(Action::Command("file.saveAs"))), // Excel: Export: change file type; Export: change file type
-    ("FH", Entry::Finish(Action::Pending("file.home"))), // pending; Excel: File Home page (recent/pinned/shared/new blank); File Home page; reserved until the command lands
     ("FI", Entry::Finish(Action::Command("file.properties"))), // Excel: Info page; fires immediately in Excel; deeper aliases dropped as unreachable
-    ("FN", Entry::Finish(Action::Command("file.new"))),  // Excel: New page; New page
-    ("FO", Entry::Finish(Action::Command("file.open"))), // Excel: Open page; fires immediately in Excel; deeper aliases dropped as unreachable
-    ("FP", Entry::Finish(Action::Command("file.print"))), // Excel: Print page; containment(Print)
-    ("FT", Entry::Finish(Action::Pending("file.options"))), // pending; Excel: Options dialog; Options dialog; reserved until the command lands
-    ("Q", Entry::Finish(Action::Pending("ui.search"))),  // pending; Excel: Search / Tell Me; Alt+Q search box does not exist yet (issue #49)
-    ("6", Entry::Finish(Action::Pending("qat.6"))),      // pending; Excel: Quick Access Toolbar position 6; QAT navigation does not exist yet
-    ("7", Entry::Finish(Action::Pending("qat.7"))),      // pending; Excel: Quick Access Toolbar position 7; QAT navigation does not exist yet
-    ("8", Entry::Finish(Action::Pending("qat.8"))),      // pending; Excel: Quick Access Toolbar position 8; QAT navigation does not exist yet
-    ("9", Entry::Finish(Action::Pending("qat.9"))),      // pending; Excel: Quick Access Toolbar position 9; QAT navigation does not exist yet
+    ("FN", Entry::Finish(Action::Command("file.new"))),    // Excel: New page; New page
+    ("FO", Entry::Finish(Action::Command("file.open"))),   // Excel: Open page; fires immediately in Excel; deeper aliases dropped as unreachable
+    ("FP", Entry::Finish(Action::Command("file.print"))),  // Excel: Print page; containment(Print)
+    ("Q", Entry::Finish(Action::Pending("ui.search"))),    // pending; Excel: Search / Tell Me; Alt+Q search box does not exist yet (issue #49)
 ];

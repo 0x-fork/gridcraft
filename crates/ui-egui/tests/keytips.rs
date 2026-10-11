@@ -521,6 +521,21 @@ fn editable_combos_filter_by_typing_and_move_by_arrows() {
 }
 
 #[test]
+fn color_palette_navigates_with_arrows_and_enter_applies() {
+    let mut h = harness(blank());
+    sequence(&mut h, &[Key::H, Key::H], false); // H,H opens the fill palette
+    h.run_steps(3);
+    key(&mut h, Key::ArrowDown); // highlight starts at theme row 0
+    key(&mut h, Key::ArrowRight); // -> row 0, col 1 = Craft theme dk1 (#000000)
+    key(&mut h, Key::Enter);
+    h.run_steps(3);
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "arrow+Enter must not error");
+    assert_eq!(h.state().session.journal.iter().filter(|(id, _)| id == "home.fillColor").count(), 1, "Enter applies the highlighted swatch");
+    assert_eq!(h.state().grid.last_fill, "#000000", "the applied fill is the highlighted colour");
+    assert_eq!(h.query_all_by_label("Theme Colors").count(), 0, "the palette closes after applying");
+}
+
+#[test]
 fn every_sequence_terminates_without_panicking() {
     use gridcraft_ui_egui::keytips::keytip_table::SEQUENCES;
     for (seq, _entry) in SEQUENCES {
