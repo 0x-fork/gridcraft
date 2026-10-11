@@ -1714,7 +1714,7 @@ fn review(app: &mut SheetApp, ui: &mut Ui) {
         }
     }
     if big_button(ui, Icon::Book, "Protect\nWorkbook", "Protect Workbook structure", false).clicked() {
-        act(app, "review.protectWorkbook", json!({}));
+        crate::backstage::protect_workbook(app);
     }
     if big_button(ui, Icon::Validation, "Allow Edit\nRanges", "Allow Edit Ranges", false).clicked() {
         app.open_dialog("allowEditRanges", json!({}));

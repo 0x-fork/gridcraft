@@ -48,7 +48,7 @@ fn shared_formulas_and_value_types() {
 
 #[test]
 fn workbook_settings_names_and_states() {
-    let wb_extra = r#"<workbookPr date1904="1"/><workbookProtection lockStructure="1"/><bookViews><workbookView activeTab="0"/></bookViews>"#;
+    let wb_extra = r#"<workbookPr date1904="1"/><workbookProtection workbookPassword="83AF" lockStructure="1"/><bookViews><workbookView activeTab="0"/></bookViews>"#;
     // Defined names must come after <sheets>; build the workbook by hand.
     let wbx = format!(
         r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">{wb_extra}<sheets><sheet name="A" sheetId="1" r:id="rId1"/><sheet name="B" sheetId="2" state="veryHidden" r:id="rId2"/><sheet name="Chart" sheetId="3" r:id="rId3"/><sheet name="C" sheetId="4" state="hidden" r:id="rId4"/></sheets>
@@ -69,6 +69,9 @@ fn workbook_settings_names_and_states() {
     assert_eq!(wb.sheets.len(), 3);
     assert_eq!(wb.date_system, DateSystem::D1904);
     assert!(wb.protected_structure);
+    // The legacy structure password ("password" hashes to 83AF) is kept and really verifies.
+    let pw = wb.structure_password.as_ref().unwrap();
+    assert!(pw.verify("password").unwrap() && !pw.verify("Password").unwrap());
     assert_eq!(wb.calc.mode, CalcMode::Manual);
     assert!(wb.calc.iterative);
     assert_eq!(wb.calc.max_iterations, 50);

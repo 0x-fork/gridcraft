@@ -22,6 +22,7 @@ fn sample() -> Workbook {
     wb.date_system = DateSystem::D1904;
     wb.calc = CalcSettings { mode: CalcMode::Manual, iterative: true, max_iterations: 42, max_change: 0.5, precision_as_displayed: true };
     wb.protected_structure = true;
+    wb.structure_password = Some(gridcraft_model::PasswordHash::new_sha512("s3cret", b"0123456789abcdef"));
     wb.props = DocProps {
         title: "T & <x>".into(),
         subject: "S".into(),
@@ -412,6 +413,8 @@ fn full_roundtrip() {
     assert_eq!(back.date_system, wb.date_system);
     assert_eq!(back.calc, wb.calc);
     assert!(back.protected_structure);
+    assert_eq!(back.structure_password, wb.structure_password);
+    assert!(back.structure_password.as_ref().unwrap().verify("s3cret").unwrap());
     assert_eq!(back.props, wb.props);
     assert_eq!(back.theme, wb.theme);
     assert_eq!(back.names, wb.names);

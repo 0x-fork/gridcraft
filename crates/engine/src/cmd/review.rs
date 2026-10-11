@@ -19,7 +19,15 @@ pub fn specs() -> Vec<CommandSpec> {
             protect_sheet
         ),
         cmd!("review.unprotectSheet", "Unprotect Sheet", ["Review", "Protect"], None, "{password?}", has_doc, unprotect_sheet),
-        cmd!("review.protectWorkbook", "Protect Workbook", ["Review", "Protect"], None, "{on?: bool}", has_doc, protect_workbook),
+        cmd!(
+            "review.protectWorkbook",
+            "Protect Workbook",
+            ["Review", "Protect"],
+            None,
+            "{on?: bool (default: toggle), password?} (structure protection; unprotecting needs the password when one was set)",
+            has_doc,
+            protect_workbook
+        ),
         cmd!(query "review.workbookStatistics", "Workbook Statistics", ["Review", "Proofing"], None, "{}", has_doc, stats),
         // Not journaled: the params can hold a password.
         CommandSpec {
@@ -159,6 +167,15 @@ fn unprotect_sheet(s: &mut Session, p: &Json) -> Result<Json> {
     })
 }
 
+/// A new Excel-compatible (SHA-512, salted) hash of `pw`. The salt mixes `what` is protected
+/// with the document, a counter and the clock, so equal passwords get different hashes.
+fn new_password_hash(d: &DocState, what: &str, pw: &str) -> PasswordHash {
+    static SALT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = SALT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let seed = format!("{what}\u{0}{n}\u{0}{}\u{0}{}", d.uid, gridcraft_calc::now_serial().to_bits());
+    PasswordHash::new_sha512(pw, &gridcraft_model::password::salt_from(seed.as_bytes()))
+}
+
 fn range_text(r: &EditRange) -> String {
     r.ranges.iter().map(|x| x.a1()).collect::<Vec<_>>().join(",")
 }
@@ -166,7 +183,6 @@ fn range_text(r: &EditRange) -> String {
 /// Review › Allow Edit Ranges: list, add, modify or delete the ranges that stay editable on a
 /// protected sheet, or unlock a password range for this session.
 fn allow_edit_ranges(s: &mut Session, p: &Json) -> Result<Json> {
-    static SALT_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let sheet = target_sheet(s, p)?;
     let action = str_param(p, "action").unwrap_or("list");
     let title = str_param(p, "title").map(str::trim).filter(|t| !t.is_empty());
@@ -180,11 +196,7 @@ fn allow_edit_ranges(s: &mut Session, p: &Json) -> Result<Json> {
             .position(|r| r.title.eq_ignore_ascii_case(t))
             .ok_or_else(|| bad("review.allowEditRanges", format!("no range titled `{t}`")))
     };
-    let hash = |pw: &str, title: &str| {
-        let n = SALT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let seed = format!("{sheet_name}\u{0}{title}\u{0}{n}\u{0}{}\u{0}{}", d.uid, gridcraft_calc::now_serial().to_bits());
-        PasswordHash::new_sha512(pw, &gridcraft_model::password::salt_from(seed.as_bytes()))
-    };
+    let hash = |pw: &str, title: &str| new_password_hash(d, &format!("{sheet_name}\u{0}{title}"), pw);
     if matches!(action, "add" | "modify" | "delete") && sh.is_protected() {
         return Err(EngineError::Other("Unprotect the sheet to change its edit ranges.".into()));
     }
@@ -270,11 +282,28 @@ fn allow_edit_ranges(s: &mut Session, p: &Json) -> Result<Json> {
     ))
 }
 
+/// Review › Protect Workbook: lock the workbook structure (sheets can't be added, moved,
+/// renamed, hidden or deleted), optionally with a password that unprotecting must match.
 fn protect_workbook(s: &mut Session, p: &Json) -> Result<Json> {
-    let cur = s.doc()?.wb.protected_structure;
+    let d = s.doc()?;
+    let cur = d.wb.protected_structure;
     let on = bool_param(p, "on").unwrap_or(!cur);
+    if on == cur {
+        return Ok(json!({"on": on}));
+    }
+    let password = if on {
+        str_param(p, "password").filter(|pw| !pw.is_empty()).map(|pw| new_password_hash(d, "workbook", pw))
+    } else {
+        if let Some(h) = &d.wb.structure_password
+            && !h.verify(str_param(p, "password").unwrap_or("")).map_err(EngineError::Other)?
+        {
+            return Err(EngineError::Other("The password you supplied is not correct.".into()));
+        }
+        None
+    };
     edit(s, |cx| {
         cx.wb.protected_structure = on;
+        cx.wb.structure_password = password.clone();
         Ok(json!({"on": on}))
     })
 }
@@ -353,6 +382,26 @@ mod tests {
         assert!(s.execute("review.nextComment", json!({})).is_err());
         assert!(s.execute("review.previousComment", json!({})).is_err());
         assert_eq!(at(&s), (0, "A1".to_string()));
+    }
+
+    #[test]
+    fn protect_workbook_with_a_password_really_verifies() {
+        let mut s = book();
+        s.execute("review.protectWorkbook", json!({"password": "pa55"})).unwrap();
+        assert!(s.doc().unwrap().wb.protected_structure);
+        assert!(s.execute("home.insertSheet", json!({"name": "Three"})).is_err(), "the structure is locked");
+        // A second Protect keeps it protected; unprotecting needs the right password.
+        assert_eq!(s.execute("review.protectWorkbook", json!({"on": true})).unwrap()["on"], true);
+        assert!(s.execute("review.protectWorkbook", json!({})).is_err());
+        assert!(s.execute("review.protectWorkbook", json!({"on": false, "password": "pass"})).is_err());
+        assert!(s.doc().unwrap().wb.protected_structure);
+        s.execute("review.protectWorkbook", json!({"on": false, "password": "pa55"})).unwrap();
+        let wb = &s.doc().unwrap().wb;
+        assert!(!wb.protected_structure && wb.structure_password.is_none());
+        // Without a password it toggles freely.
+        s.execute("review.protectWorkbook", json!({})).unwrap();
+        s.execute("review.protectWorkbook", json!({})).unwrap();
+        assert!(!s.doc().unwrap().wb.protected_structure);
     }
 
     #[test]

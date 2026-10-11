@@ -208,6 +208,35 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
     Ok(sheet)
 }
 
+/// A protection password hash: the iterated attributes (`algorithmName`, `hashValue`,
+/// `saltValue`, `spinCount`) or the legacy 16-bit `password`, each name preceded by `prefix`
+/// (`workbook` gives `workbookHashValue`…). One that can't be read keeps a hash that never
+/// matches, so what it protects stays locked rather than open.
+pub(crate) fn read_password(e: &El, prefix: &str) -> Option<PasswordHash> {
+    let attr = |base: &str| e.attr(&password_attr(prefix, base));
+    if attr("algorithmName").is_some() || attr("hashValue").is_some() {
+        return Some(PasswordHash::Iterated {
+            algorithm: attr("algorithmName").unwrap_or("").to_string(),
+            hash: attr("hashValue").unwrap_or("").to_string(),
+            salt: attr("saltValue").unwrap_or("").to_string(),
+            spin_count: e.attr_u32(&password_attr(prefix, "spinCount")).unwrap_or(0),
+        });
+    }
+    attr("password").map(|h| match u16::from_str_radix(h.trim(), 16) {
+        Ok(h) => PasswordHash::Legacy(h),
+        Err(_) => PasswordHash::Iterated { algorithm: String::new(), hash: String::new(), salt: String::new(), spin_count: 0 },
+    })
+}
+
+/// `base` preceded by `prefix` in camel case: ("workbook", "hashValue") → `workbookHashValue`.
+pub(crate) fn password_attr(prefix: &str, base: &str) -> String {
+    let mut chars = base.chars();
+    match chars.next() {
+        Some(c) if !prefix.is_empty() => format!("{prefix}{}{}", c.to_ascii_uppercase(), chars.as_str()),
+        _ => base.to_string(),
+    }
+}
+
 /// Allow Edit Ranges. A range whose password can't be read keeps a hash that never matches
 /// (or an unsupported algorithm), so it stays locked rather than open.
 fn read_protected_ranges(e: &El, sheet: &mut Sheet) {
@@ -216,20 +245,7 @@ fn read_protected_ranges(e: &El, sheet: &mut Sheet) {
         if ranges.is_empty() {
             continue;
         }
-        let password = if p.attr("algorithmName").is_some() || p.attr("hashValue").is_some() {
-            Some(PasswordHash::Iterated {
-                algorithm: p.attr("algorithmName").unwrap_or("").to_string(),
-                hash: p.attr("hashValue").unwrap_or("").to_string(),
-                salt: p.attr("saltValue").unwrap_or("").to_string(),
-                spin_count: p.attr_u32("spinCount").unwrap_or(0),
-            })
-        } else {
-            p.attr("password").map(|h| match u16::from_str_radix(h.trim(), 16) {
-                Ok(h) => PasswordHash::Legacy(h),
-                // Unreadable: keep it locked.
-                Err(_) => PasswordHash::Iterated { algorithm: String::new(), hash: String::new(), salt: String::new(), spin_count: 0 },
-            })
-        };
+        let password = read_password(p, "");
         let title = p.attr("name").unwrap_or("").to_string();
         sheet.edit_ranges.push(EditRange { title, ranges, password, security_descriptor: p.attr("securityDescriptor").map(str::to_string) });
     }
