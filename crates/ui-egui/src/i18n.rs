@@ -334,6 +334,8 @@ const JAPANESE: &[(&str, &str)] = &[
     ("Clear Validation", "入力規則のクリア"),
     ("Group", "グループ化"),
     ("Ungroup", "グループ解除"),
+    ("Show Detail", "詳細データの表示"),
+    ("Hide Detail", "詳細を表示しない"),
     ("Subtotal", "小計"),
     ("Data\nAnalysis", "データ分析"),
     ("Data Analysis", "データ分析"),

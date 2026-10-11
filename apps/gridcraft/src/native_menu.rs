@@ -160,6 +160,8 @@ fn tree() -> Vec<(&'static str, Vec<Entry>)> {
                 ("-", "", None),
                 ("Group", "data.group", None),
                 ("Ungroup", "data.ungroup", None),
+                ("Show Detail", "data.showDetail", None),
+                ("Hide Detail", "data.hideDetail", None),
                 ("Subtotal…", "dialog:subtotal", None),
                 ("-", "", None),
                 ("Calculate Now", "formulas.calculateNow", None),

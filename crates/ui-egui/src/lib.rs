@@ -21,6 +21,7 @@ pub mod i18n;
 pub mod icons;
 pub mod keymap;
 pub mod keytips;
+pub mod outline;
 pub mod panes;
 pub mod paper_view;
 pub mod pivot_pane;
