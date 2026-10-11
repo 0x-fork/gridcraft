@@ -132,6 +132,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-10-11 | Shrink to fit draws too-wide text and numbers in a smaller font inside the cell or merged area (#375) |
 | 2026-10-11 | Legacy Excel 97-2003 `.xls` (BIFF8) import with formulas, number formats, merges, sizes and names (#121) |
 | 2026-10-11 | XLSX pass-through: custom XML, external links, connections, query tables, printer settings, form/ActiveX controls and OLE objects are kept on save (#330, #324) |
 | 2026-10-11 | Data › Forecast › Forecast Sheet: a new sheet with the history, FORECAST.ETS forecast, confidence bounds, statistics and a chart (#322) |
