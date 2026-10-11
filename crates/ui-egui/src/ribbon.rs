@@ -98,13 +98,15 @@ pub fn title_bar(app: &mut SheetApp, ui: &mut Ui) {
                     ("New Workbook", "file.new"),
                     ("Open…", "file.open"),
                     ("Save As…", "file.saveAs"),
-                    ("Print…", "file.print"),
                     ("Sort A to Z", "data.sortAscending"),
                     ("Calculate Now", "formulas.calculateNow"),
                 ] {
                     if ui.button(label).clicked() {
                         app.run_or_alert(id, json!({}));
                     }
+                }
+                if ui.button("Print…").clicked() {
+                    app.print_now(json!({}));
                 }
             });
             // Centered title.
@@ -827,9 +829,9 @@ fn font_combo(app: &mut SheetApp, ui: &mut Ui, st: &Style) {
     let mut name = st.font.name.clone();
     let before = name.clone();
     egui::ComboBox::from_id_salt("font_name").width(150.0).selected_text(egui::RichText::new(&name).font(theme::ui_font(12.5))).show_ui(ui, |ui| {
-        for f in FONTS {
-            let fam = theme::cell_family(f, false, false);
-            ui.selectable_value(&mut name, f.to_string(), egui::RichText::new(*f).font(egui::FontId::new(14.0, fam)));
+        for f in crate::fonts::families() {
+            let fam = theme::cell_family(&f, false, false);
+            ui.selectable_value(&mut name, f.clone(), egui::RichText::new(&f).font(egui::FontId::new(14.0, fam)));
         }
     });
     if name != before {
@@ -1263,6 +1265,10 @@ fn insert(app: &mut SheetApp, ui: &mut Ui) {
             }
         });
     });
+    sep(ui);
+    if big_button(ui, Icon::Filter, "Slicer", "Insert a slicer to filter a table", false).clicked() {
+        act(app, "insert.slicer", json!({}));
+    }
     sep(ui);
     let sp = big_button(ui, Icon::Sparkline, "Sparklines", "Sparklines", true);
     egui::Popup::menu(&sp).show(|ui| {
@@ -1838,6 +1844,9 @@ fn view(app: &mut SheetApp, ui: &mut Ui) {
 }
 
 fn automate(app: &mut SheetApp, ui: &mut Ui) {
+    if big_button(ui, Icon::Script, "Macros", "Macros and scripts in this workbook (Alt+F8)", false).clicked() {
+        app.open_dialog("macros", json!({}));
+    }
     if big_button(ui, Icon::Script, "Command\nPalette", "Search and run any command", false).clicked() {
         app.open_dialog("commandSearch", json!({}));
     }
@@ -1875,6 +1884,10 @@ fn table_design(app: &mut SheetApp, ui: &mut Ui) {
     }
     if big_button(ui, Icon::Table, "Convert\nto Range", "Convert to Range", false).clicked() {
         act(app, "table.convertToRange", json!({"table": tname}));
+    }
+    sep(ui);
+    if big_button(ui, Icon::Filter, "Insert\nSlicer", "Insert Slicer", false).clicked() {
+        act(app, "table.insertSlicer", json!({"table": tname}));
     }
     sep(ui);
     ui.vertical(|ui| {
@@ -1983,6 +1996,10 @@ pub fn shortcut(app: &mut SheetApp, key: Key, m: Modifiers) {
         Key::O => Some(("file.open", json!({}))),
         Key::N => Some(("file.new", json!({}))),
         Key::W => Some(("file.close", json!({}))),
+        Key::P => {
+            app.print_now(json!({}));
+            None
+        }
         Key::K => {
             app.open_dialog("insertLink", json!({}));
             None

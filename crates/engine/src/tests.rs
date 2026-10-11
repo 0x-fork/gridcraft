@@ -522,6 +522,58 @@ fn insert_delete_rows_adjust() {
 }
 
 #[test]
+fn move_columns_reorders_without_overwriting_and_undoes_once() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [[1, 2, 3, 4, 5, 6, 7, 8]]})).unwrap();
+    s.execute("cell.set", json!({"cell": "H2", "input": "=B1+D1"})).unwrap();
+    s.execute("cell.set", json!({"cell": "H3", "input": "=SUM(B:B)"})).unwrap();
+    s.execute("home.columnWidth", json!({"cols": "B:B", "width": 101})).unwrap();
+    s.execute("home.columnWidth", json!({"cols": "C:C", "width": 102})).unwrap();
+    let before = s.doc().unwrap().wb.clone();
+    s.doc_mut().unwrap().undo.clear();
+
+    let result = s.execute("sheet.moveColumns", json!({"cols": "B:C", "before": 4})).unwrap();
+    assert_eq!(result["cols"], "C:D");
+    assert_eq!(
+        (0..8).map(|col| v(&s, &CellRef::new(0, col).a1())).collect::<Vec<_>>(),
+        vec![
+            Value::Number(1.0),
+            Value::Number(4.0),
+            Value::Number(2.0),
+            Value::Number(3.0),
+            Value::Number(5.0),
+            Value::Number(6.0),
+            Value::Number(7.0),
+            Value::Number(8.0),
+        ]
+    );
+    assert_eq!(s.execute("cell.get", json!({"cell": "H2"})).unwrap()["formula"], "=C1+B1");
+    assert_eq!(s.execute("cell.get", json!({"cell": "H3"})).unwrap()["formula"], "=SUM(C:C)");
+    let sh = s.doc().unwrap().wb.active().unwrap();
+    assert_eq!(sh.col_width(2), 101.0);
+    assert_eq!(sh.col_width(3), 102.0);
+    assert_eq!(s.doc().unwrap().selection.current().a1(), "C:D");
+    assert_eq!(s.doc().unwrap().undo.len(), 1);
+
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(*s.doc().unwrap().wb, *before);
+}
+
+#[test]
+fn move_columns_can_reorder_left_and_ignores_drops_inside_the_selection() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["A", "B", "C", "D", "E"]]})).unwrap();
+    s.execute("sheet.moveColumns", json!({"cols": "D:E", "before": 1})).unwrap();
+    assert_eq!(
+        (0..5).map(|col| v(&s, &CellRef::new(0, col).a1())).collect::<Vec<_>>(),
+        vec!["A".into(), "D".into(), "E".into(), "B".into(), "C".into()]
+    );
+    let undo = s.doc().unwrap().undo.len();
+    s.execute("sheet.moveColumns", json!({"cols": "B:C", "before": 2})).unwrap();
+    assert_eq!(s.doc().unwrap().undo.len(), undo);
+}
+
+#[test]
 fn insert_copied_cells_inserts_rows_columns_and_blocks() {
     // Issue #21: Insert Copied Cells.
     let mut s = s();
@@ -928,6 +980,59 @@ fn tables_and_structured_refs() {
 }
 
 #[test]
+fn slicer_filters_table() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Region", "Qty"], ["East", 2], ["West", 5], ["East", 3], ["North", 1]]})).unwrap();
+    s.execute("insert.table", json!({"range": "A1:B5", "name": "Sales"})).unwrap();
+    s.execute("selection.set", json!({"cell": "A2"})).unwrap();
+
+    // A new slicer on the Region column filters nothing (all values selected).
+    let r = s.execute("insert.slicer", json!({})).unwrap();
+    let id = r["slicer"].as_u64().unwrap() as u32;
+    let hidden = |s: &Session| {
+        let d = s.doc().unwrap();
+        let sh = d.wb.active().unwrap();
+        (1..=4).filter(|row| sh.is_row_hidden(*row)).count() // data rows are sheet rows 1..=4 (0-based header at 0)
+    };
+    assert_eq!(hidden(&s), 0);
+    {
+        let d = s.doc().unwrap();
+        let sh = d.wb.active().unwrap();
+        assert_eq!(sh.slicers.len(), 1);
+        assert_eq!(sh.slicers[0].column, "Region");
+    }
+
+    // Single-click "East": only the two East rows remain (West row 2 and North row 4 hidden).
+    s.execute("slicer.toggle", json!({"slicer": id, "value": "East"})).unwrap();
+    assert_eq!(hidden(&s), 2);
+    {
+        let d = s.doc().unwrap();
+        let sh = d.wb.active().unwrap();
+        assert!(sh.is_row_hidden(2) && sh.is_row_hidden(4));
+        assert!(!sh.is_row_hidden(1) && !sh.is_row_hidden(3));
+    }
+
+    // Ctrl-click "West" adds it: East + West visible, only North hidden.
+    s.execute("slicer.toggle", json!({"slicer": id, "value": "West", "multi": true})).unwrap();
+    assert_eq!(hidden(&s), 1);
+
+    // Clear restores everything.
+    s.execute("slicer.clear", json!({"slicer": id})).unwrap();
+    assert_eq!(hidden(&s), 0);
+    assert!(s.doc().unwrap().wb.active().unwrap().slicers[0].selected.is_none());
+
+    // Deleting the slicer drops it and clears its filter.
+    s.execute("slicer.toggle", json!({"slicer": id, "value": "East"})).unwrap();
+    assert_eq!(hidden(&s), 2);
+    s.execute("slicer.delete", json!({"slicer": id})).unwrap();
+    assert_eq!(hidden(&s), 0);
+    assert!(s.doc().unwrap().wb.active().unwrap().slicers.is_empty());
+
+    // A bad value is rejected, not panicked.
+    assert!(s.execute("slicer.toggle", json!({"value": "Nowhere"})).is_err());
+}
+
+#[test]
 fn create_names_from_selection() {
     let names = |s: &Session| -> Vec<(String, String)> {
         let mut v: Vec<_> = s.doc().unwrap().wb.names.iter().map(|n| (n.name.clone(), n.formula.clone())).collect();
@@ -1150,6 +1255,19 @@ fn ods_import_never_reuses_source_as_save_target() {
         assert_eq!(v(&s, "A1"), Value::Number(43.0));
     }
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn validation_formulas_are_relative_and_see_the_new_value() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "B1", "values": [[1], [100]]})).unwrap();
+    s.execute("data.validation", json!({"range": "A1:A2", "type": "custom", "formula1": "=A1>10"})).unwrap();
+    s.execute("data.validation", json!({"range": "C1:C2", "type": "whole", "operator": "lessOrEqual", "formula1": "=B1"})).unwrap();
+    let ok = |s: &mut Session, cell: &str, input: &str| s.execute("data.validate", json!({"cell": cell, "input": input})).unwrap()["ok"] == true;
+    assert!(ok(&mut s, "A1", "20"));
+    assert!(!ok(&mut s, "A2", "5"));
+    assert!(ok(&mut s, "C2", "50"));
+    assert!(!ok(&mut s, "C1", "50"));
 }
 
 #[test]

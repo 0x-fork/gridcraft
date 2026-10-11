@@ -27,6 +27,11 @@ pub enum Drag {
     Select,
     Rows(u32),
     Cols(u32),
+    /// Reordering one contiguous whole-column selection by its header.
+    MoveCols {
+        source: RangeRef,
+        before: Option<u32>,
+    },
     ResizeCol {
         col: u32,
         start: f32,
@@ -1299,6 +1304,10 @@ pub(crate) fn paint_selection(
             p.rect_stroke(rr, 0.0, Stroke::new(2.0, Color32::from_gray(110)), StrokeKind::Middle);
         }
     }
+    if let crate::grid::Drag::MoveCols { before: Some(before), .. } = &app.grid.drag {
+        let x = geo.x(sh, *before);
+        p.line_segment([pos2(x, geo.rect.top()), pos2(x, geo.rect.bottom())], Stroke::new(3.0, t.accent));
+    }
     // Marching ants around the copied range.
     if let Some(clip) = &app.session.clipboard
         && app.session.active().is_some_and(|d| d.uid == clip.doc_uid && d.wb.active_sheet == clip.sheet)
@@ -1464,7 +1473,9 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
         } else if in_cells {
             ctx.set_cursor_icon(CursorIcon::Cell);
         } else if in_col_header {
-            ctx.set_cursor_icon(CursorIcon::Default);
+            let col = geo.col_at(sh, p.x);
+            let selected = sel.ranges.len() == 1 && sel.current().is_full_cols() && sel.current().contains(CellRef::new(0, col));
+            ctx.set_cursor_icon(if selected { CursorIcon::Move } else { CursorIcon::Default });
         }
         app.grid.hover_cell = in_cells.then(|| geo.cell_at(sh, p));
     }
@@ -1514,7 +1525,25 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
             return;
         }
     }
-    // Objects (charts, pictures, shapes) take clicks first.
+    // A plain click on a slicer value tile toggles it (Ctrl/Cmd for multi-select); the clear
+    // button resets it. Runs before the generic object select/drag so tiles stay clickable.
+    if primary_clicked
+        && !resp.drag_started()
+        && let Some(p) = pos
+        && let Some((id, act)) = crate::chartview::slicer_click(geo, sh, wb, wb.active_sheet, p)
+    {
+        app.selected_chart = Some(id);
+        match act {
+            crate::chartview::SlicerAction::Toggle(value) => {
+                let _ = app.run("slicer.toggle", json!({"slicer": id, "value": value, "multi": mods.command || mods.ctrl}));
+            }
+            crate::chartview::SlicerAction::Clear => {
+                let _ = app.run("slicer.clear", json!({"slicer": id}));
+            }
+        }
+        return;
+    }
+    // Objects (charts, pictures, shapes, slicers) take clicks first.
     if resp.drag_started() || primary_clicked {
         // A drag is recognised only after the pointer has moved, so grab the object where the press began.
         let at = if resp.drag_started() { pointer.press_origin().or(pos) } else { pos };
@@ -1590,6 +1619,15 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                 return;
             }
             let c = geo.col_at(sh, p.x);
+            if resp.drag_started()
+                && !mods.any()
+                && sel.ranges.len() == 1
+                && sel.current().is_full_cols()
+                && sel.current().contains(CellRef::new(0, c))
+            {
+                app.grid.drag = Drag::MoveCols { source: sel.current(), before: None };
+                return;
+            }
             let range = if mods.shift { RangeRef::cols(sel.anchor.col.min(c), sel.anchor.col.max(c)) } else { RangeRef::cols(c, c) };
             select_ranges(app, range, mods.command, CellRef::new(geo.row_at(sh, geo.cells.top() + 1.0), c));
             app.grid.drag = Drag::Cols(if mods.shift { sel.anchor.col } else { c });
@@ -1741,6 +1779,14 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                     app.session.run("selection.set", json!({"range": RangeRef::cols(anchor.min(c), anchor.max(c)).a1(), "active": sel.active.a1()}));
                 scroll_by(app, vec2(auto.x, 0.0));
             }
+            Drag::MoveCols { source, .. } => {
+                let col = geo.col_at(sh, p.x.clamp(geo.cells.left() + 1.0, geo.cells.right() - 1.0));
+                let midpoint = geo.x(sh, col) + sh.col_width(col) * geo.z * 0.5;
+                let before = (col + u32::from(p.x >= midpoint)).min(MAX_COLS - 1);
+                let before = (!(source.start.col..=source.end.col + 1).contains(&before)).then_some(before);
+                app.grid.drag = Drag::MoveCols { source, before };
+                scroll_by(app, vec2(auto.x, 0.0));
+            }
             Drag::ResizeCol { col, start, orig } => {
                 let w = (orig + (p.x - start) / geo.z).max(0.0);
                 app.toast =
@@ -1837,6 +1883,11 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                 if to != src.start {
                     let _ = app.session.run("edit.cut", json!({"range": src.a1()}));
                     let _ = app.run("edit.paste", json!({"at": to.a1()}));
+                }
+            }
+            Drag::MoveCols { source, before: Some(before) } => {
+                if let Err(e) = app.run("sheet.moveColumns", json!({"cols": source.a1(), "before": before})) {
+                    app.message = Some(("GridCraft".into(), crate::clean_error(&e)));
                 }
             }
             _ => {}
@@ -2063,6 +2114,7 @@ fn object_anchor(sh: &Sheet, kind: &str, id: u32) -> Option<gridcraft_engine::mo
     match kind {
         "chart" => sh.charts.iter().find(|c| c.id == id).map(|c| c.anchor),
         "image" => sh.images.iter().find(|c| c.id == id).map(|c| c.anchor),
+        "slicer" => sh.slicers.iter().find(|c| c.id == id).map(|c| c.anchor),
         _ => sh.shapes.iter().find(|c| c.id == id).map(|c| c.anchor),
     }
 }
@@ -2220,6 +2272,9 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
                     Key::Space if !cmd && !shift && is_checkbox(sh, app) => app.run_or_alert("cell.toggleCheckbox", json!({})),
                     Key::Space if cmd && !shift => app.run_or_alert("selection.column", json!({})),
                     Key::Space if shift && !cmd => app.run_or_alert("selection.row", json!({})),
+                    Key::F8 if m.alt => {
+                        app.open_dialog("macros", json!({}));
+                    }
                     Key::F9 => app.run_or_alert("formulas.calculateNow", json!({})),
                     Key::F4 if !cmd => {}
                     _ if cmd => crate::ribbon::shortcut(app, key, m),
@@ -2283,7 +2338,12 @@ fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_open: bool)
     let Some(sh) = wb.sheet(si) else { return };
     let _ = geo;
     // Tables get an autofilter on demand.
-    let table_range = sh.tables.first().filter(|t| col >= t.range.start.col && col <= t.range.end.col).map(|t| t.range);
+    let table_range = sh
+        .tables
+        .iter()
+        .find(|t| t.range.start.row <= at.y as u32 || true)
+        .filter(|t| col >= t.range.start.col && col <= t.range.end.col)
+        .map(|t| t.range);
     if sh.autofilter.is_none()
         && let Some(r) = table_range
     {

@@ -1589,6 +1589,7 @@ version = "0.5.0"
 dependencies = [
  "egui",
  "egui_kittest",
+ "epaint_default_fonts",
  "gridcraft-chart",
  "gridcraft-engine",
  "image",
@@ -1599,6 +1600,7 @@ dependencies = [
  "sys-locale",
  "toml",
  "web-sys",
+ "zbus",
 ]
 
 [[package]]
