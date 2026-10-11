@@ -554,6 +554,28 @@ fn vertical_scrollbar(app: &mut SheetApp, ui: &mut egui::Ui, sh: &Sheet, geo: &G
     }
 }
 
+pub(crate) fn wrapped_cell_text_y(valign: VAlign, rect: Rect, gh: f32, z: f32) -> f32 {
+    let pad_v = 1.5 * z;
+    let y_top = rect.top() + pad_v;
+    let y_bottom = (rect.bottom() - gh - pad_v).max(y_top);
+    match valign {
+        VAlign::Top => y_top,
+        VAlign::Center | VAlign::Justify | VAlign::Distributed => (y_top + y_bottom) / 2.0,
+        VAlign::Bottom => y_bottom,
+    }
+}
+
+pub(crate) fn cell_text_y(valign: VAlign, rect: Rect, gh: f32, z: f32) -> f32 {
+    let top_inset = 1.0 * z;
+    let y_top = rect.top() - top_inset;
+    let y_bottom = (rect.bottom() - gh - 0.5 * z).max(y_top);
+    match valign {
+        VAlign::Top => y_top,
+        VAlign::Center | VAlign::Justify | VAlign::Distributed => (y_top + y_bottom) / 2.0,
+        VAlign::Bottom => y_bottom,
+    }
+}
+
 /// Mirror what the grid painted into `layer` (the shape indices in `range`) for a right-to-left
 /// sheet. Geometry is reflected; text and meshes (glyphs, pictures) keep their reading direction
 /// and only move so that their box lands mirrored. Floating objects (`objects`: shape index
@@ -768,11 +790,7 @@ fn paint_quadrant(p: &Painter, geo: &Geo, wb: &Workbook, si: usize, sh: &Sheet, 
                 HAlign::Right => rect.right() - pad,
                 _ => text_left + pad + indent,
             };
-            let y = match st.align.v {
-                VAlign::Top => rect.top() + 1.0,
-                VAlign::Center => rect.center().y - galley.size().y / 2.0,
-                _ => rect.bottom() - galley.size().y - 1.0,
-            };
+            let y = wrapped_cell_text_y(st.align.v, *rect, galley.size().y, z);
             p.with_clip_rect(rect.intersect(p.clip_rect())).galley(pos2(x, y), galley, color);
             continue;
         }
@@ -838,11 +856,7 @@ fn paint_quadrant(p: &Painter, geo: &Geo, wb: &Workbook, si: usize, sh: &Sheet, 
             _ => text_left + pad + indent,
         };
         let gh = galley.size().y;
-        let y = match st.align.v {
-            VAlign::Top => rect.top() + 1.0,
-            VAlign::Center | VAlign::Justify | VAlign::Distributed => rect.center().y - gh / 2.0,
-            VAlign::Bottom => rect.bottom() - gh - 0.5 * z,
-        };
+        let y = cell_text_y(st.align.v, *rect, gh, z);
         let cp = p.with_clip_rect(clip.intersect(p.clip_rect()));
         if rotated {
             let angle = -(st.align.rotation as f32).to_radians();
@@ -2566,6 +2580,53 @@ fn paint_pages(app: &mut SheetApp, p: &Painter, geo: &Geo, sh: &Sheet) {
         );
     }
     p.rect_stroke(pr, 0.0, Stroke::new(3.0, blue), StrokeKind::Outside);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cell_text_y_moves_monotonically_in_standard_and_tall_rows() {
+        let rect_std = Rect::from_min_max(pos2(0.0, 0.0), pos2(100.0, 20.0));
+        let gh = 18.5;
+        let z = 1.0;
+
+        let y_top_std = cell_text_y(VAlign::Top, rect_std, gh, z);
+        let y_center_std = cell_text_y(VAlign::Center, rect_std, gh, z);
+        let y_bottom_std = cell_text_y(VAlign::Bottom, rect_std, gh, z);
+
+        assert!(y_top_std < y_center_std, "Top ({y_top_std}) must be higher than Center ({y_center_std})");
+        assert!(y_center_std < y_bottom_std, "Center ({y_center_std}) must be higher than Bottom ({y_bottom_std})");
+
+        // Verify tall row (e.g. 40px)
+        let rect_tall = Rect::from_min_max(pos2(0.0, 0.0), pos2(100.0, 40.0));
+        let y_top_tall = cell_text_y(VAlign::Top, rect_tall, gh, z);
+        let y_center_tall = cell_text_y(VAlign::Center, rect_tall, gh, z);
+        let y_bottom_tall = cell_text_y(VAlign::Bottom, rect_tall, gh, z);
+
+        assert!(y_top_tall < y_center_tall, "Top ({y_top_tall}) must be higher than Center ({y_center_tall})");
+        assert!(y_center_tall < y_bottom_tall, "Center ({y_center_tall}) must be higher than Bottom ({y_bottom_tall})");
+    }
+
+    #[test]
+    fn wrapped_cell_text_y_positions_correctly_and_safeguards_overflow() {
+        let rect = Rect::from_min_max(pos2(0.0, 0.0), pos2(100.0, 40.0));
+        let gh = 30.0;
+        let z = 1.0;
+
+        let y_top = wrapped_cell_text_y(VAlign::Top, rect, gh, z);
+        let y_center = wrapped_cell_text_y(VAlign::Center, rect, gh, z);
+        let y_bottom = wrapped_cell_text_y(VAlign::Bottom, rect, gh, z);
+
+        assert!(y_top < y_center);
+        assert!(y_center < y_bottom);
+
+        // Overflow case: gh exceeds rect height
+        let gh_overflow = 60.0;
+        let y_bottom_ovf = wrapped_cell_text_y(VAlign::Bottom, rect, gh_overflow, z);
+        assert!(y_bottom_ovf >= rect.top());
+    }
 }
 
 #[cfg(test)]

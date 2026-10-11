@@ -1982,6 +1982,40 @@ fn notes_comments_and_links_survive_a_json_save() {
     assert_eq!(after.cells, before.cells);
 }
 
+#[test]
+fn vertical_alignment_commands_and_roundtrip() {
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "top"})).unwrap();
+    s.execute("cell.set", json!({"cell": "A2", "input": "middle"})).unwrap();
+    s.execute("cell.set", json!({"cell": "A3", "input": "bottom"})).unwrap();
+
+    s.execute("selection.set", json!({"range": "A1"})).unwrap();
+    s.execute("home.alignTop", json!({})).unwrap();
+
+    s.execute("selection.set", json!({"range": "A2"})).unwrap();
+    s.execute("home.alignMiddle", json!({})).unwrap();
+
+    s.execute("selection.set", json!({"range": "A3"})).unwrap();
+    s.execute("home.alignBottom", json!({})).unwrap();
+
+    let style_of = |s: &Session, cell: &str| {
+        let d = s.doc().unwrap();
+        d.wb.styles.get(d.wb.active().unwrap().style_id(CellRef::parse(cell).unwrap())).clone()
+    };
+
+    assert_eq!(style_of(&s, "A1").align.v, gridcraft_model::VAlign::Top);
+    assert_eq!(style_of(&s, "A2").align.v, gridcraft_model::VAlign::Center);
+    assert_eq!(style_of(&s, "A3").align.v, gridcraft_model::VAlign::Bottom);
+
+    let d = s.doc().unwrap();
+    let bytes = gridcraft_xlsx::write_xlsx(&d.wb).unwrap();
+    let (reopened, _) = gridcraft_xlsx::read_xlsx(&bytes).unwrap();
+    let reopen_style = |cell: &str| reopened.styles.get(reopened.active().unwrap().style_id(CellRef::parse(cell).unwrap())).clone();
+    assert_eq!(reopen_style("A1").align.v, gridcraft_model::VAlign::Top);
+    assert_eq!(reopen_style("A2").align.v, gridcraft_model::VAlign::Center);
+    assert_eq!(reopen_style("A3").align.v, gridcraft_model::VAlign::Bottom);
+}
+
 /// Icon-set thresholds as read from a file (one per icon, the first the lower bound) decide the
 /// icon; a rule without thresholds uses Excel's defaults (percent 33 and 67) (#235).
 #[test]

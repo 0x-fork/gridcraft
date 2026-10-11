@@ -527,7 +527,16 @@ fn home(app: &mut SheetApp, ui: &mut Ui) {
                 (Icon::AlignMiddle, VAlign::Center, "home.alignMiddle", "Middle Align"),
                 (Icon::AlignBottom, VAlign::Bottom, "home.alignBottom", "Bottom Align"),
             ] {
-                if toggle_button(ui, icon, st.align.v == v, tip).clicked() {
+                let response = toggle_button(ui, icon, st.align.v == v, tip);
+                if matches!(app.keytips.prefix(), Some("H" | "HA")) {
+                    let sequence = match v {
+                        VAlign::Top => "HAT",
+                        VAlign::Center => "HAM",
+                        _ => "HAB",
+                    };
+                    keytip(app, ui, sequence, response.rect.center_bottom());
+                }
+                if response.clicked() {
                     act(app, id, json!({}));
                 }
             }
