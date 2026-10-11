@@ -512,6 +512,43 @@ fn sort_and_filter() {
     assert_eq!(r["hiddenRows"], 1);
 }
 
+#[test]
+fn protection_passwords_stay_out_of_the_journal_and_recorded_scripts() {
+    const PW: &str = "synthetic-pw-7319";
+    let mut s = s();
+    s.execute("automate.recordActions", json!({})).unwrap();
+    s.execute("review.protectSheet", json!({"password": PW, "formatCells": true})).unwrap();
+    // The password still protects the sheet; the refused attempt isn't journaled.
+    assert!(s.execute("review.unprotectSheet", json!({})).is_err());
+    s.execute("review.unprotectSheet", json!({"password": PW})).unwrap();
+    s.execute("automate.recordActions", json!({"stop": true, "name": "Lock"})).unwrap();
+
+    let journal = serde_json::to_string(&s.journal).unwrap();
+    assert!(!journal.contains(PW), "{journal}");
+    let params = |s: &Session, id: &str| s.journal.iter().find(|(c, _)| c == id).map(|(_, p)| p.clone());
+    assert_eq!(params(&s, "review.protectSheet"), Some(json!({"formatCells": true})));
+    assert_eq!(params(&s, "review.unprotectSheet"), Some(json!({})));
+
+    // The recorded script is stored in the workbook, so it is saved with the file.
+    let bytes = crate::io::save_bytes(&s.doc().unwrap().wb, "book.xlsx").unwrap();
+    let (reopened, _) = crate::io::open_bytes("book.xlsx", &bytes).unwrap();
+    let script = reopened.names.iter().find(|n| n.name == "_sc_scripts").map(|n| n.formula.clone()).unwrap();
+    assert!(script.contains("review.protectSheet"), "{script}");
+    assert!(!script.contains(PW), "{script}");
+
+    // The journal still replays: protection without a password, then unprotection.
+    let mut r = self::s();
+    for (id, p) in s.journal.iter().filter(|(id, _)| !id.starts_with("automate.")) {
+        r.execute(id, p.clone()).unwrap_or_else(|e| panic!("{id}: {e}"));
+        let prot = r.doc().unwrap().wb.active().unwrap().protection.clone();
+        if id == "review.protectSheet" {
+            assert!(prot.as_ref().is_some_and(|p| p.format_cells && p.password_hash.is_none()), "{prot:?}");
+        }
+    }
+    assert!(r.doc().unwrap().wb.active().unwrap().protection.is_none());
+    s.execute("automate.runScript", json!({"name": "Lock"})).unwrap();
+}
+
 /// A sheet with locked data in A1:B3, unlocked cells in D1:D3 and row 10, then protected.
 fn protected(extra: serde_json::Value) -> Session {
     let mut s = s();

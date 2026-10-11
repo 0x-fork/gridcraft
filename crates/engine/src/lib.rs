@@ -184,6 +184,7 @@ pub struct Session {
     pub clipboard: Option<Clipboard>,
     pub prefs: Prefs,
     pub mode: Mode,
+    /// Commands run so far, without their passwords ([`cmd::journal_params`]).
     pub journal: Vec<(String, Json)>,
     pub ui_requests: Vec<UiRequest>,
     /// Format painter source style (sticky when double-clicked).
@@ -284,7 +285,7 @@ impl Session {
             }
         };
         if spec.journal && result.is_ok() {
-            self.journal.push((id.to_string(), params.clone()));
+            self.journal.push((id.to_string(), cmd::journal_params(&params)));
             if self.journal.len() > 10_000 {
                 self.journal.drain(..5_000);
             }
