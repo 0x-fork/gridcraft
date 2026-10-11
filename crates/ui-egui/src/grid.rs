@@ -1421,7 +1421,8 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
             Drag::Fill { target: Some(t) } => {
                 let src = sel.current();
                 if t != src {
-                    let mode = if mods.command { "copy" } else { "series" };
+                    // Ctrl (Cmd on macOS) swaps copying and extending, as in Excel.
+                    let mode = if mods.command { "alternate" } else { "series" };
                     if let Err(e) = app.run("edit.autoFill", json!({"source": src.a1(), "target": t.a1(), "mode": mode})) {
                         app.message = Some(("GridCraft".into(), crate::clean_error(&e)));
                     }

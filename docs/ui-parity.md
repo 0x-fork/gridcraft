@@ -32,7 +32,7 @@ Sources: `crates/ui-egui/src` (ribbon, grid, editor, formula bar, dialogs, panes
 | Behaviour | Status |
 |---|---|
 | Click/drag/Shift/Ctrl selection, multi-area selection | rectangular drag works in one direction only in some cases (#28) |
-| Fill handle: drag to fill series, double-click to fill down, right-drag menu | fill done; right-drag menu missing |
+| Fill handle: drag to fill series, double-click to fill down, right-drag menu | fill done (Ctrl+drag swaps copy and series); right-drag menu missing |
 | Drag-move and drag-copy cells (border drag, Ctrl/Option, Shift to insert) | done (M3) |
 | In-cell editing, Enter/Tab movement, Alt/Option+Enter line breaks | done |
 | Point mode (click/drag/arrow references), reference colouring, F4 | done |
