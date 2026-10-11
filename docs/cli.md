@@ -3,6 +3,11 @@
 Headless GridCraft: inspect, convert, evaluate, script and serve MCP without a window. Errors go to stderr with a
 non-zero exit code.
 
+`.xls` (Excel 97-2003, BIFF8) files are imported with values, formulas, number formats, merges,
+column widths, row heights and defined names; fonts, fills, borders, charts and other objects are
+not imported yet. Import warnings go to stderr. Convert to `.xlsx` to save; `.xls` output is not
+supported.
+
 `.xlsb` files support [worksheet data import](xlsb-import.md). Formula cells use their last saved
 values; source formatting and other workbook features are omitted. Import warnings go to stderr.
 Convert to `.xlsx` to save the imported workbook; XLSB output is not supported.

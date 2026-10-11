@@ -132,6 +132,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-10-11 | Legacy Excel 97-2003 `.xls` (BIFF8) import with formulas, number formats, merges, sizes and names (#121) |
 | 2026-10-11 | Startup no longer panics on a system font egui can't parse: fonts are validated and skipped (#226) |
 | 2026-10-11 | Ctrl+drag on the fill handle swaps copying and extending a series (#264) |
 | 2026-10-11 | Odd-period bond functions ODDFPRICE, ODDFYIELD, ODDLPRICE, ODDLYIELD: Financial 55 / 55 (#275) |
