@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 mod cs;
 mod de;
 mod es;
+mod fr;
 mod ko;
 mod pt;
 mod ru;
@@ -31,10 +32,11 @@ pub enum Language {
     PtBr,
     De,
     Cs,
+    Fr,
 }
 
 impl Language {
-    pub const ALL: [Self; 9] = [Self::En, Self::Es, Self::Zh, Self::Ja, Self::Ko, Self::Ru, Self::PtBr, Self::De, Self::Cs];
+    pub const ALL: [Self; 10] = [Self::En, Self::Es, Self::Zh, Self::Ja, Self::Ko, Self::Ru, Self::PtBr, Self::De, Self::Cs, Self::Fr];
 
     /// The language's own name, shown in the switcher.
     pub fn name(self) -> &'static str {
@@ -48,6 +50,7 @@ impl Language {
             Self::PtBr => "Português (Brasil)",
             Self::De => "Deutsch",
             Self::Cs => "Čeština",
+            Self::Fr => "Français",
         }
     }
 
@@ -63,6 +66,7 @@ impl Language {
             Self::PtBr => "pt",
             Self::De => "de",
             Self::Cs => "cs",
+            Self::Fr => "fr",
         }
     }
 
@@ -81,6 +85,7 @@ impl Language {
             "pt" => Some(Self::PtBr),
             "de" => Some(Self::De),
             "cs" => Some(Self::Cs),
+            "fr" => Some(Self::Fr),
             _ => None,
         }
     }
@@ -117,6 +122,7 @@ impl Language {
             Self::PtBr => pt::translate(text),
             Self::De => de::translate(text),
             Self::Cs => cs::translate(text),
+            Self::Fr => fr::translate(text),
         };
         translated.unwrap_or_else(|| text.rsplit_once('|').map_or(text, |(_, label)| label))
     }
@@ -578,6 +584,7 @@ mod tests {
             assert!(es::translate(english).is_some_and(|text| !text.is_empty()), "missing Spanish: {english}");
             assert!(de::translate(english).is_some_and(|text| !text.is_empty()), "missing German: {english}");
             assert!(cs::translate(english).is_some_and(|text| !text.is_empty()), "missing Czech: {english}");
+            assert!(fr::translate(english).is_some_and(|text| !text.is_empty()), "missing French: {english}");
         }
         assert_eq!(Language::Ja.tr("Data"), "データ");
         assert_eq!(Language::Zh.tr("Data"), "数据");
@@ -589,6 +596,8 @@ mod tests {
         assert_eq!(Language::Es.tr("Sheet1!A1"), "Sheet1!A1");
         assert_eq!(Language::De.tr("Data"), "Daten");
         assert_eq!(Language::De.tr("Sheet1!A1"), "Sheet1!A1");
+        assert_eq!(Language::Fr.tr("Data"), "Données");
+        assert_eq!(Language::Fr.tr("Sheet1!A1"), "Sheet1!A1");
         assert_eq!(Language::PtBr.tr("Date"), "Data");
         assert_eq!(Language::PtBr.tr("Sheet1!A1"), "Sheet1!A1");
         assert_eq!(Language::Ja.tr("Sheet1!A1"), "Sheet1!A1");
@@ -640,6 +649,9 @@ mod tests {
         assert_eq!(Language::from_tag("cs-CZ"), Some(Language::Cs));
         assert_eq!(Language::from_tag("cs_CZ.UTF-8"), Some(Language::Cs));
         assert_eq!(Language::parse("cs"), Some(Language::Cs));
+        assert_eq!(Language::from_tag("fr-FR"), Some(Language::Fr));
+        assert_eq!(Language::from_tag("fr_CA"), Some(Language::Fr));
+        assert_eq!(Language::parse("fr"), Some(Language::Fr));
     }
 
     #[test]
