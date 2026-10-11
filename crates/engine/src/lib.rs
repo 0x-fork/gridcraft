@@ -12,6 +12,7 @@ pub mod cmd;
 pub mod display;
 pub mod fill;
 pub mod io;
+pub mod paper;
 pub mod pivot;
 pub mod sample;
 pub mod selection;
@@ -190,8 +191,8 @@ pub struct Session {
     pub format_painter: Option<(Arc<Workbook>, usize, RangeRef, bool)>,
     /// Find state (last search).
     pub last_find: Option<Json>,
-    /// Workbook view: normal, pageLayout or pageBreakPreview.
-    pub view_mode: String,
+    /// View › Show › Ruler is off (rulers in Page Layout view; an application option).
+    pub hide_ruler: bool,
     /// Journal position where action recording started.
     pub recording: Option<usize>,
     /// Windows hidden with View › Hide.

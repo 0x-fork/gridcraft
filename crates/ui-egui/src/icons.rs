@@ -111,6 +111,14 @@ pub enum Icon {
     Sheet,
     Book,
     Folder,
+    /// Header & Footer: a page with its top / bottom band marked.
+    Header,
+    Footer,
+    PageNumber,
+    PageCount,
+    Calendar,
+    Clock,
+    FileName,
 }
 
 struct G<'a> {
@@ -604,6 +612,44 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, c: Color32) {
         }
         Icon::Folder => {
             g.poly(&[(1.5, 4.0), (6.0, 4.0), (7.5, 5.5), (14.5, 5.5), (14.5, 13.0), (1.5, 13.0)], YELLOW);
+        }
+        Icon::Header | Icon::Footer => {
+            g.rect(3.5, 1.5, 9.0, 13.0, None, Some(c));
+            let y = if icon == Icon::Header { 2.5 } else { 11.0 };
+            g.rect(4.5, y, 7.0, 2.5, Some(BLUE), None);
+            for yy in if icon == Icon::Header { [7.0, 9.5] } else { [4.5, 7.0] } {
+                g.stroke(&[(5.5, yy), (10.5, yy)], light);
+            }
+        }
+        Icon::PageNumber | Icon::PageCount => {
+            if icon == Icon::PageCount {
+                g.rect(5.5, 1.0, 8.5, 11.5, None, Some(light));
+            }
+            g.rect(2.5, 3.0, 8.5, 12.0, Some(Color32::WHITE), Some(c));
+            // A "#" mark.
+            g.stroke(&[(5.3, 6.5), (4.8, 12.5)], BLUE);
+            g.stroke(&[(8.3, 6.5), (7.8, 12.5)], BLUE);
+            g.stroke(&[(4.0, 8.4), (9.6, 8.4)], BLUE);
+            g.stroke(&[(3.8, 10.8), (9.4, 10.8)], BLUE);
+        }
+        Icon::Calendar => {
+            g.rect(2.0, 3.0, 12.0, 11.0, Some(Color32::WHITE), Some(c));
+            g.rect(2.0, 3.0, 12.0, 3.0, Some(BLUE), None);
+            for (x, y) in [(4.5, 8.5), (7.5, 8.5), (10.5, 8.5), (4.5, 11.5), (7.5, 11.5)] {
+                g.rect(x - 0.6, y - 0.6, 1.4, 1.4, Some(c), None);
+            }
+        }
+        Icon::Clock => {
+            let center = g.pt(8.0, 8.0);
+            g.p.circle_stroke(center, 6.0 * g.s, Stroke::new(1.15 * g.s.clamp(1.0, 2.0), c));
+            g.stroke(&[(8.0, 4.5), (8.0, 8.0), (10.8, 9.6)], BLUE);
+        }
+        Icon::FileName => {
+            g.poly(&[(3.0, 1.5), (10.0, 1.5), (13.0, 4.5), (13.0, 14.5), (3.0, 14.5)], Color32::WHITE);
+            g.line(&[(3.0, 1.5), (10.0, 1.5), (13.0, 4.5), (13.0, 14.5), (3.0, 14.5), (3.0, 1.5)], c, 1.15);
+            g.stroke(&[(10.0, 1.5), (10.0, 4.5), (13.0, 4.5)], c);
+            g.line(&[(5.0, 9.0), (11.0, 9.0)], BLUE, 1.4);
+            g.stroke(&[(5.0, 11.5), (9.0, 11.5)], light);
         }
     }
 }

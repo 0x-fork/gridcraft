@@ -152,6 +152,9 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
     if sheet.right_to_left {
         s.push_str(" rightToLeft=\"1\"");
     }
+    if sheet.view != gridcraft_model::SheetViewMode::Normal {
+        let _ = write!(s, " view=\"{}\"", sheet.view.as_str());
+    }
     if sheet.zoom != 100 && (10..=400).contains(&sheet.zoom) {
         let _ = write!(s, " zoomScale=\"{0}\" zoomScaleNormal=\"{0}\"", sheet.zoom);
     }

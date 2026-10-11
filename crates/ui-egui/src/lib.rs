@@ -20,6 +20,7 @@ pub mod i18n;
 pub mod icons;
 pub mod keytips;
 pub mod panes;
+pub mod paper_view;
 pub mod pivot_pane;
 pub mod ribbon;
 pub mod tabs;

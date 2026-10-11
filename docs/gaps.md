@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (created from the full re-measure against Excel for Mac 16.113.4 and the issue tracker) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (§14 Page Layout view, #329) · **Target:** Microsoft Excel (Microsoft 365)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -102,8 +102,9 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   **Estimate:** 22–35 h.
 
 ### 14. Page Layout view and print polish (U, F)
-- No paper view with rulers and in-place header/footer editing; web print exports only (#141, PR
-  #143). **Estimate:** 12–20 h.
+- Page Layout view landed (#329): paper view with rulers and in-place header/footer editing.
+  Remaining: pictures in headers/footers, Different First Page / Odd & Even pages, dragging
+  margins on the ruler; web print exports only (#141, PR #143). **Estimate:** 5–10 h.
 
 ### 15. Remaining functions and an oracle suite (F)
 - 22 missing, 9 stubs; no Excel-computed oracle corpus; #137, #138. **Estimate:** 18–30 h.

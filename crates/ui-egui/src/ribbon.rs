@@ -199,6 +199,7 @@ pub fn show(app: &mut SheetApp, ui: &mut Ui) {
                             "Automate" => automate(app, ui),
                             "Table Design" => table_design(app, ui),
                             "Chart Design" => chart_design(app, ui),
+                            crate::paper_view::TAB => crate::paper_view::ribbon_tab(app, ui),
                             _ => home(app, ui),
                         }
                     });
@@ -243,6 +244,9 @@ fn contextual_tabs(app: &SheetApp) -> Vec<&'static str> {
         }
         if app.selected_chart.is_some_and(|id| sh.charts.iter().any(|c| c.id == id)) {
             v.push("Chart Design");
+        }
+        if app.grid.hf_edit.is_some() {
+            v.push(crate::paper_view::TAB);
         }
     }
     v
@@ -1635,7 +1639,14 @@ fn view(app: &mut SheetApp, ui: &mut Ui) {
     sep(ui);
     let s = app.session.active().and_then(|d| d.wb.active().map(|s| (s.show_gridlines, s.show_headings))).unwrap_or((true, true));
     let lang = app.ui.language;
+    let page_layout =
+        app.session.active().and_then(|d| d.wb.active().map(|s| s.view == gridcraft_engine::model::SheetViewMode::PageLayout)).unwrap_or(false);
     ui.vertical(|ui| {
+        // Rulers exist only in Page Layout view.
+        let mut ruler = !app.session.hide_ruler;
+        if ui.add_enabled(page_layout, egui::Checkbox::new(&mut ruler, lang.tr("Ruler"))).changed() {
+            act(app, "view.ruler", json!({"on": ruler}));
+        }
         let mut fb = app.ui.formula_bar;
         if ui.checkbox(&mut fb, lang.tr("Formula Bar")).changed() {
             app.ui.formula_bar = fb;

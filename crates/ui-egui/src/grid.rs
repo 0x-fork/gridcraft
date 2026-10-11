@@ -84,6 +84,12 @@ pub struct GridState {
     /// Page ranges for Page Break Preview, cached per (doc uid, revision, sheet).
     pub pages: Option<((u64, u64, usize), Vec<(RangeRef, u32)>)>,
     pub header_menu: Option<(Pos2, bool)>,
+    /// Page Layout view pagination, cached per (doc uid, revision, sheet, rows, columns).
+    pub paper: Option<crate::paper_view::PaperCache>,
+    /// Header or footer being edited in place (Page Layout view).
+    pub hf_edit: Option<crate::paper_view::HfEdit>,
+    /// The grid geometry of the last frame (hit-testing for agents and tests).
+    pub geo: Option<Geo>,
 }
 
 impl GridState {
@@ -111,6 +117,8 @@ pub struct Geo {
     /// Prefix sums over custom row heights / column widths, built once per frame.
     ri: std::sync::Arc<LineIndex>,
     ci: std::sync::Arc<LineIndex>,
+    /// Page Layout view: cells sit on pages (`scroll` is then in page-layout units).
+    pub paper: Option<Arc<gridcraft_engine::paper::PageGrid>>,
 }
 
 impl Geo {
@@ -127,9 +135,42 @@ impl Geo {
         let frozen_w = (ci.start(fc) as f32) * z;
         let frozen_h = (ri.start(fr) as f32) * z;
         let cells = Rect::from_min_max(pos2(rect.left() + header_w, rect.top() + header_h), rect.max);
-        Geo { rect, cells, z, header_w, header_h, fr, fc, frozen_w, frozen_h, scroll, ri, ci }
+        Geo { rect, cells, z, header_w, header_h, fr, fc, frozen_w, frozen_h, scroll, ri, ci, paper: None }
+    }
+    /// Page Layout view geometry: `rect` excludes the rulers; cells are drawn at the print scale
+    /// on pages laid out by `grid`; frozen panes don't apply (as in Excel).
+    pub fn paged(sh: &Sheet, rect: Rect, scroll: egui::Vec2, grid: Arc<gridcraft_engine::paper::PageGrid>) -> Geo {
+        let mut g = Geo::new(sh, rect, scroll);
+        let zoom = (sh.zoom as f32 / 100.0).clamp(0.1, 4.0);
+        g.z = zoom * DISPLAY_SCALE * grid.scale.clamp(0.1, 4.0);
+        (g.fr, g.fc, g.frozen_w, g.frozen_h) = (0, 0, 0.0, 0.0);
+        g.paper = Some(grid);
+        g
+    }
+    /// The point is over cells (in Page Layout view: on a page, inside its margins).
+    pub fn in_cells(&self, p: Pos2) -> bool {
+        if !self.cells.contains(p) {
+            return false;
+        }
+        match &self.paper {
+            Some(pg) => pg.on_cells(
+                self.scroll.x as f64 + ((p.x - self.cells.left()) / self.z) as f64,
+                self.scroll.y as f64 + ((p.y - self.cells.top()) / self.z) as f64,
+            ),
+            None => true,
+        }
+    }
+    /// Scroll offset (in `scroll` units) at which `row` reaches the top of the scrolled area.
+    pub fn scroll_top_of(&self, sh: &Sheet, row: u32) -> f32 {
+        match &self.paper {
+            Some(pg) => pg.row_y(row) as f32,
+            None => (sh.row_top(row) - sh.row_top(self.fr)) as f32,
+        }
     }
     pub fn x(&self, _sh: &Sheet, col: u32) -> f32 {
+        if let Some(pg) = &self.paper {
+            return self.cells.left() + (pg.col_x(col) - self.scroll.x as f64) as f32 * self.z;
+        }
         if col < self.fc {
             self.cells.left() + self.ci.start(col) as f32 * self.z
         } else {
@@ -137,6 +178,9 @@ impl Geo {
         }
     }
     pub fn y(&self, _sh: &Sheet, row: u32) -> f32 {
+        if let Some(pg) = &self.paper {
+            return self.cells.top() + (pg.row_y(row) - self.scroll.y as f64) as f32 * self.z;
+        }
         if row < self.fr {
             self.cells.top() + self.ri.start(row) as f32 * self.z
         } else {
@@ -155,6 +199,9 @@ impl Geo {
         Rect::from_min_max(a.min, b.max)
     }
     pub fn col_at(&self, _sh: &Sheet, x: f32) -> u32 {
+        if let Some(pg) = &self.paper {
+            return pg.col_at(self.scroll.x as f64 + ((x - self.cells.left()) / self.z) as f64);
+        }
         let dx = (x - self.cells.left()) / self.z;
         if dx < self.frozen_w / self.z {
             self.ci.at(dx.max(0.0) as f64)
@@ -163,6 +210,9 @@ impl Geo {
         }
     }
     pub fn row_at(&self, _sh: &Sheet, y: f32) -> u32 {
+        if let Some(pg) = &self.paper {
+            return pg.row_at(self.scroll.y as f64 + ((y - self.cells.top()) / self.z) as f64);
+        }
         let dy = (y - self.cells.top()) / self.z;
         if dy < self.frozen_h / self.z {
             self.ri.at(dy.max(0.0) as f64)
@@ -322,6 +372,19 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     let Some(sh) = wb.sheet(si) else { return };
     let sel = d.selection.clone();
     let mut view = app.view();
+    // Page Layout view: pages on a desk, rulers above and left of the headings.
+    let paper = sh.view == gridcraft_engine::model::SheetViewMode::PageLayout;
+    let ruler = if paper && !app.session.hide_ruler { crate::paper_view::RULER } else { 0.0 };
+    let grid_rect = Rect::from_min_max(pos2((rect.left() + ruler).min(rect.right()), (rect.top() + ruler).min(rect.bottom())), rect.max);
+    let make_geo = |app: &mut SheetApp, scroll: egui::Vec2| -> Geo {
+        if paper {
+            let probe = Geo::new(sh, grid_rect, scroll);
+            if let Some(g) = crate::paper_view::grid_for(app, &wb, si, sh, probe.cells.size(), scroll) {
+                return Geo::paged(sh, grid_rect, scroll, g);
+            }
+        }
+        Geo::new(sh, rect, scroll)
+    };
     // Scrolling.
     let (scroll_delta, zoom_delta, modifiers) = ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.modifiers));
     if (resp.hovered() || resp.contains_pointer()) && !crate::text_box::contains_pointer(app, ui.ctx()) {
@@ -329,7 +392,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
             let z = (sh.zoom as f32 * zoom_delta).clamp(10.0, 400.0).round();
             let _ = app.session.run("view.zoom", json!({"percent": z}));
         } else if scroll_delta != egui::Vec2::ZERO {
-            let z = sh.zoom as f32 / 100.0 * DISPLAY_SCALE;
+            let z = if paper { make_geo(app, view.scroll).z } else { sh.zoom as f32 / 100.0 * DISPLAY_SCALE };
             let mut d = scroll_delta;
             if modifiers.shift && d.x == 0.0 {
                 d = vec2(d.y, 0.0);
@@ -338,15 +401,28 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
         }
     }
     view.scroll = view.scroll.max(egui::Vec2::ZERO);
-    let max_y = sh.row_top(MAX_ROWS - 40) as f32;
-    let max_x = sh.col_left(MAX_COLS - 20) as f32;
+    let (mut max_x, mut max_y) = (sh.col_left(MAX_COLS - 20) as f32, sh.row_top(MAX_ROWS - 40) as f32);
+    if paper {
+        // Page layout units run past sheet units (margins and gaps); the end is known once the
+        // pages reach the last row / column.
+        let g = make_geo(app, view.scroll);
+        if let Some(pg) = &g.paper {
+            let (ex, ey) = pg.extent();
+            max_x = if pg.cols_complete { (ex as f32 - g.cells.width() / g.z).max(0.0) } else { 1.0e9 };
+            max_y = if pg.rows_complete { (ey as f32 - g.cells.height() / g.z).max(0.0) } else { 1.0e9 };
+        }
+    }
     view.scroll.x = view.scroll.x.min(max_x);
     view.scroll.y = view.scroll.y.min(max_y);
-    let mut geo = Geo::new(sh, rect, view.scroll);
+    let mut geo = make_geo(app, view.scroll);
     // Keep the active cell visible after keyboard moves.
     if app.grid.ensure_visible {
         app.grid.ensure_visible = false;
         let target = app.editor.as_ref().and_then(|e| e.point_cell).unwrap_or(sel.active);
+        if paper {
+            crate::paper_view::ensure_covers(app, &wb, si, target);
+            geo = make_geo(app, view.scroll);
+        }
         let cr = geo.cell_rect(sh, target);
         let area = Rect::from_min_max(pos2(geo.cells.left() + geo.frozen_w, geo.cells.top() + geo.frozen_h), geo.cells.max);
         if target.row >= geo.fr {
@@ -364,16 +440,70 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
             }
         }
         view.scroll = view.scroll.max(egui::Vec2::ZERO);
-        geo = Geo::new(sh, rect, view.scroll);
+        geo = make_geo(app, view.scroll);
     }
     // Snap scrolling to whole rows/columns at rest like Excel? Keep smooth (better on trackpads).
     if let Some(v) = app.view_mut() {
         *v = view;
     }
     app.grid.cells_rect = Some(geo.cells);
+    app.grid.geo = Some(geo.clone());
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, t.grid_bg);
     let mut cf = CfCache::new();
+    let quads = if geo.paper.is_some() {
+        crate::paper_view::paint_pages(app, &painter, &geo, &wb, si, sh, &sel, &mut cf, &t)
+    } else {
+        paint_panes(app, &painter, &geo, &wb, si, sh, &sel, &mut cf, &t)
+    };
+    // Objects above cells.
+    crate::chartview::paint_objects(app, &painter.with_clip_rect(geo.cells), &geo, &wb, si, sh);
+    paint_overlays(app, ui, &painter.with_clip_rect(geo.cells), &geo, &wb, si, sh, &sel);
+    if sh.view == gridcraft_engine::model::SheetViewMode::PageBreakPreview {
+        paint_pages(app, &painter.with_clip_rect(geo.cells), &geo, sh);
+    }
+    if geo.paper.is_some() {
+        crate::paper_view::paint_headers_footers(app, ui, &painter, &geo, &wb, sh);
+    }
+    // Headers.
+    if sh.show_headings {
+        paint_headers(&painter, &geo, sh, &sel, &t, &quads);
+    }
+    if geo.paper.is_some() {
+        crate::paper_view::paint_rulers(app, &painter, rect, &geo, &t);
+    }
+    // Interaction.
+    let previous_popups = (app.grid.filter_menu, app.grid.list_picker, app.grid.header_menu);
+    crate::paper_view::interact(app, ui, &resp, &geo, sh, &wb);
+    interact(app, ui, &resp, &geo, sh, &wb);
+    crate::text_box::show(app, ui, &geo, sh);
+    if app.editor.as_ref().is_some_and(|e| !e.from_formula_bar) {
+        in_cell_editor(app, ui, &geo, sh, &wb);
+    }
+    filter_menu(app, ui, &geo, previous_popups.0 == app.grid.filter_menu);
+    list_picker(app, ui, &geo, previous_popups.1 == app.grid.list_picker);
+    header_menu(app, ui, previous_popups.2 == app.grid.header_menu);
+    context_menu(app, ui);
+    vertical_scrollbar(app, ui, sh, &geo, available.right(), max_y, &t);
+    if app.session.clipboard.is_some() {
+        app.grid.marching_phase = (app.grid.marching_phase + 0.5) % 8.0;
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(60));
+    }
+}
+
+/// Normal view: up to four panes (frozen rows/columns), each painted with its own clip.
+#[allow(clippy::too_many_arguments)]
+fn paint_panes(
+    app: &SheetApp,
+    painter: &Painter,
+    geo: &Geo,
+    wb: &Workbook,
+    si: usize,
+    sh: &Sheet,
+    sel: &gridcraft_engine::Selection,
+    cf: &mut CfCache,
+    t: &Tokens,
+) -> Vec<((u32, u32), (u32, u32), Rect)> {
     // Quadrants: (rows, cols, clip).
     let (sr0, sr1) = geo.scroll_rows(sh);
     let (sc0, sc1) = geo.scroll_cols(sh);
@@ -395,8 +525,8 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
             continue;
         }
         let p = painter.with_clip_rect(*clip);
-        paint_quadrant(&p, &geo, &wb, si, sh, *rows, *cols, &mut cf, &t);
-        paint_selection(&p, &geo, sh, &sel, &t, app);
+        paint_quadrant(&p, geo, wb, si, sh, *rows, *cols, cf, t);
+        paint_selection(&p, geo, sh, sel, t, app);
     }
     // Freeze lines.
     if geo.fr > 0 {
@@ -405,32 +535,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     if geo.fc > 0 {
         painter.line_segment([pos2(split.x, geo.cells.top()), pos2(split.x, geo.cells.bottom())], Stroke::new(1.0, Color32::from_gray(150)));
     }
-    // Objects above cells.
-    crate::chartview::paint_objects(app, &painter.with_clip_rect(geo.cells), &geo, &wb, si, sh);
-    paint_overlays(app, ui, &painter.with_clip_rect(geo.cells), &geo, &wb, si, sh, &sel);
-    if app.session.view_mode == "pageBreakPreview" || app.session.view_mode == "pageLayout" {
-        paint_pages(app, &painter.with_clip_rect(geo.cells), &geo, sh);
-    }
-    // Headers.
-    if sh.show_headings {
-        paint_headers(&painter, &geo, sh, &sel, &t, &quads);
-    }
-    // Interaction.
-    let previous_popups = (app.grid.filter_menu, app.grid.list_picker, app.grid.header_menu);
-    interact(app, ui, &resp, &geo, sh, &wb);
-    crate::text_box::show(app, ui, &geo, sh);
-    if app.editor.as_ref().is_some_and(|e| !e.from_formula_bar) {
-        in_cell_editor(app, ui, &geo, sh, &wb);
-    }
-    filter_menu(app, ui, &geo, previous_popups.0 == app.grid.filter_menu);
-    list_picker(app, ui, &geo, previous_popups.1 == app.grid.list_picker);
-    header_menu(app, ui, previous_popups.2 == app.grid.header_menu);
-    context_menu(app, ui);
-    vertical_scrollbar(app, ui, sh, &geo, available.right(), max_y, &t);
-    if app.session.clipboard.is_some() {
-        app.grid.marching_phase = (app.grid.marching_phase + 0.5) % 8.0;
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(60));
-    }
+    quads
 }
 
 /// The worksheet is painted virtually, so it needs its own scrollbar rather than a
@@ -443,7 +548,7 @@ fn vertical_scrollbar(app: &mut SheetApp, ui: &mut egui::Ui, sh: &Sheet, geo: &G
     let visible = track.height() / geo.z;
     let scroll = app.view().scroll.y;
     let last = sh.used_range().map(|r| r.end.row.saturating_add(10)).unwrap_or(100).clamp(100, MAX_ROWS - 1);
-    let content = (sh.row_top(last) - sh.row_top(geo.fr)) as f32;
+    let content = geo.scroll_top_of(sh, last);
     let extent = (content - visible).max(scroll).max(0.0).min(limit);
     let id = ui.id().with("vscroll");
     let resp = ui.interact(track, id, Sense::click_and_drag());
@@ -483,7 +588,17 @@ fn vertical_scrollbar(app: &mut SheetApp, ui: &mut egui::Ui, sh: &Sheet, geo: &G
 }
 
 #[allow(clippy::too_many_arguments)]
-fn paint_quadrant(p: &Painter, geo: &Geo, wb: &Workbook, si: usize, sh: &Sheet, rows: (u32, u32), cols: (u32, u32), cf: &mut CfCache, t: &Tokens) {
+pub(crate) fn paint_quadrant(
+    p: &Painter,
+    geo: &Geo,
+    wb: &Workbook,
+    si: usize,
+    sh: &Sheet,
+    rows: (u32, u32),
+    cols: (u32, u32),
+    cf: &mut CfCache,
+    t: &Tokens,
+) {
     let z = geo.z;
     let (r0, r1) = rows;
     let (c0, c1) = cols;
@@ -901,7 +1016,7 @@ fn paint_cf_icon(p: &Painter, r: Rect, set: &str, idx: usize) {
     }
 }
 
-fn paint_selection(p: &Painter, geo: &Geo, sh: &Sheet, sel: &gridcraft_engine::Selection, t: &Tokens, app: &SheetApp) {
+pub(crate) fn paint_selection(p: &Painter, geo: &Geo, sh: &Sheet, sel: &gridcraft_engine::Selection, t: &Tokens, app: &SheetApp) {
     // Fill all areas except the active cell.
     for r in &sel.ranges {
         if r.is_single() && sel.ranges.len() == 1 {
@@ -973,7 +1088,14 @@ fn paint_selection(p: &Painter, geo: &Geo, sh: &Sheet, sel: &gridcraft_engine::S
     }
 }
 
-fn paint_headers(p: &Painter, geo: &Geo, sh: &Sheet, sel: &gridcraft_engine::Selection, t: &Tokens, quads: &[((u32, u32), (u32, u32), Rect)]) {
+pub(crate) fn paint_headers(
+    p: &Painter,
+    geo: &Geo,
+    sh: &Sheet,
+    sel: &gridcraft_engine::Selection,
+    t: &Tokens,
+    quads: &[((u32, u32), (u32, u32), Rect)],
+) {
     let font = theme::ui_font((11.5 * (geo.z / DISPLAY_SCALE).max(0.75)).min(16.0));
     let r = geo.rect;
     let top = Rect::from_min_max(pos2(geo.cells.left(), r.top()), pos2(r.right(), geo.cells.top()));
@@ -1049,7 +1171,7 @@ fn paint_headers(p: &Painter, geo: &Geo, sh: &Sheet, sel: &gridcraft_engine::Sel
 
 fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &Geo, sh: &Sheet, wb: &Workbook) {
     // Text selection and editing must not also move the object or edit worksheet cells.
-    if app.text_box_editor.is_some() {
+    if app.text_box_editor.is_some() || app.grid.hf_edit.is_some() {
         return;
     }
     let ctx = ui.ctx().clone();
@@ -1058,7 +1180,7 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
     let pointer = ctx.input(|i| i.pointer.clone());
     let mods = ctx.input(|i| i.modifiers);
     let pos = pointer.interact_pos().or(pointer.hover_pos());
-    let in_cells = pos.is_some_and(|p| geo.cells.contains(p));
+    let in_cells = pos.is_some_and(|p| geo.in_cells(p));
     let in_col_header = pos.is_some_and(|p| p.y < geo.cells.top() && p.y >= geo.rect.top() && p.x >= geo.cells.left());
     let in_row_header = pos.is_some_and(|p| p.x < geo.cells.left() && p.x >= geo.rect.left() && p.y >= geo.cells.top());
     let in_corner = pos.is_some_and(|p| p.x < geo.cells.left() && p.y < geo.cells.top() && geo.rect.contains(p));
@@ -1098,8 +1220,10 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
             if let Some(p) = pos
                 && resp.dragged()
             {
-                let sx = sh.col_left(geo.fc) as f32 + geo.scroll.x + (p.x - geo.cells.left() - geo.frozen_w) / geo.z;
-                let sy = sh.row_top(geo.fr) as f32 + geo.scroll.y + (p.y - geo.cells.top() - geo.frozen_h) / geo.z;
+                // Through the cell under the pointer, so frozen panes and pages map right.
+                let c = geo.cell_at(sh, p);
+                let sx = sh.col_left(c.col) as f32 + (p.x - geo.x(sh, c.col)) / geo.z;
+                let sy = sh.row_top(c.row) as f32 + (p.y - geo.y(sh, c.row)) / geo.z;
                 app.grid.ink.push([sx, sy]);
             }
             if !app.grid.ink.is_empty() {
@@ -1109,10 +1233,8 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                     .ink
                     .iter()
                     .map(|q| {
-                        pos2(
-                            geo.cells.left() + geo.frozen_w + (q[0] - sh.col_left(geo.fc) as f32 - geo.scroll.x) * geo.z,
-                            geo.cells.top() + geo.frozen_h + (q[1] - sh.row_top(geo.fr) as f32 - geo.scroll.y) * geo.z,
-                        )
+                        let (col, row) = (sh.col_at(q[0].max(0.0) as f64), sh.row_at(q[1].max(0.0) as f64));
+                        pos2(geo.x(sh, col) + (q[0] - sh.col_left(col) as f32) * geo.z, geo.y(sh, row) + (q[1] - sh.row_top(row) as f32) * geo.z)
                     })
                     .collect();
                 ui.painter().add(egui::epaint::PathShape::line(pts, egui::epaint::PathStroke::new(2.0 * geo.z, Color32::from_rgb(0x1F, 0x5F, 0xC9))));
@@ -1571,7 +1693,7 @@ fn on_border(r: Rect, p: Pos2) -> bool {
 fn col_edge(geo: &Geo, sh: &Sheet, x: f32) -> Option<(u32, f32)> {
     let c = geo.col_at(sh, x);
     for cc in [c, c.saturating_sub(1)] {
-        let edge = geo.x(sh, cc + 1);
+        let edge = geo.x(sh, cc) + sh.col_width(cc) * geo.z;
         if (x - edge).abs() <= 4.0 {
             return Some((cc, edge));
         }
@@ -1582,7 +1704,7 @@ fn col_edge(geo: &Geo, sh: &Sheet, x: f32) -> Option<(u32, f32)> {
 fn row_edge(geo: &Geo, sh: &Sheet, y: f32) -> Option<(u32, f32)> {
     let r = geo.row_at(sh, y);
     for rr in [r, r.saturating_sub(1)] {
-        let edge = geo.y(sh, rr + 1);
+        let edge = geo.y(sh, rr) + sh.row_height(rr) * geo.z;
         if (y - edge).abs() <= 3.0 {
             return Some((rr, edge));
         }
@@ -1963,7 +2085,7 @@ pub fn validation_arrow(sh: &Sheet, geo: &Geo, c: CellRef) -> Option<Rect> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn paint_overlays(
+pub(crate) fn paint_overlays(
     app: &mut SheetApp,
     ui: &egui::Ui,
     p: &Painter,
