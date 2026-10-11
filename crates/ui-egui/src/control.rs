@@ -81,6 +81,7 @@ pub fn inspect(app: &SheetApp, ctx: &egui::Context) -> Json {
         "scroll": [v.scroll.x, v.scroll.y],
         "editor": app.editor.as_ref().map(|e| json!({"cell": e.cell.a1(), "text": e.text, "formulaBar": e.from_formula_bar, "point": e.can_point()})),
         "dialog": app.dialog.as_ref().map(|d| json!({"name": d.name, "title": d.title, "values": d.values, "tab": d.tab})),
+        "backstage": app.backstage.as_ref().map(|b| b.page.id()),
         "message": app.message.as_ref().map(|(t, m)| json!({"title": t, "text": m})),
         "selectedChart": app.selected_chart,
         "mode": format!("{:?}", app.session.mode),
@@ -129,7 +130,7 @@ fn cell_center(app: &SheetApp, c: CellRef) -> Option<egui::Pos2> {
     let sh = d.wb.active()?;
     let rect = app.grid.rect?;
     let geo = crate::grid::Geo::new(sh, rect, app.view().scroll);
-    Some(geo.cell_rect(sh, c).center())
+    Some(geo.screen_cell_rect(sh, c).center())
 }
 
 fn push_click(app: &mut SheetApp, pos: egui::Pos2, button: egui::PointerButton, count: u32, m: egui::Modifiers) {
@@ -176,14 +177,14 @@ pub fn handle(app: &mut SheetApp, ctx: &egui::Context, method: &str, p: &Json) -
             let mut v: Vec<Json> = app.session.commands().into_iter().map(|c| serde_json::to_value(c).unwrap_or_default()).collect();
             for (id, label, params) in [
                 ("ui.ribbonTab", "Ribbon Tab", ""),
-                ("view.formulaBar", "Formula Bar", ""),
                 ("view.collapseRibbon", "Collapse Ribbon", ""),
                 ("view.darkMode", "Dark Mode", ""),
                 ("view.theme", "Display Theme", ""),
                 ("view.animations", "Animations", "{on?: bool} (toggles without it) → {on}"),
-                ("view.zoom100", "100%", ""),
+                ("view.interfaceScale", "Interface Size", "{percent: 75–200 | \"auto\"} (100 = auto; clamped)"),
                 ("ui.dialog", "Open Dialog", ""),
-                ("app.language.set", "Interface Language", "{language: \"en\"|\"zh\"|\"ja\"|\"ko\"|\"ru\"|\"pt\"} (alias: code)"),
+                ("ui.backstage", "File (Backstage view)", "{page?: home|new|open|info|saveAs|print|export|options|close}"),
+                ("app.language.set", "Interface Language", "{language: \"en\"|\"zh\"|\"ja\"|\"ko\"|\"ru\"|\"pt\"|\"de\"|\"cs\"} (alias: code)"),
                 ("app.language.english", "Interface Language: English", ""),
                 ("app.language.japanese", "Interface Language: Japanese", ""),
             ] {
@@ -205,7 +206,7 @@ pub fn handle(app: &mut SheetApp, ctx: &egui::Context, method: &str, p: &Json) -
                 app.ui.system_theme = false;
             }
             if let Some(v) = p.get("formulaBar").and_then(Json::as_bool) {
-                app.ui.formula_bar = v;
+                let _ = app.run("view.formulaBar", json!({"on": v}));
             }
             if let Some(v) = p.get("ribbonCollapsed").and_then(Json::as_bool) {
                 app.ui.ribbon_collapsed = v;
@@ -213,7 +214,11 @@ pub fn handle(app: &mut SheetApp, ctx: &egui::Context, method: &str, p: &Json) -
             if let Some(v) = p.get("animations").and_then(Json::as_bool) {
                 app.ui.animations = v;
             }
-            ok(serde_json::to_value(&app.ui).unwrap_or_default())
+            let mut out = serde_json::to_value(&app.ui).unwrap_or_default();
+            if let Some(o) = out.as_object_mut() {
+                o.insert("formulaBar".into(), json!(app.session.prefs.formula_bar));
+            }
+            ok(out)
         }
         "ui.dialog" => {
             app.open_dialog(s("name").unwrap_or(""), p.clone());

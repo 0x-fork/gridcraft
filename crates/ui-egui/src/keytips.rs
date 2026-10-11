@@ -101,6 +101,9 @@ impl KeyTips {
                                 "HAR" => self.finish(Action::Command("home.alignRight"), &mut actions),
                                 "HAL" => self.finish(Action::Command("home.alignLeft"), &mut actions),
                                 "HAC" => self.finish(Action::Command("home.alignCenter"), &mut actions),
+                                "HAT" => self.finish(Action::Command("home.alignTop"), &mut actions),
+                                "HAM" => self.finish(Action::Command("home.alignMiddle"), &mut actions),
+                                "HAB" => self.finish(Action::Command("home.alignBottom"), &mut actions),
                                 "HVS" | "ES" => self.finish(Action::Dialog("pasteSpecial"), &mut actions),
                                 "HOI" | "OCA" => self.finish(Action::Command("home.autofitColumnWidth"), &mut actions),
                                 _ => {}
