@@ -1,11 +1,13 @@
 //! The command registry. Ids follow Excel's ribbon (`home.bold`, `insert.chart`,
 //! `data.sortAscending`) plus primitive editing commands (`cell.set`, `selection.set`).
 
+pub mod analysis;
 pub mod data;
 pub mod draw;
 pub mod edit;
 pub mod extra;
 pub mod file;
+pub mod forecast;
 pub mod format;
 pub mod formulas;
 pub mod insert;
@@ -14,6 +16,8 @@ pub mod pivot;
 pub mod print;
 pub mod review;
 pub mod sheet;
+pub mod slicer;
+pub mod solver;
 pub mod spelling;
 pub mod view;
 pub mod whatif;
@@ -69,6 +73,21 @@ impl CommandSpec {
     }
 }
 
+/// Params that hold a secret: `password`, or a name ending in `Password`.
+pub fn is_secret_param(key: &str) -> bool {
+    key == "password" || key.ends_with("Password")
+}
+
+/// The params as the journal records them: secret params are left out, so a password never
+/// reaches the journal dialog, `engine.journal` or a recorded script (saved in the workbook).
+/// Replaying such an entry runs the command without that param.
+pub fn journal_params(params: &Json) -> Json {
+    match params {
+        Json::Object(o) => Json::Object(o.iter().filter(|(k, _)| !is_secret_param(k)).map(|(k, v)| (k.clone(), v.clone())).collect()),
+        other => other.clone(),
+    }
+}
+
 pub fn always(_: &Session) -> std::result::Result<(), String> {
     Ok(())
 }
@@ -118,8 +137,12 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(extra::specs());
         v.extend(draw::specs());
         v.extend(spelling::specs());
+        v.extend(solver::specs());
         v.extend(pivot::specs());
+        v.extend(slicer::specs());
         v.extend(whatif::specs());
+        v.extend(forecast::specs());
+        v.extend(analysis::specs());
         v.extend(print::specs());
         v
     })
@@ -219,8 +242,28 @@ pub(crate) fn split_sheet(r: &str) -> (Option<String>, &str) {
     }
 }
 
-pub(crate) fn cell_param(p: &Json, key: &str) -> Option<CellRef> {
-    str_param(p, key).and_then(|t| CellRef::parse(split_sheet(t).1))
+/// A single-cell parameter. Absent or null is `Ok(None)` (callers default it); a value that is not
+/// a cell reference, or that names a sheet other than the active one, is an error rather than a
+/// silent fallback to some other cell.
+pub(crate) fn cell_param(s: &Session, p: &Json, key: &str) -> Result<Option<CellRef>> {
+    cell_param_on(s, p, key, s.doc()?.wb.active_sheet)
+}
+
+/// Like [`cell_param`], for a command that operates on `sheet` (a `Sheet!` prefix must name it).
+pub(crate) fn cell_param_on(s: &Session, p: &Json, key: &str, sheet: usize) -> Result<Option<CellRef>> {
+    let t = match p.get(key) {
+        None | Some(Json::Null) => return Ok(None),
+        Some(Json::String(t)) => t,
+        Some(v) => return Err(bad("cell", format!("invalid cell reference `{v}` for `{key}`"))),
+    };
+    let (sh, body) = split_sheet(t);
+    let c = CellRef::parse(body).ok_or_else(|| bad("cell", format!("invalid cell reference `{t}` for `{key}`")))?;
+    if let Some(name) = sh
+        && s.doc()?.wb.sheet_index(&name) != Some(sheet)
+    {
+        return Err(bad("cell", format!("`{t}` for `{key}` names a sheet other than the one this command works on")));
+    }
+    Ok(Some(c))
 }
 
 /// Applies an edit to a copy of the active workbook, then recalculates and commits it.
@@ -240,7 +283,11 @@ pub struct Ctx<'a> {
 
 pub(crate) fn edit<R>(s: &mut Session, f: impl FnOnce(&mut Ctx) -> Result<R>) -> Result<R> {
     let d = s.doc_mut()?;
-    commit(d, f)
+    commit(d, |cx| {
+        let r = f(cx)?;
+        crate::tables::sync_headers(cx);
+        Ok(r)
+    })
 }
 
 pub(crate) fn commit<R>(d: &mut DocState, f: impl FnOnce(&mut Ctx) -> Result<R>) -> Result<R> {
@@ -253,7 +300,7 @@ pub(crate) fn commit<R>(d: &mut DocState, f: impl FnOnce(&mut Ctx) -> Result<R>)
     let r = f(&mut ctx)?;
     let Ctx { mut wb, changed, structural, mut fit_rows, protection_checked, .. } = ctx;
     if !protection_checked {
-        check_protection(&d.wb, &wb)?;
+        check_protection(&d.wb, &wb, &d.unlocked_ranges)?;
     }
     if changed.len() <= 200_000 {
         fit_rows.extend(changed.iter().map(|(s, c)| (*s, c.row)));
@@ -288,7 +335,7 @@ pub(crate) const PROTECTED: &str = "The cell or chart you're trying to change is
 /// Refuses an edit that changed what a locked cell on a protected sheet holds (its value or
 /// formula), whichever command made it. Sheets are matched by name, so moving, renaming or
 /// deleting a sheet isn't an edit of its cells.
-fn check_protection(old: &Workbook, new: &Workbook) -> Result<()> {
+fn check_protection(old: &Workbook, new: &Workbook, unlocked: &[(String, String)]) -> Result<()> {
     for sh in &old.sheets {
         if !sh.is_protected() {
             continue;
@@ -298,12 +345,31 @@ fn check_protection(old: &Workbook, new: &Workbook) -> Result<()> {
             continue;
         }
         for c in sh.cells.diff(&after.cells) {
-            if !same_content(sh.cell(c), after.cell(c)) && old.styles.get(sh.style_id(c)).protection.locked {
-                return Err(EngineError::Other(PROTECTED.into()));
+            if !same_content(sh.cell(c), after.cell(c))
+                && old.styles.get(sh.style_id(c)).protection.locked
+                && let Some(m) = locked_cell_error(sh, c, unlocked)
+            {
+                return Err(EngineError::Other(m));
             }
         }
     }
     Ok(())
+}
+
+/// Whether a locked cell on a protected sheet stays locked: `None` when it's in an Allow Edit
+/// Range without a password or one unlocked in this session, else the message to show.
+pub(crate) fn locked_cell_error(sh: &gridcraft_model::Sheet, c: CellRef, unlocked: &[(String, String)]) -> Option<String> {
+    let mut needs_password = None;
+    for r in sh.edit_ranges.iter().filter(|r| r.contains(c)) {
+        if r.password.is_none() || unlocked.iter().any(|(s, t)| *s == sh.name && *t == r.title) {
+            return None;
+        }
+        needs_password.get_or_insert(r.title.as_str());
+    }
+    Some(match needs_password {
+        Some(t) => format!("The range \"{t}\" needs its password before it can be changed (Review › Allow Edit Ranges)."),
+        None => PROTECTED.into(),
+    })
 }
 
 /// Two cells hold the same value or formula (formats aside).

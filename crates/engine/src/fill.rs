@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use gridcraft_core::date::{MONTHS, WEEKDAYS, datetime_from_serial, serial_from_ymd};
+use gridcraft_core::date::{MONTHS, WEEKDAYS, datetime_from_serial, days_in_month, serial_from_ymd};
 use gridcraft_core::{CellRef, RangeRef, Value};
 use gridcraft_model::{Cell, Formula};
 
@@ -13,6 +13,9 @@ use crate::cmd::Ctx;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FillMode {
     Series,
+    /// The Ctrl+drag fill: the opposite of a plain drag. A lone number fills a
+    /// series stepping by 1; anything a plain drag would extend is copied.
+    Alternate,
     Copy,
     Formats,
     ValuesOnly,
@@ -62,13 +65,14 @@ pub fn fill(cx: &mut Ctx, sheet: usize, src: RangeRef, target: RangeRef, mode: F
                 if forward { (src.end.col + 1..=target.end.col).collect() } else { (target.start.col..src.start.col).rev().collect() };
             cols.into_iter().map(|c| CellRef::new(lane, c)).collect()
         };
-        let pattern = if mode == FillMode::Series {
-            Pattern::detect(
+        let pattern = if matches!(mode, FillMode::Series | FillMode::Alternate) {
+            let detected = Pattern::detect(
                 &src_cells,
                 &custom,
                 cx.wb.date_system,
                 cx.wb.styles.get(src_cells.first().and_then(|c| c.1.as_ref()).map(|c| c.style).unwrap_or_default()).num_fmt.as_str(),
-            )
+            );
+            if mode == FillMode::Alternate { detected.alternate(&src_cells) } else { detected }
         } else {
             Pattern::Copy
         };
@@ -84,7 +88,7 @@ pub fn fill(cx: &mut Ctx, sheet: usize, src: RangeRef, target: RangeRef, mode: F
                     writes.push((*t, Some(existing)));
                     continue;
                 }
-                FillMode::ValuesOnly | FillMode::Series | FillMode::Copy => {
+                FillMode::ValuesOnly | FillMode::Series | FillMode::Alternate | FillMode::Copy => {
                     let style = if mode == FillMode::ValuesOnly { sh.cell(*t).map(|c| c.style).unwrap_or_default() } else { cell.style };
                     if let Some(f) = &cell.formula {
                         if let Some(e) = f.expr() {
@@ -231,6 +235,19 @@ impl Pattern {
         Pattern::Copy
     }
 
+    /// The pattern of a Ctrl+drag, which swaps copying and extending: a single
+    /// number (which a plain drag copies) counts up by 1, and every series a
+    /// plain drag would extend (numbers, dates, lists, `Item 1`) is copied.
+    fn alternate(self, cells: &[(CellRef, Option<Cell>)]) -> Pattern {
+        match (self, cells) {
+            (Pattern::Copy, [(_, Some(cell))]) if cell.formula.is_none() => match cell.value.as_f64() {
+                Some(n) if cell.value.is_number() => Pattern::Linear { last: n, first: n, step: 1.0 },
+                _ => Pattern::Copy,
+            },
+            _ => Pattern::Copy,
+        }
+    }
+
     /// The value `k` steps beyond the source (forward) or before it (backward).
     fn value(&self, k: i64, forward: bool, _len: usize) -> Option<Value> {
         let sign = if forward { 1 } else { -1 };
@@ -264,13 +281,23 @@ impl Pattern {
             }
             Pattern::Months { last, first, months } => {
                 let base = if forward { *last } else { *first };
-                let d = datetime_from_serial(gridcraft_core::DateSystem::D1900, base)?;
-                let m = d.month as i64 + months * k * sign;
-                let s = serial_from_ymd(gridcraft_core::DateSystem::D1900, d.year as i64, m, d.day as i64)?;
+                let s = add_months_clamped(gridcraft_core::DateSystem::D1900, base, months.checked_mul(k * sign)?)?;
                 Some(Value::number(s))
             }
         }
     }
+}
+
+/// `serial` shifted by `months` calendar months, keeping the day of month but clamping it to the
+/// target month's last day (Jan 31 + 1 month = Feb 28/29). Always measured from the original date,
+/// so a series does not drift: Jan 31, Feb 28, Mar 31, Apr 30.
+fn add_months_clamped(sys: gridcraft_core::DateSystem, serial: f64, months: i64) -> Option<f64> {
+    let d = datetime_from_serial(sys, serial)?;
+    let total = (d.year as i64).checked_mul(12)?.checked_add(d.month as i64 - 1)?.checked_add(months)?;
+    let year = total.div_euclid(12);
+    let month = total.rem_euclid(12) + 1;
+    let last = days_in_month(i32::try_from(year).ok()?, month as u32);
+    serial_from_ymd(sys, year, month, (d.day as i64).min(last as i64))
 }
 
 fn round15(x: f64) -> f64 {
@@ -316,8 +343,8 @@ pub fn series(cx: &mut Ctx, sheet: usize, r: RangeRef, rows: bool, kind: &str, s
                 "date" => {
                     let d = datetime_from_serial(sys, v);
                     match (unit, d) {
-                        ("month", Some(d)) => serial_from_ymd(sys, d.year as i64, d.month as i64 + step as i64, d.day as i64).unwrap_or(v),
-                        ("year", Some(d)) => serial_from_ymd(sys, d.year as i64 + step as i64, d.month as i64, d.day as i64).unwrap_or(v),
+                        ("month", Some(_)) => (step as i64).checked_mul(i as i64).and_then(|m| add_months_clamped(sys, start, m)).unwrap_or(v),
+                        ("year", Some(_)) => (step as i64).checked_mul(i as i64 * 12).and_then(|m| add_months_clamped(sys, start, m)).unwrap_or(v),
                         ("weekday", Some(_)) => {
                             let mut n = v;
                             let mut left = step.abs() as i64;

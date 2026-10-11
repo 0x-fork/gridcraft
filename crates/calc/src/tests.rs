@@ -140,6 +140,72 @@ fn operators() {
 }
 
 #[test]
+fn blocked_spill_reads_as_spill_error() {
+    // Calculated in the same pass, a formula over a blocked spill read the array that couldn't
+    // spill.
+    let mut t = T::new();
+    let s = t.wb.sheet_mut(0).unwrap();
+    for a in ["A1", "B1", "C1", "A2", "C2", "A3", "B3", "C3"] {
+        s.cells.set(c(a), Cell::value(Value::Number(1.0)));
+    }
+    s.cells.set(c("B2"), Cell::formula(Formula::new("=SEQUENCE(2,2,9)")));
+    s.cells.set(c("E1"), Cell::formula(Formula::new("=SUM(A1:C3)")));
+    t.calc.recalc_all(&mut t.wb);
+    assert_eq!(t.get("B2"), Value::Error(CellError::Spill));
+    assert_eq!(t.get("E1"), Value::Error(CellError::Spill));
+    assert_eq!(t.num("C3"), 1.0);
+}
+
+#[test]
+fn blocked_spill_read_through_offset() {
+    // The reader's reference is only known while evaluating, so it isn't in the dependency graph.
+    let mut t = T::new();
+    t.set("E4", "5");
+    t.set("E8", "=SUM(OFFSET(E2,0,0,2,2))");
+    t.set("E3", "=SEQUENCE(2,2,3)");
+    t.calc.recalc_all(&mut t.wb);
+    assert_eq!(t.get("E3"), Value::Error(CellError::Spill));
+    assert_eq!(t.get("E8"), Value::Error(CellError::Spill));
+}
+
+#[test]
+fn spill_into_the_old_area_of_a_blocked_neighbour() {
+    // C7's array becomes blocked by C8, whose array then takes over C7's old area.
+    let mut t = T::new();
+    t.set("C7", "=SEQUENCE(2,2)");
+    t.set("C8", "=SEQUENCE(2,2)");
+    assert_eq!(t.get("C7"), Value::Error(CellError::Spill));
+    assert_eq!([t.num("C8"), t.num("D8"), t.num("C9"), t.num("D9")], [1.0, 2.0, 3.0, 4.0]);
+}
+
+#[test]
+fn arrays_do_not_spill_in_tables() {
+    // Excel: spilled array formulas aren't supported in tables.
+    let mut t = T::new();
+    t.wb.sheet_mut(0).unwrap().tables.push(gridcraft_model::Table {
+        id: 1,
+        name: "Table1".into(),
+        range: gridcraft_core::RangeRef::parse("B3:C6").unwrap(),
+        header_row: true,
+        totals_row: false,
+        columns: vec![],
+        style: String::new(),
+        banded_rows: false,
+        banded_cols: false,
+        first_col: false,
+        last_col: false,
+        filter_button: false,
+    });
+    t.set("C4", "=SEQUENCE(2)");
+    t.set("E1", "=SEQUENCE(4)");
+    t.set("H1", "=SUM(C4:C5)");
+    assert_eq!(t.get("C4"), Value::Error(CellError::Spill));
+    assert_eq!(t.get("C5"), Value::Empty);
+    assert_eq!(t.get("H1"), Value::Error(CellError::Spill));
+    assert_eq!(t.num("E4"), 4.0);
+}
+
+#[test]
 fn ifs_and_lazy() {
     let mut t = T::new();
     t.set("A1", "5");
@@ -151,6 +217,25 @@ fn ifs_and_lazy() {
     assert_eq!(t.get("B3"), Value::from("b"));
     t.set("B4", "=SWITCH(A1,1,\"one\",5,\"five\",\"other\")");
     assert_eq!(t.get("B4"), Value::from("five"));
+}
+
+#[test]
+fn choose_with_an_array_index() {
+    let mut t = T::new();
+    for (i, (k, v)) in [(1, 10), (2, 20), (3, 30)].iter().enumerate() {
+        t.set(&format!("A{}", i + 1), &k.to_string());
+        t.set(&format!("B{}", i + 1), &v.to_string());
+    }
+    t.set("D1", "=CHOOSE({1,2},\"a\",\"b\")");
+    assert_eq!(t.get("D1"), Value::from("a"));
+    assert_eq!(t.get("E1"), Value::from("b"));
+    // The usual "look left" idiom: a two-column array from two ranges.
+    t.set("D3", "=VLOOKUP(20,CHOOSE({1,2},B1:B3,A1:A3),2,FALSE)");
+    assert_eq!(t.num("D3"), 2.0);
+    t.set("D4", "=SUM(CHOOSE({1,2},A1:A3,B1:B3))");
+    assert_eq!(t.num("D4"), 66.0);
+    t.set("D5", "=CHOOSE(2,A1:A3,B1:B3)");
+    assert_eq!(t.num("D7"), 30.0);
 }
 
 #[test]
@@ -193,6 +278,40 @@ fn spills() {
 }
 
 #[test]
+fn references_keep_their_size_past_the_used_range() {
+    let mut t = T::new();
+    t.set("A1", "5");
+    t.set("A2", "6");
+    t.set("C1", "=ROWS(A1:A10*1)");
+    t.set("C2", "=SUMPRODUCT(--(A1:A10=\"\"))");
+    t.set("C3", "=COUNTBLANK(A1:A10)");
+    t.set("C4", "=COUNTIF(A1:A10,\"\")");
+    t.set("C5", "=COLUMNS(TRANSPOSE(A1:A10))");
+    for (at, want) in [("C1", 10.0), ("C2", 8.0), ("C3", 8.0), ("C4", 8.0), ("C5", 10.0)] {
+        assert_eq!(t.num(at), want, "{at}");
+    }
+    // Whole columns are still read up to the used range.
+    t.set("D1", "=ROWS(FILTER(A:A,A:A<>\"\"))");
+    assert_eq!(t.num("D1"), 2.0);
+}
+
+#[test]
+fn spilled_blank_cells_show_zero() {
+    let mut t = T::new();
+    t.set("A1", "5");
+    t.set("A3", "7");
+    t.set("C1", "=A1:A4");
+    assert_eq!(t.get("C2"), Value::Number(0.0));
+    assert_eq!(t.get("C4"), Value::Number(0.0));
+    t.set("D1", "=COUNT(C1:C4)");
+    assert_eq!(t.num("D1"), 4.0);
+    t.set("E1", "=A2:A3");
+    assert_eq!(t.get("E1"), Value::Number(0.0));
+    t.set("F1", "=SORT(A1:A3)");
+    assert_eq!(t.get("F3"), Value::Number(0.0));
+}
+
+#[test]
 fn let_lambda() {
     let mut t = T::new();
     t.set("A1", "=LET(x,2,y,3,x*y)");
@@ -217,6 +336,33 @@ fn names_and_sheets() {
     t.wb.sheet_mut(1).unwrap().set_value(c("A1"), Value::Number(10.0));
     t.calc.cells_changed(&mut t.wb, &[(1, c("A1"))]);
     assert_eq!(t.num("A1"), 5.0);
+}
+
+#[test]
+fn legacy_array_formulas_fill_their_range() {
+    let mut t = T::new();
+    t.set("A1", "1");
+    t.set("A2", "2");
+    let cse = |t: &mut T, at: &str, formula: &str, range: &str| {
+        let mut f = Formula::new(formula);
+        f.array = gridcraft_core::RangeRef::parse(range);
+        t.wb.sheet_mut(0).unwrap().cells.set(c(at), Cell::formula(f));
+        t.calc.cells_changed(&mut t.wb, &[(0, c(at))]);
+    };
+    // Past the result: #N/A. A single column repeats across the range.
+    cse(&mut t, "C1", "=A1:A2*2", "C1:D3");
+    cse(&mut t, "F1", "=A1:A2*2", "F1");
+    cse(&mut t, "G1", "=5", "G1:G2");
+    assert_eq!(t.num("C2"), 4.0);
+    assert_eq!(t.num("D2"), 4.0);
+    assert_eq!(t.get("C3"), Value::Error(CellError::NA));
+    // A smaller range shows only part of the result and never spills.
+    assert_eq!(t.num("F1"), 2.0);
+    assert_eq!(t.get("F2"), Value::Empty);
+    assert_eq!(t.num("G2"), 5.0);
+    // A range too large to fill is an error, not an allocation of every cell.
+    cse(&mut t, "H1", "=1", "H1:XFD1048576");
+    assert_eq!(t.get("H1"), Value::Error(CellError::Num));
 }
 
 #[test]
@@ -339,4 +485,224 @@ fn sumif_resized_sum_range_on_another_sheet_and_through_a_name() {
     t.calc.cells_changed(&mut t.wb, &[(1, c("B3"))]);
     assert_eq!(t.num("C1"), 10.0);
     assert_eq!(t.num("C2"), 5.0);
+}
+
+#[test]
+fn trimrange() {
+    let mut t = T::new();
+    t.set("C3", "1");
+    t.set("D5", "2");
+    let cases = [
+        ("J1", "=ROWS(TRIMRANGE(A1:F10))", 3.0),
+        ("J2", "=COLUMNS(TRIMRANGE(A1:F10))", 2.0),
+        ("J3", "=ROWS(TRIMRANGE(A1:F10,2))", 5.0),
+        ("J4", "=ROWS(TRIMRANGE(A1:F10,1,0))", 8.0),
+        ("J5", "=COLUMNS(TRIMRANGE(A1:F10,1,0))", 6.0),
+        ("J6", "=ROWS(TRIMRANGE(A1:F10,0,0))", 10.0),
+        ("J7", "=SUM(TRIMRANGE(C:C))", 1.0),
+        ("J8", "=ROWS(TRIMRANGE(C:C))", 1.0),
+        ("J9", "=ROWS(TRIMRANGE(C:C,2))", 3.0),
+        ("J10", "=MIN(ROW(TRIMRANGE(A1:F10)))", 3.0),
+        ("J11", "=COLUMNS(TRIMRANGE({1,2;3,4}))", 2.0),
+    ];
+    for (at, f, _) in cases {
+        t.set(at, f);
+    }
+    for (at, f, want) in cases {
+        assert_eq!(t.num(at), want, "{f}");
+    }
+    // The result spills as the trimmed block and follows edits.
+    t.set("L1", "=TRIMRANGE(A1:F10)");
+    assert_eq!((t.num("L1"), t.num("M3")), (1.0, 2.0));
+    t.set("E6", "3");
+    assert_eq!((t.num("J1"), t.num("J2")), (4.0, 3.0));
+    // Errors: a bad trim code, nothing but blanks, several areas.
+    t.set("K1", "=TRIMRANGE(A1:F10,4)");
+    assert_eq!(t.get("K1"), Value::Error(CellError::Value));
+    t.set("K2", "=TRIMRANGE(Q1:Q9)");
+    assert_eq!(t.get("K2"), Value::Error(CellError::Calc));
+    t.set("K3", "=TRIMRANGE((A1:B2,C3:D4))");
+    assert_eq!(t.get("K3"), Value::Error(CellError::Value));
+}
+
+/// `formula` in AB1 over a small mixed sheet. The ranges in the cases below are cut from it:
+///
+/// ```text
+///      A      B      C       E
+///  1   1.5    10     =A1*4        (C1 is a formula cell inside the ranges)
+///  2   2      TRUE           #DIV/0!   (E2 only when `error` is set)
+///  3   text   3
+///  4   -0.25
+/// ```
+fn aggregate_of(error: bool, formula: &str) -> Value {
+    let mut t = T::new();
+    for (at, v) in [("A1", "1.5"), ("A2", "2"), ("A3", "skipped"), ("A4", "-0.25"), ("B1", "10"), ("B2", "TRUE"), ("B3", "3"), ("C1", "=A1*4")] {
+        t.set(at, v);
+    }
+    if error {
+        t.set("E2", "#DIV/0!");
+    }
+
+    // AB1 is outside every range used, so the formula can't read itself.
+    t.set("AB1", formula);
+    t.get("AB1")
+}
+
+#[test]
+fn sum_count_average_over_ranges() {
+    // Text, booleans, blanks and a formula cell inside ranges; direct arguments; unions; whole
+    // columns; blocks holding an error or nothing numeric. The expected values are what the
+    // array path (the ranges copied into an array) gave before the ranges were folded in place,
+    // so any difference is a change of behavior.
+    let n = Value::Number;
+    let e = Value::Error;
+
+    // (formula written with SUM, error in E2?, [SUM, COUNT, AVERAGE] of that formula)
+    #[rustfmt::skip]
+    let cases: &[(&str, bool, [Value; 3])] = &[
+        ("=SUM(A1:A1,B3)", false, [n(4.5), n(2.0), n(2.25)]),
+        ("=SUM(A1:A1,B3)", true, [n(4.5), n(2.0), n(2.25)]),
+        ("=SUM((A1:A2,B1:B3))", false, [n(16.5), n(4.0), n(4.125)]),
+        ("=SUM((A1:A2,B1:B3))", true, [n(16.5), n(4.0), n(4.125)]),
+        ("=SUM(A1:A4,B1:B3)", false, [n(16.25), n(5.0), n(3.25)]),
+        ("=SUM(A1:A4,B1:B3)", true, [n(16.25), n(5.0), n(3.25)]),
+        ("=SUM(A1:A4,\"x\")", false, [e(CellError::Value), n(3.0), e(CellError::Value)]),
+        ("=SUM(A1:A4,\"x\")", true, [e(CellError::Value), n(3.0), e(CellError::Value)]),
+        ("=SUM(A1:B4,5,\"7\",TRUE)", false, [n(29.25), n(8.0), n(3.65625)]),
+        ("=SUM(A1:B4,5,\"7\",TRUE)", true, [n(29.25), n(8.0), n(3.65625)]),
+        ("=SUM(A1:C4)+SUM(B1:B3)", false, [n(35.25), n(8.0), n(10.208333333333334)]),
+        ("=SUM(A1:C4)+SUM(B1:B3)", true, [n(35.25), n(8.0), n(10.208333333333334)]),
+        ("=SUM(A1:C4)", false, [n(22.25), n(6.0), n(3.7083333333333335)]),
+        ("=SUM(A1:C4)", true, [n(22.25), n(6.0), n(3.7083333333333335)]),
+        ("=SUM(A1:E4)", false, [n(22.25), n(6.0), n(3.7083333333333335)]),
+        ("=SUM(A1:E4)", true, [e(CellError::Div0), n(6.0), e(CellError::Div0)]),
+        ("=SUM(A1)", false, [n(1.5), n(1.0), n(1.5)]),
+        ("=SUM(A1)", true, [n(1.5), n(1.0), n(1.5)]),
+        ("=SUM(A3,B2)", false, [n(0.0), n(0.0), e(CellError::Div0)]),
+        ("=SUM(A3,B2)", true, [n(0.0), n(0.0), e(CellError::Div0)]),
+        ("=SUM(A:C)", false, [n(22.25), n(6.0), n(3.7083333333333335)]),
+        ("=SUM(A:C)", true, [n(22.25), n(6.0), n(3.7083333333333335)]),
+        ("=SUM(E1:E3)", false, [n(0.0), n(0.0), e(CellError::Div0)]),
+        ("=SUM(E1:E3)", true, [e(CellError::Div0), n(0.0), e(CellError::Div0)]),
+        ("=SUM(Z1:Z9)", false, [n(0.0), n(0.0), e(CellError::Div0)]),
+        ("=SUM(Z1:Z9)", true, [n(0.0), n(0.0), e(CellError::Div0)]),
+    ];
+
+    for (formula, error, want) in cases {
+        for (func, want) in ["SUM", "COUNT", "AVERAGE"].into_iter().zip(want) {
+            // The same formula for each function: `SUM(` becomes `COUNT(` or `AVERAGE(`.
+            let f = formula.replace("SUM", func);
+
+            assert_eq!(&aggregate_of(*error, &f), want, "{f} (error in E2: {error})");
+        }
+    }
+}
+
+#[test]
+fn sum_count_average_have_no_size_limit() {
+    // One stored cell far down stretches the used range to 27 million cells (27 columns by a
+    // million rows), past the 16M-cell limit of ranges copied into an array. Only two cells are
+    // stored, so the sheet itself is tiny.
+    for (func, want) in [("SUM", Value::Number(2.5)), ("COUNT", Value::Number(2.0)), ("AVERAGE", Value::Number(1.25))] {
+        for range in ["A1:AA1000000", "A:AA"] {
+            let mut t = T::new();
+            t.set("A1", "1.5");
+            t.set("Z1000000", "1");
+
+            t.set("AB1", &format!("={func}({range})"));
+
+            assert_eq!(t.get("AB1"), want, "{func}({range})");
+        }
+    }
+}
+
+#[test]
+fn sum_count_average_over_spilled_values() {
+    // A1 spills over A1:A3, so the block holds values that exist only as a spill (they have no
+    // stored cell of their own). The host must not fold such a block in place: it falls back
+    // to the array path, which sees the spill. Expected: 1 + 2 + 3 + 10.
+    let mut t = T::new();
+    t.set("A1", "=SEQUENCE(3)");
+    t.set("A4", "10");
+
+    for (f, want) in [("SUM", 16.0), ("COUNT", 4.0), ("AVERAGE", 4.0)] {
+        t.set("C1", &format!("={f}(A1:A5)"));
+
+        assert_eq!(t.num("C1"), want, "{f}");
+    }
+}
+
+#[test]
+fn aggregate_arguments_are_read_in_order() {
+    // Volatile cells draw a random number each time they are calculated, so the order in which
+    // the arguments are read decides which draw each one gets. `B1:B2` comes first, so B2 must
+    // draw before the `RAND()` argument does. (Reading the plain `RAND()` first once gave
+    // 7.9043 here.) The expected values are what the array path gave; they depend on the random
+    // generator and its seed, and must be updated if either changes.
+    let mut t = T::new();
+    t.set("B1", "1");
+    t.set("B2", "=RAND()*10");
+
+    t.set("A1", "=SUM(B1:B2,RAND())");
+
+    assert_eq!((t.num("A1"), t.num("B2")), (4.968520165759784, 3.3112028100185356));
+}
+
+#[test]
+fn sum_count_average_follow_edits_inside_the_range() {
+    // A range read in place must still count as a precedent of the formula: if it didn't, an
+    // edit inside it would leave the formula showing a stale value. Each step below changes one
+    // cell inside the range and checks all three functions; the last one changes a cell outside.
+    for range in ["A1:A5", "A:A"] {
+        let mut t = T::new();
+        t.set("A1", "1");
+        t.set("A3", "3");
+        t.set("C1", &format!("=SUM({range})"));
+        t.set("C2", &format!("=COUNT({range})"));
+        t.set("C3", &format!("=AVERAGE({range})"));
+        let all = |t: &T| (t.num("C1"), t.num("C2"), t.num("C3"));
+        assert_eq!(all(&t), (4.0, 2.0, 2.0), "{range}");
+
+        t.set("A1", "5");
+        assert_eq!(all(&t), (8.0, 2.0, 4.0), "{range}: edit");
+
+        t.set("A2", "10");
+        assert_eq!(all(&t), (18.0, 3.0, 6.0), "{range}: fill a blank");
+
+        t.set("A3", "text");
+        assert_eq!(all(&t), (15.0, 2.0, 7.5), "{range}: number to text");
+
+        t.set("A2", "");
+        assert_eq!(all(&t), (5.0, 1.0, 5.0), "{range}: clear");
+
+        t.set("A5", "=A1*2");
+        assert_eq!(all(&t), (15.0, 2.0, 7.5), "{range}: formula in the range");
+
+        t.set("A1", "1");
+        assert_eq!(all(&t), (3.0, 2.0, 1.5), "{range}: its precedent changes");
+
+        // A7 is inside the whole column A:A but outside A1:A5.
+        t.set("A7", "100");
+        let outside = if range == "A:A" { (103.0, 3.0, 103.0 / 3.0) } else { (3.0, 2.0, 1.5) };
+        assert_eq!(all(&t), outside, "{range}: a cell outside the range");
+    }
+}
+
+#[test]
+fn visit_range_declines_when_a_formula_in_the_block_spills_into_it() {
+    // The sheet: D1 = SEQUENCE(3) and D4 = 10, and D1 has not been calculated yet when the
+    // block D1:D5 is read.
+    let mut wb = Workbook::new();
+    let sh = wb.sheet_mut(0).unwrap();
+    sh.cells.set(c("D1"), Cell::formula(Formula::new("=SEQUENCE(3)")));
+    sh.cells.set(c("D4"), Cell::value(Value::Number(10.0)));
+    let block = gridcraft_core::RangeRef::parse("D1:D5").unwrap();
+
+    // Reading the block calculates D1, which spills over D2:D3. A walk over the stored cells
+    // would never see 2 and 3, so the host must decline and leave the block to `range_values`.
+    // (`Calc` recalculates a pass that produced new spills, so final results are right either
+    // way; only this direct call shows the host's contract.)
+    let walked = crate::recalc::tests::probe_visit_range(&wb, &[("D1", "=SEQUENCE(3)")], block);
+
+    assert_eq!(walked, None, "walked a block holding a spill it can't see");
 }

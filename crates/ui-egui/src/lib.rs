@@ -6,6 +6,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod backstage;
 mod border_preview;
 mod cell_pictures;
 pub mod chartview;
@@ -18,10 +19,13 @@ mod formula_locale;
 pub mod grid;
 pub mod i18n;
 pub mod icons;
+pub mod keymap;
 pub mod keytips;
 pub mod panes;
+pub mod paper_view;
 pub mod pivot_pane;
 pub mod ribbon;
+pub mod selection_glide;
 pub mod tabs;
 pub mod text_box;
 pub mod theme;
@@ -46,9 +50,10 @@ pub struct UiState {
     pub system_theme: bool,
     pub ribbon_tab: String,
     pub ribbon_collapsed: bool,
-    pub formula_bar: bool,
     pub formula_bar_expanded: bool,
     pub status_bar: bool,
+    /// Motion in the UI: the selection outline glides to a new selection (View ▸ Animations).
+    pub animations: bool,
     pub recent: Vec<String>,
     /// Interface language. English by default (so tests and headless renders never depend on the
     /// host's locale); the desktop app starts from [`i18n::Language::system`] when `ui.json` has
@@ -56,6 +61,25 @@ pub struct UiState {
     /// rather than failing the whole `UiState`.
     #[serde(deserialize_with = "i18n::lenient")]
     pub language: i18n::Language,
+    /// Interface size in percent on top of the desktop's scale (100 = Auto), applied as egui's
+    /// zoom factor so the ribbon, menus, dialogs and grid grow together. Kept within
+    /// [`INTERFACE_SCALE_MIN`]..=[`INTERFACE_SCALE_MAX`]; a malformed saved value reads as 100.
+    #[serde(deserialize_with = "lenient_interface_scale")]
+    pub interface_scale: u16,
+}
+
+pub const INTERFACE_SCALE_MIN: u16 = 75;
+pub const INTERFACE_SCALE_MAX: u16 = 200;
+
+/// A requested interface size, rounded and clamped to the supported range; `None` when it isn't
+/// a finite number.
+pub fn clamp_interface_scale(percent: f64) -> Option<u16> {
+    percent.is_finite().then(|| percent.round().clamp(INTERFACE_SCALE_MIN as f64, INTERFACE_SCALE_MAX as f64) as u16)
+}
+
+fn lenient_interface_scale<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u16, D::Error> {
+    let v = Json::deserialize(d)?;
+    Ok(v.as_f64().and_then(clamp_interface_scale).unwrap_or(100))
 }
 
 impl Default for UiState {
@@ -65,11 +89,12 @@ impl Default for UiState {
             system_theme: false,
             ribbon_tab: "Home".into(),
             ribbon_collapsed: false,
-            formula_bar: true,
             formula_bar_expanded: false,
             status_bar: true,
+            animations: true,
             recent: vec![],
             language: i18n::Language::En,
+            interface_scale: 100,
         }
     }
 }
@@ -83,6 +108,11 @@ impl UiState {
         } else {
             egui::ThemePreference::Light
         }
+    }
+
+    /// The zoom factor for the interface size preference.
+    pub fn zoom_factor(&self) -> f32 {
+        clamp_interface_scale(self.interface_scale as f64).unwrap_or(100) as f32 / 100.0
     }
 
     pub fn theme_mode(&self) -> &'static str {
@@ -116,12 +146,19 @@ pub struct Services {
     /// Publish HTML and its plain-text alternative together. `Ok` means the host owns the
     /// write (including any asynchronous fallback); an immediate error uses egui's text path.
     pub copy_html: Option<Box<dyn FnMut(&str, &str) -> Result<(), String>>>,
+    /// Read the HTML flavour of the system clipboard when the user pastes text, so cells the
+    /// source spreadsheet recorded as numbers stay numbers ("Rp10,000.00" → 10000). `None` from
+    /// the host pastes the plain text alone.
+    pub paste_html: Option<Box<dyn FnMut() -> Option<String>>>,
     /// Web: deliver a file to the user (name, bytes).
     pub download: Option<Box<dyn Fn(&str, &[u8])>>,
     /// Web: start an asynchronous file pick; the bytes arrive later in `inbox`.
     pub open_async: Option<Box<dyn Fn()>>,
     /// Files delivered asynchronously (name, bytes), opened on the next frame.
     pub inbox: Option<Inbox>,
+    /// Web: hand PDF bytes to the browser's print flow directly (no download,
+    /// no intermediate file) — opens the system print dialog on that PDF.
+    pub print: Option<Box<dyn Fn(&[u8])>>,
 }
 
 /// Shared queue of files read asynchronously (browser file picker, drag and drop).
@@ -142,6 +179,8 @@ pub struct SheetApp {
     pub editor: Option<editor::EditState>,
     pub text_box_editor: Option<text_box::EditState>,
     pub dialog: Option<dialogs::Dialog>,
+    /// The File tab's Backstage view, when open (UI-only; replaces the ribbon, grid and tabs).
+    pub backstage: Option<backstage::Backstage>,
     pub message: Option<(String, String)>,
     pub toast: Option<(String, f64)>,
     pub services: Services,
@@ -178,6 +217,7 @@ impl SheetApp {
             editor: None,
             text_box_editor: None,
             dialog: None,
+            backstage: None,
             message: None,
             toast: None,
             services,
@@ -245,6 +285,11 @@ impl SheetApp {
         }
         let r = self.session.run(id, params);
         self.after_engine();
+        if id == "file.exportPdf"
+            && let Ok(r) = &r
+        {
+            self.deliver_pdf(r);
+        }
         r
     }
 
@@ -252,7 +297,10 @@ impl SheetApp {
     /// their existing internal clipboard behavior and do not write to the host clipboard.
     pub fn copy_to_clipboard(&mut self, ctx: &egui::Context, command: &str) {
         // Only ask the engine for HTML when the host can publish it.
-        let Ok(result) = self.run(command, json!({"html": self.services.copy_html.is_some()})) else { return };
+        let result = match self.run(command, json!({"html": self.services.copy_html.is_some()})) {
+            Ok(result) => result,
+            Err(e) => return self.alert(e),
+        };
         let Some(text) = result.get("text").and_then(Json::as_str) else { return };
         if let Some(html) = result.get("html").and_then(Json::as_str)
             && let Some(copy_html) = &mut self.services.copy_html
@@ -265,14 +313,67 @@ impl SheetApp {
         ctx.copy_text(text.to_string());
     }
 
+    /// Paste text that came from the system clipboard, with the clipboard's HTML flavour when the
+    /// host can read it.
+    pub fn paste_external(&mut self, text: String) {
+        let html = self.services.paste_html.as_mut().and_then(|read| read());
+        let params = match html {
+            Some(html) => json!({"text": text, "html": html}),
+            None => json!({"text": text}),
+        };
+        self.run_or_alert("edit.paste", params);
+    }
+
+    /// Web: `file.exportPdf` without a path returns the PDF as base64; hand it to the browser as a download.
+    fn deliver_pdf(&self, result: &Json) {
+        if result.get("path").is_some() {
+            return;
+        }
+        if let Some(dl) = &self.services.download
+            && let Some(b) = result.get("base64").and_then(Json::as_str).and_then(gridcraft_engine::io::base64_decode)
+        {
+            let title = self.session.active().map(|d| d.display_title()).unwrap_or_else(|| "Book1".into());
+            dl(&std::path::Path::new(&title).with_extension("pdf").to_string_lossy(), &b);
+        }
+    }
+
     /// Runs a command and shows its error in a message box (for menu/ribbon clicks).
     pub fn run_or_alert(&mut self, id: &str, params: Json) {
+        // Printing from the UI also hands the PDF to the host's print flow (web).
+        if id == "file.print" {
+            return self.print_now(params);
+        }
         if let Err(e) = self.run(id, params) {
-            if e.contains("is not available right now") {
-                self.toast = Some((e, now_ms()));
-            } else {
-                self.message = Some(("GridCraft".into(), clean_error(&e)));
+            self.alert(e);
+        }
+    }
+
+    /// Shows a command error: a toast for an unavailable command, else a message box.
+    fn alert(&mut self, e: String) {
+        if e.contains("is not available right now") {
+            self.toast = Some((e, now_ms()));
+        } else {
+            self.message = Some(("GridCraft".into(), clean_error(&e)));
+        }
+    }
+
+    /// Runs `file.print`, builds the PDF and (where the host provides the hook — the web
+    /// build) hands the bytes straight to the browser's print flow; errors show the usual
+    /// alert. Desktop builds have no `services.print`, so this falls back to `run_or_alert`
+    /// (which still produces the PDF — just without a UI to act on the result yet).
+    pub fn print_now(&mut self, params: Json) {
+        match self.run("file.print", params) {
+            Ok(r) => {
+                let Some(b64) = r.get("base64").and_then(Json::as_str) else { return };
+                let Some(bytes) = gridcraft_engine::io::base64_decode(b64) else {
+                    self.message = Some(("GridCraft".into(), "Couldn't decode the generated PDF.".into()));
+                    return;
+                };
+                if let Some(print) = &self.services.print {
+                    print(&bytes);
+                }
             }
+            Err(e) => self.alert(e),
         }
     }
 
@@ -282,10 +383,6 @@ impl SheetApp {
             "ui.ribbonTab" => {
                 self.ui.ribbon_tab = p.get("tab").and_then(Json::as_str).unwrap_or("Home").to_string();
                 Ok(Json::Null)
-            }
-            "view.formulaBar" => {
-                self.ui.formula_bar = p.get("on").and_then(Json::as_bool).unwrap_or(!self.ui.formula_bar);
-                Ok(json!({"on": self.ui.formula_bar}))
             }
             "view.collapseRibbon" => {
                 self.ui.ribbon_collapsed = !self.ui.ribbon_collapsed;
@@ -308,7 +405,25 @@ impl SheetApp {
                 }
                 Ok(json!({"mode": self.ui.theme_mode()}))
             }
-            "view.zoom100" => return Some(self.session.run("view.zoom", json!({"percent": 100})).inspect(|_| self.after_engine())),
+            "view.animations" => {
+                self.ui.animations = p.get("on").and_then(Json::as_bool).unwrap_or(!self.ui.animations);
+                Ok(json!({"on": self.ui.animations}))
+            }
+            "view.interfaceScale" => {
+                // `{"percent": 125}` or `{"percent": "auto"}`; out-of-range values are clamped.
+                let percent = match p.get("percent") {
+                    Some(Json::String(s)) if s.eq_ignore_ascii_case("auto") => Some(100),
+                    Some(v) => v.as_f64().and_then(clamp_interface_scale),
+                    None => None,
+                };
+                match percent {
+                    Some(v) => {
+                        self.ui.interface_scale = v;
+                        Ok(json!({"percent": v}))
+                    }
+                    None => Err(format!("missing `percent` ({INTERFACE_SCALE_MIN}–{INTERFACE_SCALE_MAX}, or \"auto\")")),
+                }
+            }
             "app.language.set" => {
                 // `{"language": "ja"}`; `code` is accepted as an alias.
                 let code = p.get("language").or_else(|| p.get("code")).and_then(Json::as_str).unwrap_or("");
@@ -317,7 +432,7 @@ impl SheetApp {
                         self.ui.language = l;
                         Ok(json!({"language": l}))
                     }
-                    None => Err(format!("unknown language {code:?} (use \"en\", \"es\", \"zh\", \"ja\", \"ko\", \"ru\" or \"pt\")")),
+                    None => Err(format!("unknown language {code:?} (use \"en\", \"es\", \"zh\", \"ja\", \"ko\", \"ru\", \"pt\" or \"cs\")")),
                 }
             }
             "app.language.english" => {
@@ -327,6 +442,22 @@ impl SheetApp {
             "app.language.japanese" => {
                 self.ui.language = i18n::Language::Ja;
                 Ok(json!({"language": i18n::Language::Ja}))
+            }
+            "ui.backstage" => {
+                // `{"page": "info"}` opens File › Info; `{"page": "close"}` returns to the sheet.
+                match p.get("page").and_then(Json::as_str).map(str::trim) {
+                    Some("close" | "none" | "") => self.backstage = None,
+                    Some(id) => match backstage::Page::parse(id) {
+                        Some(page) => self.open_backstage(page),
+                        None => {
+                            return Some(Err(format!(
+                                "unknown File page {id:?} (use home, new, open, info, saveAs, print, export, options or close)"
+                            )));
+                        }
+                    },
+                    None => self.open_backstage(backstage::Page::Home),
+                }
+                Ok(json!({"page": self.backstage.as_ref().map(|b| b.page.id())}))
             }
             "ui.dialog" => {
                 let name = p.get("name").and_then(Json::as_str).unwrap_or("");
@@ -396,7 +527,25 @@ impl SheetApp {
                     dl(&name, &b);
                 }
             }
+            // File › Options (`file.options`) and the File tab itself open the Backstage view.
+            "options" => self.open_backstage(backstage::Page::Options),
+            "backstage" => {
+                let page = params.get("page").and_then(Json::as_str).and_then(backstage::Page::parse).unwrap_or(backstage::Page::Home);
+                self.open_backstage(page);
+            }
             other => self.dialog = dialogs::Dialog::open(self, other, params),
+        }
+    }
+
+    /// Opens the File tab's Backstage view on `page`, committing a cell still being edited first
+    /// (File actions work on the whole workbook). A draft that can't be committed keeps the sheet.
+    pub fn open_backstage(&mut self, page: backstage::Page) {
+        if !self.commit_edit(0, 0, false, false) {
+            return;
+        }
+        match &mut self.backstage {
+            Some(b) => b.page = page,
+            None => self.backstage = Some(backstage::Backstage::new(page)),
         }
     }
 
@@ -444,11 +593,10 @@ impl SheetApp {
         let current = if sh.cell_pictures.contains_key(&at) {
             String::new()
         } else {
-            sh.cell(at)
-                .map(
-                    |c| if c.formula.is_some() { formula_locale::display(&c.input_text(), locale, &d.wb, d.wb.active_sheet) } else { c.input_text() },
-                )
-                .unwrap_or_default()
+            match sh.cell(at) {
+                Some(c) if c.formula.is_some() => formula_locale::display(&c.input_text(), locale, &d.wb, d.wb.active_sheet),
+                _ => gridcraft_engine::display::edit_text(&d.wb, sh, at),
+            }
         };
         let (text, replace) = match text {
             Some(t) => (t, true),
@@ -566,6 +714,16 @@ impl SheetApp {
             ctx.request_repaint();
         }
         self.effective_dark = ctx.theme() == egui::Theme::Dark;
+        // Interface size: the preference owns the zoom factor, so egui's own Ctrl/Cmd +/-/0 zoom
+        // keys stay off (they would also swallow GridCraft's shortcuts).
+        if ctx.options(|o| o.zoom_with_keyboard) {
+            ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        }
+        let zoom = self.ui.zoom_factor();
+        if (ctx.zoom_factor() - zoom).abs() > 0.001 {
+            ctx.set_zoom_factor(zoom);
+            ctx.request_repaint();
+        }
         control::poll(self, ctx);
         // Files read asynchronously (web file picker, dropped files).
         let arrived: Vec<(String, Vec<u8>)> = self
@@ -576,8 +734,10 @@ impl SheetApp {
             .unwrap_or_default();
         for (name, bytes) in arrived {
             let b64 = gridcraft_engine::io::base64_encode(&bytes);
-            if let Err(e) = self.run("file.open", json!({"name": name, "base64": b64})) {
-                self.message = Some(("GridCraft".into(), clean_error(&e)));
+            match self.run("file.open", json!({"name": name, "base64": b64})) {
+                // A file picked from File › Open (web) arrives here: show it, not the Backstage.
+                Ok(_) => self.backstage = None,
+                Err(e) => self.message = Some(("GridCraft".into(), clean_error(&e))),
             }
             self.after_engine();
         }
@@ -604,23 +764,30 @@ impl SheetApp {
         // The language the widgets translate with this frame (see `i18n::current`).
         i18n::set_current(&ctx, self.ui.language);
         let t = theme::Tokens::get(&ctx);
-        self.ribbon_keys(&ctx);
+        if self.backstage.is_none() {
+            self.ribbon_keys(&ctx);
+        }
         ribbon::title_bar(self, ui);
-        ribbon::show(self, ui);
-        if self.ui.formula_bar {
-            formula_bar::show(self, ui);
+        if self.backstage.is_some() {
+            // File tab: the Backstage view replaces everything below the title bar.
+            backstage::show(self, ui);
+        } else {
+            ribbon::show(self, ui);
+            if self.session.prefs.formula_bar {
+                formula_bar::show(self, ui);
+            }
+            if self.ui.status_bar {
+                tabs::status_bar(self, ui);
+            }
+            tabs::sheet_tabs(self, ui);
+            pivot_pane::show(self, ui);
+            panes::show(self, ui);
+            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.grid_bg)).show(ui, |ui| {
+                let g0 = now_ms();
+                grid::show(self, ui);
+                self.perf.grid_ms = now_ms() - g0;
+            });
         }
-        if self.ui.status_bar {
-            tabs::status_bar(self, ui);
-        }
-        tabs::sheet_tabs(self, ui);
-        pivot_pane::show(self, ui);
-        panes::show(self, ui);
-        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.grid_bg)).show(ui, |ui| {
-            let g0 = now_ms();
-            grid::show(self, ui);
-            self.perf.grid_ms = now_ms() - g0;
-        });
         dialogs::show(self, &ctx);
         widgets::message_box(self, &ctx);
         widgets::toast(self, &ctx);

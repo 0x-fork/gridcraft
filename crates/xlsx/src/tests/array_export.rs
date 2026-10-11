@@ -124,7 +124,8 @@ fn dynamic_spills_and_legacy_cse_keep_distinct_ranges() {
     let (back, _) = read_xlsx(&bytes).unwrap();
     let sh = back.sheet(0).unwrap();
     assert_eq!(sh.cell(at("A1")).unwrap().formula.as_ref().unwrap().array, Some(range("A1:A2")));
-    assert_eq!(sh.value(at("A2")), Value::Number(2.0));
+    // A legacy array's cached values are dropped on read: the formula fills its range on recalc (#156).
+    assert!(sh.cell(at("A2")).is_none());
     assert_eq!(sh.cell(at("B1")).unwrap().formula.as_ref().unwrap().array, None);
     assert!(sh.cell(at("B2")).is_none());
     assert!(sh.cell(at("B3")).is_none());
@@ -235,8 +236,10 @@ fn implicit_intersection_metadata_respects_function_argument_context() {
             ("SUM(A1:A3)", false),
             ("SUMPRODUCT(A1:A3*B1:B3)", false),
             ("SUMPRODUCT(SQRT(A1:A3))", false),
-            ("SQRT(@A1:A3)", false),
-            ("@A1:A3*2", false),
+            // An explicit `@` is written as `_xlfn.SINGLE`, a dynamic-array formula. Dropping it
+            // instead would need the reader to put it back on legacy formulas.
+            ("SQRT(@A1:A3)", true),
+            ("@A1:A3*2", true),
             ("@(A1:A3*2)", true),
             ("SQRT(INDIRECT(\"A1\"))", false),
             ("SUM(INDIRECT(\"A1:A3\"))", false),
@@ -256,6 +259,12 @@ fn implicit_intersection_metadata_respects_function_argument_context() {
             ("LET(x,A1:A3,SUM(x*2))", true),
             ("XLOOKUP(1,A1:A3,B1:B3)", false),
             ("XLOOKUP(1,A1:A3,B1:C3)", true),
+            ("FORECAST.LINEAR(4,A1:A3,B1:B3)", false),
+            ("FORECAST.ETS(4,A1:A3,B1:B3,1,1,1)", false),
+            ("FORECAST.ETS(C1:C3,A1:A3,B1:B3)", true),
+            ("FORECAST.ETS.CONFINT(4,A1:A3,B1:B3,0.95)", false),
+            ("FORECAST.ETS.SEASONALITY(A1:A3,B1:B3)", false),
+            ("FORECAST.ETS.STAT(A1:A3,B1:B3,1)", false),
         ],
     );
 }
