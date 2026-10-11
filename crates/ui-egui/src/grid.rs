@@ -901,23 +901,50 @@ fn paint_cf_icon(p: &Painter, r: Rect, set: &str, idx: usize) {
     }
 }
 
+/// Where the active cell is on screen: the whole merged cell when it is part of one.
+fn active_rect(geo: &Geo, sh: &Sheet, sel: &gridcraft_engine::Selection) -> Rect {
+    match sh.merge_at(sel.active) {
+        Some(m) => geo.range_rect(sh, m),
+        None => geo.cell_rect(sh, sel.active),
+    }
+}
+
+/// The rectangles shaded for a selection: every area except the active cell, which stays clear so
+/// it is plain where typing goes. A single selected cell has no fill.
+pub fn selection_fill(geo: &Geo, sh: &Sheet, sel: &gridcraft_engine::Selection) -> Vec<Rect> {
+    if sel.is_single_cell() {
+        return vec![];
+    }
+    let active = active_rect(geo, sh, sel);
+    sel.ranges.iter().flat_map(|r| rect_around(geo.range_rect(sh, *r), active)).collect()
+}
+
+/// `area` without `hole`: the strips above and below the hole, then what is left beside it. The
+/// selection fill is translucent, so the active cell can't be cleared by painting over it; the
+/// pieces never overlap for the same reason. Pieces with no size, or whose numbers aren't finite,
+/// are dropped.
+fn rect_around(area: Rect, hole: Rect) -> impl Iterator<Item = Rect> {
+    // `intersect` takes the sane side of a NaN, which would make a broken hole cover the area.
+    let hole = if hole.is_finite() { area.intersect(hole) } else { Rect::NOTHING };
+    let parts = if hole.is_positive() {
+        [
+            Rect::from_min_max(area.min, pos2(area.max.x, hole.min.y)),
+            Rect::from_min_max(pos2(area.min.x, hole.max.y), area.max),
+            Rect::from_min_max(pos2(area.min.x, hole.min.y), pos2(hole.min.x, hole.max.y)),
+            Rect::from_min_max(pos2(hole.max.x, hole.min.y), pos2(area.max.x, hole.max.y)),
+        ]
+    } else {
+        [area, Rect::NOTHING, Rect::NOTHING, Rect::NOTHING]
+    };
+    parts.into_iter().filter(|r| r.is_positive() && r.is_finite())
+}
+
 fn paint_selection(p: &Painter, geo: &Geo, sh: &Sheet, sel: &gridcraft_engine::Selection, t: &Tokens, app: &SheetApp) {
     // Fill all areas except the active cell.
-    for r in &sel.ranges {
-        if r.is_single() && sel.ranges.len() == 1 {
-            continue;
-        }
-        let rect = geo.range_rect(sh, *r);
+    for rect in selection_fill(geo, sh, sel) {
         p.rect_filled(rect, 0.0, t.sel_fill);
     }
-    let active = geo.cell_rect(sh, sh.merge_at(sel.active).map(|m| m.start).unwrap_or(sel.active));
-    let active = match sh.merge_at(sel.active) {
-        Some(m) => geo.range_rect(sh, m),
-        None => active,
-    };
-    if !(sel.ranges.len() == 1 && sel.current().is_single()) {
-        p.rect_filled(active.shrink(1.0), 0.0, t.grid_bg.gamma_multiply(0.0));
-    }
+    let active = active_rect(geo, sh, sel);
     let cur = geo.range_rect(sh, sel.current());
     // Editing a formula: outline its references instead of the selection.
     if let Some(ed) = &app.editor
@@ -2222,4 +2249,65 @@ fn paint_pages(app: &mut SheetApp, p: &Painter, geo: &Geo, sh: &Sheet) {
         );
     }
     p.rect_stroke(pr, 0.0, Stroke::new(3.0, blue), StrokeKind::Outside);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rect_around_leaves_the_hole_and_never_overlaps() {
+        let area = Rect::from_min_max(pos2(100.0, 50.0), pos2(400.0, 250.0));
+        let check = |hole: Rect, pieces: usize| {
+            let parts: Vec<Rect> = rect_around(area, hole).collect();
+            assert_eq!(parts.len(), pieces, "{hole:?}: {parts:?}");
+            let cut = area.intersect(hole);
+            let cut_area = if cut.is_positive() { cut.area() } else { 0.0 };
+            let shaded: f32 = parts.iter().map(Rect::area).sum();
+            assert!((shaded - (area.area() - cut_area)).abs() < 0.5, "everything but the hole is shaded: {hole:?}");
+            for (i, a) in parts.iter().enumerate() {
+                assert!(area.contains_rect(*a), "nothing outside the area: {a:?}");
+                assert!(!a.shrink(0.01).intersects(hole), "the hole stays clear: {a:?} vs {hole:?}");
+                // The fill is translucent: a part shaded twice would show darker.
+                assert!(parts.iter().skip(i + 1).all(|b| !a.shrink(0.01).intersects(*b)), "{parts:?}");
+            }
+        };
+        let cell = |x: f32, y: f32| Rect::from_min_size(pos2(x, y), vec2(64.0, 16.0));
+        // In the middle, in each corner (where a drag began), along an edge.
+        check(cell(200.0, 100.0), 4);
+        check(cell(100.0, 50.0), 2);
+        check(cell(336.0, 50.0), 2);
+        check(cell(100.0, 234.0), 2);
+        check(cell(336.0, 234.0), 2);
+        check(cell(100.0, 100.0), 3);
+        // A merged cell as wide, or as tall, as the area; one that is all of it, or more.
+        check(Rect::from_min_max(pos2(100.0, 100.0), pos2(400.0, 132.0)), 2);
+        check(Rect::from_min_max(pos2(200.0, 50.0), pos2(264.0, 250.0)), 2);
+        check(area, 0);
+        check(area.expand(30.0), 0);
+        // The active cell is in another area, touches this one, or is only partly inside it.
+        check(cell(500.0, 300.0), 1);
+        check(cell(400.0, 50.0), 1);
+        check(cell(380.0, 240.0), 2);
+    }
+
+    #[test]
+    fn rect_around_survives_hostile_numbers() {
+        let sane = Rect::from_min_max(pos2(0.0, 0.0), pos2(64.0, 16.0));
+        let bad = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, f32::MAX, f32::MIN, -1.0, 0.0];
+        for a in bad {
+            for b in bad {
+                let weird = Rect::from_min_max(pos2(a, b), pos2(b, a));
+                for (area, hole) in [(sane, weird), (weird, sane), (weird, weird)] {
+                    for part in rect_around(area, hole) {
+                        assert!(part.is_positive() && part.is_finite(), "{area:?} around {hole:?}: {part:?}");
+                    }
+                }
+                // A hole that makes no sense leaves the whole area shaded.
+                if !weird.intersects(sane) {
+                    assert_eq!(rect_around(sane, weird).collect::<Vec<_>>(), vec![sane]);
+                }
+            }
+        }
+    }
 }
