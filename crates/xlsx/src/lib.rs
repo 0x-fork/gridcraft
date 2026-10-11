@@ -16,6 +16,7 @@ mod chart;
 mod chartex;
 mod csv;
 mod drawing;
+mod feature_bags;
 mod fmla;
 mod ods;
 mod package;

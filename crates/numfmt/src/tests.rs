@@ -421,3 +421,73 @@ fn fuzz_no_panic() {
         }
     }
 }
+
+// ---- 15 significant digits: an exact tie at the 16th digit goes toward zero ----
+// Windows Excel 16.0.20430 TEXT() over the exact doubles below. An odd 15th digit is where
+// round-half-even and toward-zero differ; an even one is where they agree.
+
+#[test]
+fn an_exact_tie_at_the_sixteenth_digit_goes_toward_zero() {
+    for (v, whole) in [
+        (1234567890123405.0, "1234567890123400"),
+        (1234567890123415.0, "1234567890123410"),
+        (1234567890123425.0, "1234567890123420"),
+        (1234567890123435.0, "1234567890123430"),
+        (1234567890123455.0, "1234567890123450"),
+        (1234567890123475.0, "1234567890123470"),
+        (1234567890123495.0, "1234567890123490"),
+        (6631679258820775.0, "6631679258820770"),
+        (8052991635850695.0, "8052991635850690"),
+    ] {
+        assert_eq!(f("0", v), whole, "0 over {v}");
+        assert_eq!(f("0.00", v), format!("{whole}.00"), "0.00 over {v}");
+        assert_eq!(f("0", -v), format!("-{whole}"), "0 over -{v}");
+    }
+    assert_eq!(f("#,##0", 1234567890123455.0), "1,234,567,890,123,450");
+    assert_eq!(f("#,##0", -3267527853107975.0), "-3,267,527,853,107,970");
+    // A fraction is a tie as well, when it is exact in binary.
+    assert_eq!(f("0", 123456789012345.5), "123456789012345");
+    assert_eq!(f("0.00", 123456789012345.5), "123456789012345.00");
+    // Excel observed: no carry after fifteen 9s.
+    assert_eq!(f("0", 999999999999999.5), "999999999999999");
+    assert_eq!(f("0", -999999999999999.5), "-999999999999999");
+    assert_eq!(f("0", 4999999999999995.0), "4999999999999990");
+    assert_eq!(f("#,##0", -4999999999999995.0), "-4,999,999,999,999,990");
+}
+
+#[test]
+fn only_exact_ties_go_toward_zero() {
+    // Just above and just below a tie round to the nearer 15-digit value (Excel observed).
+    assert_eq!(f("0", 1234567890123455.0 + 0.25), "1234567890123460");
+    assert_eq!(f("0", 1234567890123455.5), "1234567890123460");
+    assert_eq!(f("0", 1234567890123455.0 - 0.25), "1234567890123450");
+    // 16 digits that are not a tie, and the ordinary decimal cases, are untouched.
+    assert_eq!(f("0", 1234567890123456.0), "1234567890123460");
+    assert_eq!(f("0", 1234567890123454.0), "1234567890123450");
+    assert_eq!(f("0.00", 2.675), "2.68");
+    assert_eq!(f("0.00", 1.005), "1.01");
+    assert_eq!(f("0.0", 0.285), "0.3");
+    assert_eq!(f("0.0", 99999999999999.95), "100000000000000.0");
+    // Ten digits and a half are not a 16th-digit tie.
+    assert_eq!(f("0", 0.5), "1");
+    assert_eq!(f("0", 2.5), "3");
+}
+
+#[test]
+fn decimal_digits_keeps_fifteen_digits_and_truncates_a_tie() {
+    use crate::decimal::decimal_digits;
+    let (d, e) = decimal_digits(1234567890123455.0);
+    assert_eq!((d, e), ([1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5], 15));
+    let (d, e) = decimal_digits(1234567890123456.0);
+    assert_eq!((d, e), ([1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 6], 15));
+    let (d, e) = decimal_digits(123456789012345.5);
+    assert_eq!((d, e), ([1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5], 14));
+    // Excel observed: a tie after fifteen 9s does not carry (999999999999999.5 shows 999999999999999).
+    let (d, e) = decimal_digits(999999999999999.5);
+    assert_eq!((d, e), ([9; 15], 14));
+    let (d, e) = decimal_digits(4999999999999995.0);
+    assert_eq!((d, e), ([4, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9], 15));
+    // A 16th digit above 5 carries as usual.
+    let (d, e) = decimal_digits(999999999999999.6);
+    assert_eq!((d, e), ([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 15));
+}
