@@ -61,7 +61,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Calculation Options",
             ["Formulas", "Calculation"],
             None,
-            "{mode: automatic|automaticExceptTables|manual, iterative?, maxIterations?, maxChange?}",
+            "{mode?: automatic|automaticExceptTables|manual, iterative?: bool (Enable iterative calculation), maxIterations?: 1–32767 (100), maxChange?: number (0.001)} → the settings. File › Options › Formulas › Calculation options; stored in the workbook.",
             has_doc,
             calc_options
         ),
@@ -546,6 +546,7 @@ fn calc_options(s: &mut Session, p: &Json) -> Result<Json> {
         _ => None,
     };
     edit(s, |cx| {
+        let before = cx.wb.calc.clone();
         if let Some(m) = mode {
             cx.wb.calc.mode = m;
         }
@@ -553,14 +554,18 @@ fn calc_options(s: &mut Session, p: &Json) -> Result<Json> {
             cx.wb.calc.iterative = v;
         }
         if let Some(v) = u32_param(p, "maxIterations") {
-            cx.wb.calc.max_iterations = v.clamp(1, 32767);
+            cx.wb.calc.set_max_iterations(v);
         }
         if let Some(v) = f64_param(p, "maxChange") {
-            cx.wb.calc.max_change = v.abs();
+            cx.wb.calc.set_max_change(v);
         }
-        if mode == Some(CalcMode::Automatic) {
+        let c = &cx.wb.calc;
+        // Switching to automatic, or changing how circular references are calculated outside
+        // manual mode, recalculates the workbook.
+        let iteration_changed = (c.iterative, c.max_iterations, c.max_change) != (before.iterative, before.max_iterations, before.max_change);
+        if mode == Some(CalcMode::Automatic) || (iteration_changed && c.mode != CalcMode::Manual) {
             cx.structural = true;
         }
-        Ok(json!({"mode": format!("{:?}", cx.wb.calc.mode)}))
+        Ok(json!({"mode": format!("{:?}", c.mode), "iterative": c.iterative, "maxIterations": c.max_iterations, "maxChange": c.max_change}))
     })
 }

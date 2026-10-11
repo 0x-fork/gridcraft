@@ -573,6 +573,60 @@ fn package_structure() {
 }
 
 #[test]
+fn iterative_calculation_settings_roundtrip() {
+    let calc_pr = |wb: &Workbook| {
+        let bytes = write_xlsx(wb).unwrap();
+        let mut pkg = Package::open(&bytes).unwrap();
+        let book = pkg.read_xml("xl/workbook.xml").unwrap().unwrap();
+        let c = book.child("calcPr").unwrap();
+        let attrs = ["calcMode", "iterate", "iterateCount", "iterateDelta", "fullPrecision"].map(|a| c.attr(a).map(str::to_string));
+        (attrs, read_xlsx(&bytes).unwrap().0.calc)
+    };
+    let s = |v: &str| Some(v.to_string());
+    // Defaults: nothing written.
+    let mut wb = Workbook::new();
+    assert_eq!(calc_pr(&wb), ([None, None, None, None, None], CalcSettings::default()));
+    // On: the switch and both limits, beside the other calculation settings.
+    wb.calc.mode = CalcMode::Manual;
+    wb.calc.iterative = true;
+    wb.calc.precision_as_displayed = true;
+    let (attrs, back) = calc_pr(&wb);
+    assert_eq!(attrs, [s("manual"), s("1"), s("100"), s("0.001"), s("0")]);
+    assert_eq!(back, wb.calc);
+    // Off: limits that differ from the defaults are kept for when it is switched on again.
+    wb.calc.iterative = false;
+    wb.calc.set_max_iterations(250);
+    wb.calc.set_max_change(0.0005);
+    let (attrs, back) = calc_pr(&wb);
+    assert_eq!(attrs, [s("manual"), None, s("250"), s("0.0005"), s("0")]);
+    assert_eq!(back, wb.calc);
+    // Out-of-range values in a file are kept within Excel's limits.
+    let xml = |attrs: &str| {
+        format!(
+            r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="A" sheetId="1" r:id="rId1"/></sheets><calcPr {attrs}/></workbook>"#
+        )
+    };
+    for (attrs, count, change) in [
+        (r#"iterate="1" iterateCount="0" iterateDelta="-2""#, 1, 2.0),
+        (r#"iterate="true" iterateCount="99999" iterateDelta="NaN""#, CalcSettings::MAX_ITERATIONS, CalcSettings::DEFAULT_CHANGE),
+    ] {
+        let wbx = xml(attrs);
+        let rels = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#;
+        let ws = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>"#;
+        let bytes = super::make_zip(&[
+            ("[Content_Types].xml", super::CT.as_bytes()),
+            ("_rels/.rels", super::ROOT_RELS.as_bytes()),
+            ("xl/workbook.xml", wbx.as_bytes()),
+            ("xl/_rels/workbook.xml.rels", rels.as_bytes()),
+            ("xl/worksheets/sheet1.xml", ws.as_bytes()),
+        ]);
+        let calc = read_xlsx(&bytes).unwrap().0.calc;
+        assert!(calc.iterative, "{attrs}");
+        assert_eq!((calc.max_iterations, calc.max_change), (count, change), "{attrs}");
+    }
+}
+
+#[test]
 fn empty_workbook_roundtrip() {
     let wb = Workbook::new();
     let bytes = write_xlsx(&wb).unwrap();

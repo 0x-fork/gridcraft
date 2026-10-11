@@ -120,6 +120,105 @@ fn errors_and_cycles() {
     assert_eq!(t.get("C2"), Value::Error(CellError::Name));
 }
 
+impl T {
+    fn iterative(max_iterations: u32, max_change: f64) -> T {
+        let mut t = T::new();
+        t.wb.calc.iterative = true;
+        t.wb.calc.set_max_iterations(max_iterations);
+        t.wb.calc.set_max_change(max_change);
+        t
+    }
+}
+
+#[test]
+fn iterative_calculation_stops_at_maximum_iterations() {
+    // A1 =A1+1 never settles: every recalculation adds Maximum Iterations.
+    let mut t = T::iterative(100, 0.001);
+    t.set("A1", "=A1+1");
+    assert_eq!(t.num("A1"), 100.0);
+    assert!(t.calc.circular.is_empty());
+    // An edit outside the loop doesn't recalculate it.
+    t.set("B1", "7");
+    assert_eq!(t.num("A1"), 100.0);
+    // Each recalculation starts from the value the cell shows.
+    t.calc.recalc_all(&mut t.wb);
+    assert_eq!(t.num("A1"), 200.0);
+    t.wb.calc.set_max_iterations(5);
+    t.calc.recalc_all(&mut t.wb);
+    assert_eq!(t.num("A1"), 205.0);
+    // Through a range that holds the formula itself.
+    t.set("C1", "1");
+    t.set("C2", "2");
+    t.set("C3", "=SUM(C1:C3)");
+    assert_eq!(t.num("C3"), 15.0);
+    // Excel's largest Maximum Iterations.
+    let mut t = T::iterative(32767, 0.001);
+    t.set("A1", "=A1+1");
+    assert_eq!(t.num("A1"), 32767.0);
+}
+
+#[test]
+fn iterative_calculation_converges_within_maximum_change() {
+    let mut t = T::iterative(100, 0.001);
+    t.set("A1", "=(A2+10)/2");
+    t.set("A2", "=A1");
+    assert!((t.num("A1") - 10.0).abs() < 0.002, "{}", t.num("A1"));
+    assert!((t.num("A2") - 10.0).abs() < 0.002, "{}", t.num("A2"));
+    assert!(t.calc.circular.is_empty());
+    // A loop fed by a constant, and a formula that reads the loop, follow a change.
+    t.set("D1", "10");
+    t.set("A1", "=(A2+D1)/2");
+    t.set("E1", "=A1*2");
+    t.set("D1", "30");
+    assert!((t.num("A1") - 30.0).abs() < 0.002, "{}", t.num("A1"));
+    assert!((t.num("E1") - 60.0).abs() < 0.004, "{}", t.num("E1"));
+    // Already settled: recalculating changes it by less than Maximum Change.
+    let a1 = t.num("A1");
+    t.calc.recalc_all(&mut t.wb);
+    assert!((t.num("A1") - a1).abs() < 0.001);
+}
+
+#[test]
+fn iterative_calculation_stops_once_changes_are_below_maximum_change() {
+    // A1 halves its distance to 10 each pass, from 5: 7.5, 8.75, 9.375, 9.6875, and A2 trails
+    // one pass behind. Maximum Change 1 stops once neither moved by 1 or more.
+    let mut t = T::iterative(100, 1.0);
+    t.set("A1", "=(A2+10)/2");
+    assert_eq!(t.num("A1"), 5.0);
+    t.set("A2", "=A1");
+    assert_eq!((t.num("A1"), t.num("A2")), (9.6875, 9.375));
+    // Maximum Iterations 2 stops first.
+    let mut t = T::iterative(2, 1.0);
+    t.set("A1", "=(A2+10)/2");
+    t.set("A2", "=A1");
+    assert_eq!((t.num("A1"), t.num("A2")), (8.75, 7.5));
+}
+
+#[test]
+fn iterative_calculation_of_text_and_errors() {
+    let mut t = T::iterative(100, 0.001);
+    t.set("A1", "=IF(ISTEXT(A1),A1&\"\",\"go\")");
+    assert_eq!(t.get("A1"), Value::from("go"));
+    t.set("B1", "=B1+1/0");
+    assert_eq!(t.get("B1"), Value::Error(CellError::Div0));
+}
+
+#[test]
+fn circular_references_without_iterative_calculation() {
+    let mut t = T::new();
+    t.set("A1", "=A1+1");
+    assert_eq!(t.get("A1"), Value::Error(CellError::Circ));
+    assert_eq!(t.calc.circular, vec![(0, c("A1"))]);
+    // Switched on, the loop is calculated from 0 rather than from the error.
+    t.wb.calc.iterative = true;
+    t.calc.recalc_all(&mut t.wb);
+    assert_eq!(t.num("A1"), 100.0);
+    assert!(t.calc.circular.is_empty());
+    t.wb.calc.iterative = false;
+    t.calc.recalc_all(&mut t.wb);
+    assert_eq!(t.get("A1"), Value::Error(CellError::Circ));
+}
+
 #[test]
 fn operators() {
     let mut t = T::new();

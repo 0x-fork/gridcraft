@@ -6,7 +6,9 @@
 //! O(log n + matches) however many ranges share the column. After an edit, the dirty set is the
 //! transitive closure of dependents; it is evaluated in topological order, with on-demand
 //! evaluation as a safety net for dynamic references. Cycles produce `#CIRC!` unless iterative
-//! calculation is on.
+//! calculation is on: then a formula read while it is being evaluated gives its previous value,
+//! and the formulas that read one are evaluated again until the loop settles
+//! (`PassHost::iterate_loops`).
 
 use std::collections::{BTreeSet, VecDeque};
 use std::hash::{BuildHasherDefault, Hasher};
@@ -57,6 +59,10 @@ const WIDE: u32 = 64;
 
 /// Insertions an [`Intervals`] keeps aside (scanned by every query) before merging them in.
 const PENDING: usize = 32;
+
+/// Formula evaluations iterative calculation may spend on one recalculation (passes × formulas
+/// evaluated again), however high Maximum Iterations is.
+const MAX_ITERATION_WORK: usize = 10_000_000;
 
 /// Row intervals `[r0, r1]`, each with a payload, answering "which intervals overlap rows
 /// `a..=b`?" in O(log n + k).
@@ -389,6 +395,44 @@ struct PassHost<'a> {
     cycle: bool,
     cycles: Vec<Key>,
     depth: usize,
+    /// Iterative calculation: a circular reference reads the cell's previous value instead of
+    /// giving `#CIRC!`.
+    iterate: bool,
+    /// Values from the previous iteration; cells not in it read their stored value.
+    prev: HashMap<Key, Value>,
+    /// Formulas being evaluated, innermost last (kept only when iterating).
+    stack: Vec<Key>,
+    /// Formulas found on a circular reference (when iterating).
+    members: HashSet<Key>,
+    /// Results that read a previous value, directly or through other formulas.
+    tainted: HashSet<Key>,
+    /// Whether the formula being evaluated has read a previous value.
+    taint: bool,
+}
+
+impl<'a> PassHost<'a> {
+    fn new(wb: &'a Workbook, exprs: &'a HashMap<Key, std::sync::Arc<Expr>>, rng: &'a mut u64, now: f64) -> Self {
+        PassHost {
+            wb,
+            exprs,
+            results: HashMap::with_capacity_and_hasher(exprs.len(), Default::default()),
+            pending: exprs.keys().copied().collect(),
+            in_progress: HashSet::default(),
+            spills: HashMap::default(),
+            used: HashMap::default(),
+            rng,
+            now,
+            cycle: false,
+            cycles: vec![],
+            depth: 0,
+            iterate: false,
+            prev: HashMap::default(),
+            stack: Vec::new(),
+            members: HashSet::default(),
+            tainted: HashSet::default(),
+            taint: false,
+        }
+    }
 }
 
 /// Whether an array result at `k` can't spill: it is in a table, or its area runs off the sheet,
@@ -415,18 +459,29 @@ fn spill_blocked(host: &PassHost<'_>, (sheet, anchor): Key, a: &Array) -> bool {
 impl PassHost<'_> {
     fn compute(&mut self, k: Key) -> Value {
         if let Some(v) = self.results.get(&k) {
-            return v.clone();
+            let v = v.clone();
+            if self.iterate && self.tainted.contains(&k) {
+                self.taint = true;
+            }
+            return v;
         }
         let Some(expr) = self.exprs.get(&k) else {
             return self.wb.sheet(k.0).map(|s| s.value(k.1)).unwrap_or_default();
         };
         if self.in_progress.contains(&k) || self.depth > 2000 {
             self.cycle = true;
+            if self.iterate {
+                return self.circular_read(k);
+            }
             self.cycles.push(k);
             return Value::Error(CellError::Circ);
         }
         self.in_progress.insert(k);
         self.depth += 1;
+        let outer_taint = std::mem::replace(&mut self.taint, false);
+        if self.iterate {
+            self.stack.push(k);
+        }
         let expr = std::sync::Arc::clone(expr);
         let v = {
             let mut ev = Evaluator::new(self, k.0, k.1);
@@ -441,6 +496,15 @@ impl PassHost<'_> {
         self.depth -= 1;
         self.in_progress.remove(&k);
         self.pending.remove(&k);
+        if self.iterate {
+            self.stack.pop();
+            if self.taint {
+                self.tainted.insert(k);
+            } else {
+                self.tainted.remove(&k);
+            }
+        }
+        self.taint |= outer_taint;
         // A blank cell shows as 0 in a formula's result, inside an array as well (`=A1:A3`,
         // FILTER or SORT of a range with blanks). GROUPBY and PIVOTBY lay out blank cells
         // of their own, which stay blank.
@@ -471,6 +535,68 @@ impl PassHost<'_> {
         };
         self.results.insert(k, v.clone());
         v
+    }
+
+    /// A formula's previous value for iterative calculation: from the last iteration, else the
+    /// value it shows. Blank, and the `#CIRC!` of a loop calculated with iteration off, are 0.
+    fn previous(&self, k: Key) -> Value {
+        let v = match self.prev.get(&k) {
+            Some(v) => v.clone(),
+            None => self.wb.sheet(k.0).map(|s| s.value(k.1)).unwrap_or_default(),
+        };
+        if matches!(v, Value::Empty | Value::Error(CellError::Circ)) { Value::Number(0.0) } else { v }
+    }
+
+    /// Reading `k` while it is being evaluated, with iterative calculation on: its previous value.
+    /// The formulas around the loop are the ones whose changes decide when iteration stops.
+    fn circular_read(&mut self, k: Key) -> Value {
+        self.taint = true;
+        match self.stack.iter().rposition(|s| *s == k) {
+            Some(i) => self.members.extend(self.stack.get(i..).unwrap_or_default().iter().copied()),
+            // Too deep to follow: the formula itself is watched.
+            None => {
+                self.members.insert(k);
+            }
+        }
+        self.previous(k)
+    }
+
+    /// Iterative calculation, after a first pass over `order` that met circular references. The
+    /// formulas that read a previous value (the loops and what depends on them) are evaluated
+    /// again in the same order, each pass starting from the last one's values and reading what it
+    /// has already produced (Gauss-Seidel), until no formula on a loop changes by `max_change` or
+    /// more, or after `max_iterations` passes in all. Returns the number of passes.
+    fn iterate_loops(&mut self, order: &[Key], max_iterations: u32, max_change: f64) -> u32 {
+        let again: Vec<Key> = order.iter().copied().filter(|k| self.tainted.contains(k)).collect();
+        let set: HashSet<Key> = again.iter().copied().collect();
+        // Bounds the work whatever Maximum Iterations says.
+        let max_passes = u32::try_from(MAX_ITERATION_WORK / again.len().max(1)).unwrap_or(u32::MAX).max(1);
+        let mut passes = 1u32;
+        while passes < max_iterations.min(max_passes) && !self.converged(max_change) {
+            self.prev = again.iter().filter_map(|k| self.results.remove(k).map(|v| (*k, v))).collect();
+            self.pending = set.clone();
+            self.spills.retain(|a, _| !set.contains(a));
+            for k in &again {
+                self.compute(*k);
+            }
+            passes += 1;
+        }
+        passes
+    }
+
+    /// Whether every formula on a loop changed by less than `max_change` in the last pass (text,
+    /// logical and error values: not at all).
+    fn converged(&self, max_change: f64) -> bool {
+        self.members.iter().all(|k| {
+            let Some(new) = self.results.get(k) else { return true };
+            match (new, &self.previous(*k)) {
+                (Value::Number(a), Value::Number(b)) => {
+                    let d = (a - b).abs();
+                    d < max_change || d == 0.0
+                }
+                (new, old) => new == old,
+            }
+        })
     }
 }
 
@@ -532,6 +658,9 @@ impl Host for PassHost<'_> {
             if anchor.0 == sheet && c.row >= anchor.1.row && c.col >= anchor.1.col {
                 let (dr, dc) = ((c.row - anchor.1.row) as usize, (c.col - anchor.1.col) as usize);
                 if dr < arr.rows && dc < arr.cols {
+                    if self.iterate && self.tainted.contains(anchor) {
+                        self.taint = true;
+                    }
                     return arr.get(dr, dc).cloned().unwrap_or_default();
                 }
             }
@@ -590,6 +719,18 @@ impl Host for PassHost<'_> {
                     v
                 })
                 .collect();
+            // Iterating: an array spilled by a formula that read a previous value.
+            if self.iterate
+                && self.spills.iter().any(|(a, arr)| {
+                    let end = CellRef::new(
+                        a.1.row.saturating_add((arr.rows as u32).saturating_sub(1)),
+                        a.1.col.saturating_add((arr.cols as u32).saturating_sub(1)),
+                    );
+                    a.0 == sheet && self.tainted.contains(a) && RangeRef::new(a.1, end).intersects(&range)
+                })
+            {
+                self.taint = true;
+            }
             for (i, v) in new {
                 if let Some(slot) = out.get_mut(i) {
                     *slot = v;
@@ -825,22 +966,16 @@ impl Calc {
             let mut rng = self.rng;
             let tp = prof_now();
             let (results, spills, cycles) = {
-                let mut host = PassHost {
-                    wb,
-                    exprs: &exprs,
-                    results: HashMap::with_capacity_and_hasher(dirty.len(), Default::default()),
-                    pending: exprs.keys().copied().collect(),
-                    in_progress: HashSet::default(),
-                    spills: HashMap::default(),
-                    used: HashMap::default(),
-                    rng: &mut rng,
-                    now,
-                    cycle: false,
-                    cycles: vec![],
-                    depth: 0,
-                };
+                let mut host = PassHost::new(wb, &exprs, &mut rng, now);
+                host.iterate = wb.calc.iterative;
                 for k in &dirty {
                     host.compute(*k);
+                }
+                if host.iterate && !host.members.is_empty() {
+                    let passes = host.iterate_loops(&dirty, wb.calc.max_iterations, wb.calc.max_change);
+                    if std::env::var_os("GRIDCRAFT_PROFILE").is_some() {
+                        eprintln!("  iterative calculation: {} passes over {} formulas", passes, host.tainted.len());
+                    }
                 }
                 (host.results, host.spills, host.cycles)
             };
@@ -961,20 +1096,7 @@ pub fn evaluate(wb: &Workbook, sheet: usize, at: CellRef, formula: &str) -> Valu
 pub fn evaluate_expr(wb: &Workbook, sheet: usize, at: CellRef, expr: &Expr) -> Value {
     let exprs = HashMap::default();
     let mut rng = 0x1234_5678_9ABC_DEF0u64;
-    let mut host = PassHost {
-        wb,
-        exprs: &exprs,
-        results: HashMap::default(),
-        pending: HashSet::default(),
-        in_progress: HashSet::default(),
-        spills: HashMap::default(),
-        used: HashMap::default(),
-        rng: &mut rng,
-        now: now_serial(),
-        cycle: false,
-        cycles: vec![],
-        depth: 0,
-    };
+    let mut host = PassHost::new(wb, &exprs, &mut rng, now_serial());
     let mut ev = Evaluator::new(&mut host, sheet, at);
     ev.value(expr)
 }
@@ -998,7 +1120,7 @@ pub(crate) mod tests {
     use gridcraft_core::{CellRef, RangeRef, Value};
     use gridcraft_model::{Cell, Formula, Workbook};
 
-    use super::{Calc, HashMap, HashSet, Host, Intervals, Key, PassHost};
+    use super::{Calc, HashMap, Host, Intervals, Key, PassHost};
 
     /// xorshift64 for repeatable pseudo-random cases.
     fn rng(state: &mut u64) -> u64 {
@@ -1214,20 +1336,7 @@ pub(crate) mod tests {
         // of a real pass partway through; `visit_range` has to cope with the formulas it reads
         // being calculated under it.
         let mut rng = 1u64;
-        let mut host = PassHost {
-            wb,
-            pending: exprs.keys().copied().collect(),
-            exprs: &exprs,
-            results: HashMap::default(),
-            in_progress: HashSet::default(),
-            spills: HashMap::default(),
-            used: HashMap::default(),
-            rng: &mut rng,
-            now: 0.0,
-            cycle: false,
-            cycles: vec![],
-            depth: 0,
-        };
+        let mut host = PassHost::new(wb, &exprs, &mut rng, 0.0);
 
         let mut seen = Vec::new();
         host.visit_range(0, range, &mut |v| {

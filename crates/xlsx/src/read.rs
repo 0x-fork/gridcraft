@@ -176,10 +176,10 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         };
         wb.calc.iterative = c.flag("iterate", false);
         if let Some(n) = c.attr_u32("iterateCount") {
-            wb.calc.max_iterations = n.clamp(1, 32767);
+            wb.calc.set_max_iterations(n);
         }
         if let Some(d) = c.attr_f64("iterateDelta") {
-            wb.calc.max_change = d.abs();
+            wb.calc.set_max_change(d);
         }
         wb.calc.precision_as_displayed = !c.flag("fullPrecision", true);
     }
