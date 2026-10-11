@@ -4,7 +4,7 @@
 
 Each entry is an Excel ribbon or menu command (feature names only). It counts as implemented when GridCraft registers a command with the same id. This measures breadth only; the overall assessment (depth, fidelity, effort) is in [target-app-parity.md](target-app-parity.md).
 
-**Overall: 258 / 290 commands implemented (89.0%).**
+**Overall: 263 / 290 commands implemented (90.7%).**
 
 | Tab | Implemented | Total | Parity |
 |---|---|---|---|
@@ -15,7 +15,7 @@ Each entry is an Excel ribbon or menu command (feature names only). It counts as
 | Page Layout | 23 | 23 | 100% |
 | Formulas | 23 | 23 | 100% |
 | Data | 20 | 28 | 71% |
-| Review | 9 | 18 | 50% |
+| Review | 14 | 18 | 78% |
 | View | 18 | 20 | 90% |
 | Automate | 3 | 3 | 100% |
 | Table Design | 12 | 13 | 92% |
@@ -276,7 +276,7 @@ Missing:
 - `data.solver` Solver (Analysis)
 - `data.analysisToolPak` Data Analysis (Analysis)
 
-## Review (9 / 18, 50%)
+## Review (14 / 18, 78%)
 
 Implemented:
 
@@ -285,8 +285,13 @@ Implemented:
 - `review.workbookStatistics` Workbook Statistics (Proofing)
 - `review.checkAccessibility` Check Accessibility (Accessibility)
 - `review.deleteComment` Delete Comment (Comments)
+- `review.previousComment` Previous Comment (Comments)
+- `review.nextComment` Next Comment (Comments)
+- `review.showComments` Show Comments (Comments)
 - `review.newNote` New Note (Notes)
 - `review.showNote` Show/Hide Note (Notes)
+- `review.showAllNotes` Show All Notes (Notes)
+- `review.convertToComments` Convert to Comments (Notes)
 - `review.unprotectSheet` Unprotect Sheet (Protect)
 - `review.protectWorkbook` Protect Workbook (Protect)
 
@@ -294,11 +299,6 @@ Missing:
 
 - `review.smartLookup` Smart Lookup (Insights)
 - `review.translate` Translate (Language)
-- `review.previousComment` Previous Comment (Comments)
-- `review.nextComment` Next Comment (Comments)
-- `review.showComments` Show Comments (Comments)
-- `review.showAllNotes` Show All Notes (Notes)
-- `review.convertToComments` Convert to Comments (Notes)
 - `review.allowEditRanges` Allow Edit Ranges (Protect)
 - `review.showChanges` Show Changes (Changes)
 

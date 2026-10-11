@@ -200,6 +200,11 @@ pub struct Session {
     pub draw_tool: String,
     pub draw_color: String,
     pub draw_width: f32,
+    /// Review › Show Comments: the Comments pane is open.
+    pub comments_pane: bool,
+    /// Review › Notes › Show All Notes: every note is displayed. An application display setting
+    /// (like Excel's comment indicator option), so it's not saved in the file.
+    pub show_all_notes: bool,
 }
 
 impl Session {

@@ -7,7 +7,15 @@ use crate::SheetApp;
 use crate::theme::{self, Tokens};
 
 pub fn show(app: &mut SheetApp, ui: &mut Ui) {
-    let Some(pane) = app.grid.pane.clone() else { return };
+    // The Comments pane is engine state (`review.showComments`, so agents can drive it); the other
+    // panes are UI state. One pane shows at a time: opening another one closes Comments.
+    if app.grid.pane.as_deref() == Some("comments") {
+        app.grid.pane = None;
+        app.run_or_alert("review.showComments", json!({"on": true}));
+    } else if app.grid.pane.is_some() && app.session.comments_pane {
+        app.run_or_alert("review.showComments", json!({"on": false}));
+    }
+    let Some(pane) = app.grid.pane.clone().or_else(|| app.session.comments_pane.then(|| "comments".to_string())) else { return };
     let t = Tokens::get(ui.ctx());
     egui::Panel::right("task_pane").default_size(300.0).resizable(true).frame(egui::Frame::NONE.fill(t.ribbon).inner_margin(10)).show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -21,6 +29,9 @@ pub fn show(app: &mut SheetApp, ui: &mut Ui) {
             ui.label(egui::RichText::new(title).font(theme::ui_bold(15.0)));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if crate::widgets::icon_button(ui, crate::icons::Icon::Close, t.text_dim, "Close", vec2(22.0, 22.0)).clicked() {
+                    if pane == "comments" {
+                        app.run_or_alert("review.showComments", json!({"on": false}));
+                    }
                     app.grid.pane = None;
                 }
             });

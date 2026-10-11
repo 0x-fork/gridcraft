@@ -2001,8 +2001,9 @@ fn paint_overlays(
     }
     // Notes: shown on hover (or always when marked visible).
     let hover = app.grid.hover_cell;
+    let all_notes = app.session.show_all_notes;
     for (c, cm) in &sh.comments {
-        let show = cm.visible || hover == Some(*c);
+        let show = cm.visible || (all_notes && !cm.threaded) || hover == Some(*c);
         if !show || app.grid.drag != Drag::None {
             continue;
         }
