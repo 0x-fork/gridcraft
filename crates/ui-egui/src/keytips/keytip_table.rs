@@ -101,6 +101,57 @@ pub fn control_badges(prefix: &str, target: &str) -> Vec<&'static str> {
     sequences_for(target).into_iter().filter(|seq| seq.len() > prefix.len() && seq.starts_with(prefix)).collect()
 }
 
+/// The badge for a single control: the rest of its finish sequence when it has exactly one, or
+/// the common group letter when several sequences land on the same control (menu anchors like
+/// Borders, whose HBA..HBW variants all share "HB").
+pub fn control_badge(prefix: &str, target: &str) -> Option<&'static str> {
+    if prefix.is_empty() {
+        return None; // empty prefix shows only tab badges
+    }
+    let seqs: Vec<&'static str> = sequences_for(target).into_iter().filter(|seq| seq.len() > prefix.len() && seq.starts_with(prefix)).collect();
+    match seqs.as_slice() {
+        [] => None,
+        [single] => Some(single),
+        many => {
+            let common = |a: &str, b: &str| a.chars().zip(b.chars()).take_while(|(x, y)| x == y).count();
+            let lcp = many.iter().skip(1).fold(many[0].len(), |acc, s| acc.min(common(many[0], s)));
+            (lcp > prefix.len()).then_some(&many[0][..lcp])
+        }
+    }
+}
+
+/// The single badge for a menu anchor: the direct finish one key past the prefix, or the
+/// group-level candidate that prefixes the most of `targets`' sequences. Anchors get one
+/// badge, so overlapping groups (e.g. Pictures' "NP" vs SmartArt's "NM") resolve to the
+/// dominant one.
+pub fn anchor_badge(prefix: &str, targets: &[&str]) -> Option<&'static str> {
+    if prefix.is_empty() {
+        return None; // empty prefix shows only tab badges
+    }
+    let all: Vec<&'static str> = targets.iter().flat_map(|t| sequences_for(t)).filter(|s| s.len() > prefix.len() && s.starts_with(prefix)).collect();
+    if all.is_empty() {
+        return None;
+    }
+    let depth = prefix.len() + 1;
+    let mut candidates: Vec<&'static str> = all.iter().filter(|s| s.len() == depth).copied().collect();
+    if candidates.is_empty() {
+        for s in &all {
+            let c = &s[..depth.min(s.len())];
+            if is_group_level(c) && !candidates.contains(&c) {
+                candidates.push(c);
+            }
+        }
+    }
+    let mut best: Option<(&'static str, usize)> = None;
+    for c in candidates {
+        let score = all.iter().filter(|s| s.starts_with(c)).count();
+        if best.is_none_or(|(_, b)| score > b) {
+            best = Some((c, score));
+        }
+    }
+    best.map(|(c, _)| c)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,5 +210,25 @@ mod tests {
         assert!(control_badges("", "home.alignRight").is_empty(), "empty prefix shows only tab badges");
         assert_eq!(control_badges("HA", "home.alignRight"), vec!["HAR"]);
         assert!(control_badges("HZ", "home.alignRight").is_empty(), "unknown prefixes show nothing");
+    }
+
+    #[test]
+    fn control_badge_shows_the_rest_or_the_group_letter() {
+        assert_eq!(control_badge("H", "home.bold"), Some("H1"), "a unique sequence paints its full rest");
+        assert_eq!(control_badge("H", "home.fontColor"), Some("HFC"));
+        assert_eq!(control_badge("H", "home.borders"), Some("HB"), "many variants collapse to the group letter");
+        assert!(control_badge("", "home.bold").is_none(), "empty prefix shows only tab badges");
+        assert!(control_badge("HZ", "home.bold").is_none(), "unknown prefixes show nothing");
+        assert!(control_badge("H", "view.zoom").is_none(), "diverging sequences at the next letter show nothing");
+    }
+
+    #[test]
+    fn anchor_badge_resolves_to_the_dominant_group() {
+        assert_eq!(anchor_badge("H", &["edit.paste", "edit.pasteSpecial", "dialog:pasteSpecial"]), Some("HV"));
+        assert_eq!(anchor_badge("P", &["pageLayout.orientation"]), Some("PO"), "a direct finish paints itself");
+        assert_eq!(anchor_badge("N", &["insert.picture"]), Some("NP"), "NP dominates the lone NM (SmartArt) entry");
+        assert_eq!(anchor_badge("H", &["table.style"]), Some("HT"));
+        assert!(anchor_badge("", &["edit.paste"]).is_none(), "empty prefix shows only tab badges");
+        assert!(anchor_badge("H", &["view.zoom"]).is_none(), "no sequences under this prefix");
     }
 }
