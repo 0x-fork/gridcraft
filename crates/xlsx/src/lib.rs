@@ -1,5 +1,5 @@
 //! GridCraft file formats: XLSX (transitional and strict) and CSV import/export, plus XLSB and ODS data import
-//! and legacy Excel 97-2003 `.xls` (BIFF8) import.
+//! and legacy Excel 97-2003 `.xls` (BIFF8) import, and password-encrypted workbooks (Agile and Standard encryption).
 //!
 //! Clean-room implementation from ECMA-376 / ISO/IEC 29500 and observed behaviour. All entry
 //! points work on byte slices (no file system access), so the crate builds for WebAssembly.
@@ -30,8 +30,8 @@ mod sheet_read;
 mod sheet_write;
 mod styles;
 mod tables;
-#[cfg(test)]
-pub(crate) mod testing;
+#[cfg(any(test, feature = "test-support"))]
+pub mod testing;
 mod theme;
 mod write;
 mod xls;
