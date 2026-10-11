@@ -166,16 +166,49 @@ pub fn cell_family(name: &str, bold: bool, italic: bool) -> FontFamily {
     )
 }
 
+/// Whether epaint can open face `index` of this font file and it maps characters to glyphs.
+/// epaint panics (in `Context::set_fonts`, i.e. on startup) on a face it can't open, so every font
+/// file we did not ship is checked first with the same parser and the same call epaint makes
+/// (`skrifa::FontRef::from_index`): a corrupt file, something that is not an sfnt at all, or a
+/// collection index past the end is rejected instead of crashing the app (#226). A face whose
+/// character map is unreadable (a truncated file) would open but draw nothing, so it is refused
+/// too and the next candidate gets its turn.
+pub(crate) fn font_parses(bytes: &[u8], index: u32) -> bool {
+    use skrifa::MetadataProvider;
+    skrifa::FontRef::from_index(bytes, index).is_ok_and(|font| font.charmap().has_map())
+}
+
+/// Loads the first candidate that exists and parses. A file that exists but can't be parsed is
+/// skipped with a warning and the next candidate is tried.
 #[cfg(not(target_arch = "wasm32"))]
 fn try_load(paths: &[(&str, u32)]) -> Option<FontData> {
     for (p, index) in paths {
         if let Ok(bytes) = std::fs::read(p) {
+            if !font_parses(&bytes, *index) {
+                log::warn!("skipping font {p} (face {index}): not a font file egui can read");
+                continue;
+            }
             let mut fd = FontData::from_owned(bytes);
             fd.index = *index;
             return Some(fd);
         }
     }
     None
+}
+
+/// Last line of defence before [`FontDefinitions`] reach egui: drops every face epaint could not
+/// parse (and its key from every family), so a bad font costs a fallback, never a crash.
+pub(crate) fn drop_unparseable_fonts(fonts: &mut FontDefinitions) {
+    let bad: Vec<String> = fonts.font_data.iter().filter(|(_, fd)| !font_parses(&fd.font, fd.index)).map(|(k, _)| k.clone()).collect();
+    for key in &bad {
+        log::warn!("dropping font {key:?}: egui can't parse it");
+        fonts.font_data.remove(key);
+    }
+    if !bad.is_empty() {
+        for chain in fonts.families.values_mut() {
+            chain.retain(|k| !bad.contains(k));
+        }
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -348,6 +381,7 @@ pub fn font_definitions_for_language(language: crate::i18n::Language) -> FontDef
     if let Some(ui) = fonts.families.get(&FontFamily::Name(UI.into())).cloned() {
         fonts.families.insert(FontFamily::Proportional, ui);
     }
+    drop_unparseable_fonts(&mut fonts);
     fonts
 }
 
@@ -662,7 +696,7 @@ mod tests {
             ["sys-cjk-han-zh", "sys-cjk-han-ja", "sys-cjk-hangul", "sys-thai", "sys-hebrew", "sys-symbols", "sys-symbols-2"]
         );
         assert_eq!(HanOrder::of(Language::Ja), HanOrder::Japanese);
-        for l in [Language::En, Language::Zh, Language::Ko, Language::Ru, Language::PtBr] {
+        for l in [Language::En, Language::Zh, Language::Ko, Language::Ru, Language::PtBr, Language::De, Language::Cs] {
             assert_eq!(HanOrder::of(l), HanOrder::Chinese, "{l:?} shares the default order (no font rebuild)");
         }
     }
@@ -688,13 +722,15 @@ mod tests {
         // Real render check, per script: the proportional family (what cells and the UI use) must
         // resolve a sample string to a real glyph, not the tofu replacement char. Skips a script
         // whose face is absent (a minimal machine) and fails if a face is present but not wired in.
-        let cases: [(&str, Vec<(String, u32)>, &str); 6] = [
+        let cases: [(&str, Vec<(String, u32)>, &str); 7] = [
             ("sys-cjk-han-ja", cjk_han_japanese(), "カテゴリ"),
             ("sys-cjk-han-zh", cjk_han_simplified(), "页面布局 客户端配置"),
             ("sys-cjk-hangul", cjk_hangul(), "한글"),
             ("sys-thai", thai(), "ทดสอบ"),
             ("sys-hebrew", hebrew(), "עברית"),
             ("ui", candidates(UI), "Русский"),
+            // Czech interface labels: every Czech accented letter, in both cases.
+            ("ui", candidates(UI), "Příliš žluťoučký kůň úpěl ďábelské ódy ŘŠČŽÝÁÍÉÚŮĚŤĎŇÓ"),
         ];
         for language in [Language::En, Language::Ja] {
             let ctx = egui::Context::default();
@@ -724,5 +760,52 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn unparseable_font_files_are_rejected_not_fatal() {
+        // #226: epaint panics in `set_fonts` on a face it can't parse ("An offset was out of
+        // bounds"). Garbage, a truncated real font and a bad collection index must all be refused.
+        let real = FontDefinitions::default().font_data.values().next().map(|fd| fd.font.to_vec()).unwrap_or_default();
+        assert!(font_parses(&real, 0), "egui's own font must parse");
+        assert!(!font_parses(b"", 0));
+        assert!(!font_parses(&[0xAB; 64], 0));
+        assert!(!font_parses(real.get(..20).unwrap_or_default(), 0), "a truncated font must be refused");
+        assert!(!font_parses(&real, 3), "a single-face file has no face 3");
+
+        // A bad face that slipped into the definitions is dropped (key and family entries), and the
+        // context builds its fonts without panicking.
+        let mut fonts = font_definitions();
+        fonts.font_data.insert("sys-hebrew".into(), Arc::new(FontData::from_owned(vec![0, 1, 0, 0, 0, 0xFF, 0, 0])));
+        for chain in fonts.families.values_mut() {
+            chain.push("sys-hebrew".into());
+        }
+        drop_unparseable_fonts(&mut fonts);
+        assert!(!fonts.font_data.contains_key("sys-hebrew"));
+        assert!(fonts.families.values().all(|c| !c.iter().any(|k| k == "sys-hebrew")));
+        let ctx = egui::Context::default();
+        ctx.set_fonts(fonts);
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.label("Hebrew עברית");
+        });
+        out.textures_delta.clear(); // nothing consumes the atlas in a headless test
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn try_load_skips_a_broken_candidate() {
+        // A candidate that exists but is not a readable font must not win over a good one behind it.
+        let dir = std::env::temp_dir().join(format!("gridcraft-font-test-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let bad = dir.join("broken.ttf");
+        let good = dir.join("good.ttf");
+        let real = FontDefinitions::default().font_data.values().next().map(|fd| fd.font.to_vec()).unwrap_or_default();
+        let _ = std::fs::write(&bad, real.get(..40).unwrap_or_default());
+        let _ = std::fs::write(&good, &real);
+        let (bad_s, good_s) = (bad.to_string_lossy().into_owned(), good.to_string_lossy().into_owned());
+        assert!(try_load(&[(bad_s.as_str(), 0)]).is_none());
+        let loaded = try_load(&[(bad_s.as_str(), 0), (good_s.as_str(), 0)]);
+        assert_eq!(loaded.map(|fd| fd.font.len()), Some(real.len()));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
