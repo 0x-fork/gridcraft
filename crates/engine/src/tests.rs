@@ -2214,3 +2214,31 @@ fn copying_areas_that_do_not_line_up_is_refused_with_a_message() {
     assert!(s.execute("edit.pasteSpecial", json!({"what": "all", "link": true, "at": "E1"})).is_err());
     assert!(v(&s, "E1").is_empty());
 }
+
+#[test]
+fn editing_a_date_cell_shows_a_date_not_the_serial() {
+    let mut s = s();
+    let at = CellRef::parse("A1").unwrap();
+    s.execute("cell.set", json!({"cell": "A1", "input": "2026-03-04"})).unwrap();
+    {
+        let d = s.doc().unwrap();
+        let sh = d.wb.active().unwrap();
+        assert_eq!(crate::display::edit_text(&d.wb, sh, at), "2026-03-04");
+    }
+    // A format whose text cannot be typed back falls back to ISO.
+    s.execute("home.formatCells", json!({"range": "A1", "style": {"num_fmt": "dddd, mmmm d"}})).unwrap();
+    let d = s.doc().unwrap();
+    let sh = d.wb.active().unwrap();
+    assert_eq!(crate::display::edit_text(&d.wb, sh, at), "2026-03-04");
+    // A time alone falls back to a time, not to day 0 of 1900 ("9 AM" would lose the 36 minutes).
+    let mut s3 = self::s();
+    s3.execute("cell.set", json!({"cell": "A1", "input": "0.4"})).unwrap();
+    s3.execute("home.formatCells", json!({"range": "A1", "style": {"num_fmt": "h AM/PM"}})).unwrap();
+    let d = s3.doc().unwrap();
+    assert_eq!(crate::display::edit_text(&d.wb, d.wb.active().unwrap(), at), "09:36:00");
+    // Plain numbers are untouched.
+    let mut s2 = self::s();
+    s2.execute("cell.set", json!({"cell": "A1", "input": "42"})).unwrap();
+    let d = s2.doc().unwrap();
+    assert_eq!(crate::display::edit_text(&d.wb, d.wb.active().unwrap(), at), "42");
+}
