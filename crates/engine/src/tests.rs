@@ -453,6 +453,39 @@ fn fill_series() {
 }
 
 #[test]
+fn ctrl_drag_fill_swaps_copy_and_series() {
+    // Issue #264: Ctrl+drag fills a lone number as a series, and copies what a plain drag extends.
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "7"})).unwrap();
+    s.execute("edit.autoFill", json!({"source": "A1", "target": "A1:A4"})).unwrap();
+    assert_eq!(v(&s, "A4"), Value::Number(7.0), "a plain drag copies a lone number");
+    s.execute("edit.autoFill", json!({"source": "A1", "target": "A1:A4", "mode": "alternate"})).unwrap();
+    assert_eq!(v(&s, "A2"), Value::Number(8.0));
+    assert_eq!(v(&s, "A4"), Value::Number(10.0));
+    // Upward too.
+    s.execute("cell.set", json!({"cell": "B5", "input": "7"})).unwrap();
+    s.execute("edit.autoFill", json!({"source": "B5", "target": "B3:B5", "mode": "alternate"})).unwrap();
+    assert_eq!(v(&s, "B3"), Value::Number(5.0));
+    // A two-number series, a list entry and text with a number are copied.
+    s.execute("range.setValues", json!({"range": "C1", "values": [[1], [3]]})).unwrap();
+    s.execute("edit.autoFill", json!({"source": "C1:C2", "target": "C1:C4", "mode": "alternate"})).unwrap();
+    assert_eq!(v(&s, "C3"), Value::Number(1.0));
+    assert_eq!(v(&s, "C4"), Value::Number(3.0));
+    s.execute("cell.set", json!({"cell": "D1", "input": "Mon"})).unwrap();
+    s.execute("edit.autoFill", json!({"source": "D1", "target": "D1:D3", "mode": "alternate"})).unwrap();
+    assert_eq!(v(&s, "D3"), Value::from("Mon"));
+    s.execute("cell.set", json!({"cell": "E1", "input": "Item 9"})).unwrap();
+    s.execute("edit.autoFill", json!({"source": "E1", "target": "E1:E2", "mode": "alternate"})).unwrap();
+    assert_eq!(v(&s, "E2"), Value::from("Item 9"));
+    // Plain text copies either way; an empty source clears.
+    s.execute("cell.set", json!({"cell": "F1", "input": "abc"})).unwrap();
+    s.execute("edit.autoFill", json!({"source": "F1", "target": "F1:F2", "mode": "alternate"})).unwrap();
+    assert_eq!(v(&s, "F2"), Value::from("abc"));
+    s.execute("edit.autoFill", json!({"source": "G1", "target": "G1:G3", "mode": "alternate"})).unwrap();
+    assert_eq!(v(&s, "G3"), Value::Empty);
+}
+
+#[test]
 fn insert_delete_cells_adjust() {
     let formula = |s: &mut Session, a: &str| s.execute("cell.get", json!({"cell": a})).unwrap()["formula"].clone();
     let mut s = s();
