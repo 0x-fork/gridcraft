@@ -77,6 +77,7 @@ refresh. Counted under features (Get & Transform, ~10% ready), not here.
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-12 | minor | CSV: saving a file opened as CSV keeps its detected separator (`;` files were rewritten with `,`) |
+| 2026-10-11 | minor | XLSX: cell/shared/array formulas read through the file→model conversion (`_xlpm.` LET/LAMBDA parameter prefixes stripped); table column names keep line breaks; table names may start with `\` |
 | 2026-10-11 | minor | `.xls` (BIFF8) import: values, formulas, number formats, merges, sizes, names (#121) |
 | 2026-10-11 | minor | XLSX pass-through: custom XML, external links, connections, query tables, printer settings, form/ActiveX controls, OLE objects, sheet backgrounds kept on save (#330, #324) |
 | 2026-10-11 | minor | XLSX: threaded comments and persons parts written (they came back as notes before); note visibility read from VML (#300) |
