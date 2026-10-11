@@ -6,6 +6,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod backstage;
 mod border_preview;
 mod cell_pictures;
 pub mod chartview;
@@ -141,6 +142,8 @@ pub struct SheetApp {
     pub editor: Option<editor::EditState>,
     pub text_box_editor: Option<text_box::EditState>,
     pub dialog: Option<dialogs::Dialog>,
+    /// The File tab's Backstage view, when open (UI-only; replaces the ribbon, grid and tabs).
+    pub backstage: Option<backstage::Backstage>,
     pub message: Option<(String, String)>,
     pub toast: Option<(String, f64)>,
     pub services: Services,
@@ -173,6 +176,7 @@ impl SheetApp {
             editor: None,
             text_box_editor: None,
             dialog: None,
+            backstage: None,
             message: None,
             toast: None,
             services,
@@ -339,6 +343,22 @@ impl SheetApp {
                 self.ui.language = i18n::Language::Ja;
                 Ok(json!({"language": i18n::Language::Ja}))
             }
+            "ui.backstage" => {
+                // `{"page": "info"}` opens File › Info; `{"page": "close"}` returns to the sheet.
+                match p.get("page").and_then(Json::as_str).map(str::trim) {
+                    Some("close" | "none" | "") => self.backstage = None,
+                    Some(id) => match backstage::Page::parse(id) {
+                        Some(page) => self.open_backstage(page),
+                        None => {
+                            return Some(Err(format!(
+                                "unknown File page {id:?} (use home, new, open, info, saveAs, print, export, options or close)"
+                            )));
+                        }
+                    },
+                    None => self.open_backstage(backstage::Page::Home),
+                }
+                Ok(json!({"page": self.backstage.as_ref().map(|b| b.page.id())}))
+            }
             "ui.dialog" => {
                 let name = p.get("name").and_then(Json::as_str).unwrap_or("");
                 self.open_dialog(name, p.clone());
@@ -407,7 +427,25 @@ impl SheetApp {
                     dl(&name, &b);
                 }
             }
+            // File › Options (`file.options`) and the File tab itself open the Backstage view.
+            "options" => self.open_backstage(backstage::Page::Options),
+            "backstage" => {
+                let page = params.get("page").and_then(Json::as_str).and_then(backstage::Page::parse).unwrap_or(backstage::Page::Home);
+                self.open_backstage(page);
+            }
             other => self.dialog = dialogs::Dialog::open(self, other, params),
+        }
+    }
+
+    /// Opens the File tab's Backstage view on `page`, committing a cell still being edited first
+    /// (File actions work on the whole workbook). A draft that can't be committed keeps the sheet.
+    pub fn open_backstage(&mut self, page: backstage::Page) {
+        if !self.commit_edit(0, 0, false, false) {
+            return;
+        }
+        match &mut self.backstage {
+            Some(b) => b.page = page,
+            None => self.backstage = Some(backstage::Backstage::new(page)),
         }
     }
 
@@ -577,8 +615,10 @@ impl SheetApp {
             .unwrap_or_default();
         for (name, bytes) in arrived {
             let b64 = gridcraft_engine::io::base64_encode(&bytes);
-            if let Err(e) = self.run("file.open", json!({"name": name, "base64": b64})) {
-                self.message = Some(("GridCraft".into(), clean_error(&e)));
+            match self.run("file.open", json!({"name": name, "base64": b64})) {
+                // A file picked from File › Open (web) arrives here: show it, not the Backstage.
+                Ok(_) => self.backstage = None,
+                Err(e) => self.message = Some(("GridCraft".into(), clean_error(&e))),
             }
             self.after_engine();
         }
@@ -605,23 +645,30 @@ impl SheetApp {
         // The language the widgets translate with this frame (see `i18n::current`).
         i18n::set_current(&ctx, self.ui.language);
         let t = theme::Tokens::get(&ctx);
-        self.ribbon_keys(&ctx);
+        if self.backstage.is_none() {
+            self.ribbon_keys(&ctx);
+        }
         ribbon::title_bar(self, ui);
-        ribbon::show(self, ui);
-        if self.ui.formula_bar {
-            formula_bar::show(self, ui);
+        if self.backstage.is_some() {
+            // File tab: the Backstage view replaces everything below the title bar.
+            backstage::show(self, ui);
+        } else {
+            ribbon::show(self, ui);
+            if self.ui.formula_bar {
+                formula_bar::show(self, ui);
+            }
+            if self.ui.status_bar {
+                tabs::status_bar(self, ui);
+            }
+            tabs::sheet_tabs(self, ui);
+            pivot_pane::show(self, ui);
+            panes::show(self, ui);
+            egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.grid_bg)).show(ui, |ui| {
+                let g0 = now_ms();
+                grid::show(self, ui);
+                self.perf.grid_ms = now_ms() - g0;
+            });
         }
-        if self.ui.status_bar {
-            tabs::status_bar(self, ui);
-        }
-        tabs::sheet_tabs(self, ui);
-        pivot_pane::show(self, ui);
-        panes::show(self, ui);
-        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.grid_bg)).show(ui, |ui| {
-            let g0 = now_ms();
-            grid::show(self, ui);
-            self.perf.grid_ms = now_ms() - g0;
-        });
         dialogs::show(self, &ctx);
         widgets::message_box(self, &ctx);
         widgets::toast(self, &ctx);
