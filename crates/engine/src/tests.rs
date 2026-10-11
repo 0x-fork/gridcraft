@@ -53,6 +53,26 @@ fn entering_empty_cells_preserves_whole_sheet_formatting() {
 }
 
 #[test]
+fn editing_a_name_renames_it_in_formulas() {
+    // Name Manager › Edit…: `oldName` edits the name in place; formulas that use it follow.
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "21"})).unwrap();
+    s.execute("formulas.defineName", json!({"name": "Price", "refersTo": "=Sheet1!$A$1"})).unwrap();
+    s.execute("formulas.defineName", json!({"name": "Other", "refersTo": "=1"})).unwrap();
+    s.execute("cell.set", json!({"cell": "B1", "input": "=Price*2"})).unwrap();
+    let err = s.execute("formulas.defineName", json!({"name": "Other", "refersTo": "=Sheet1!$A$1", "oldName": "Price"}));
+    assert!(err.is_err(), "renaming onto another existing name is refused");
+    s.execute("formulas.defineName", json!({"name": "Cost", "refersTo": "=Sheet1!$A$1", "comment": "unit", "oldName": "Price"})).unwrap();
+    let d = s.doc().unwrap();
+    let names: Vec<&str> = d.wb.names.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(names, ["Other", "Cost"]);
+    let b1 = d.wb.active().unwrap().cell(CellRef::parse("B1").unwrap()).and_then(|c| c.formula.clone()).unwrap();
+    assert_eq!(b1.text, "Cost*2");
+    assert_eq!(v(&s, "B1"), Value::number(42.0));
+    assert!(s.execute("formulas.defineName", json!({"name": "X", "oldName": "Missing"})).is_err());
+}
+
+#[test]
 fn entry_and_text_paste_use_inherited_formats_and_cell_overrides() {
     let mut s = s();
     s.execute("home.bold", json!({"range": "B:B", "on": true})).unwrap();
