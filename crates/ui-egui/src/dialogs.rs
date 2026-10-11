@@ -373,6 +373,40 @@ impl Dialog {
                 json!({"header": true}),
             ),
             "goalSeek" => Dialog::custom("goalSeek", "Goal Seek", json!({"set": active, "to": "0", "changing": ""})),
+            "forecastSheet" => Dialog::form(
+                "forecastSheet",
+                "Create Forecast Worksheet",
+                "data.forecastSheet",
+                vec![
+                    Text { key: "timeline", label: "Timeline range (blank: first column of the selection):" },
+                    Text { key: "values", label: "Values range (blank: second column of the selection):" },
+                    Text { key: "end", label: "Forecast end (date or number; blank: a third of the history):" },
+                    Check { key: "confidenceInterval", label: "Confidence interval" },
+                    Text { key: "confidence", label: "Confidence level (%):" },
+                    Text { key: "seasonality", label: "Seasonality (auto, 0 for none, or a season length):" },
+                    Choice {
+                        key: "fillMissing",
+                        label: "Fill missing points using",
+                        options: vec![("interpolate", "Interpolation"), ("zeros", "Zeros")],
+                    },
+                    Choice {
+                        key: "aggregate",
+                        label: "Aggregate duplicates using",
+                        options: vec![
+                            ("average", "Average"),
+                            ("count", "Count"),
+                            ("counta", "CountA"),
+                            ("max", "Max"),
+                            ("median", "Median"),
+                            ("min", "Min"),
+                            ("sum", "Sum"),
+                        ],
+                    },
+                    Check { key: "statistics", label: "Include forecast statistics" },
+                    Choice { key: "chart", label: "Chart", options: vec![("line", "Line chart"), ("column", "Column chart")] },
+                ],
+                json!({"confidenceInterval": true, "confidence": "95", "seasonality": "auto", "fillMissing": "interpolate", "aggregate": "average", "chart": "line"}),
+            ),
             "analysisToolPak" => {
                 // Opened with a known `tool`, it goes straight to that tool's form.
                 let tool = params.get("tool").and_then(Json::as_str).unwrap_or("");

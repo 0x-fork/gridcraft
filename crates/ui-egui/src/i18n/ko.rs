@@ -179,6 +179,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Data Table…" => "데이터 표…",
         "Scenario Manager…" => "시나리오 관리자…",
         "Goal Seek…" => "목표값 찾기…",
+        "Forecast\nSheet" => "예측 시트",
         "Spelling" => "맞춤법 검사",
         "Check\nAccessibility" => "접근성\n검사",
         "Threaded Comments" => "스레드 댓글",

@@ -134,6 +134,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 |---|---|
 | 2026-10-11 | Legacy Excel 97-2003 `.xls` (BIFF8) import with formulas, number formats, merges, sizes and names (#121) |
 | 2026-10-11 | XLSX pass-through: custom XML, external links, connections, query tables, printer settings, form/ActiveX controls and OLE objects are kept on save (#330, #324) |
+| 2026-10-11 | Data › Forecast › Forecast Sheet: a new sheet with the history, FORECAST.ETS forecast, confidence bounds, statistics and a chart (#322) |
 | 2026-10-11 | Startup no longer panics on a system font egui can't parse: fonts are validated and skipped (#226) |
 | 2026-10-11 | Ctrl+drag on the fill handle swaps copying and extending a series (#264) |
 | 2026-10-11 | Odd-period bond functions ODDFPRICE, ODDFYIELD, ODDLPRICE, ODDLYIELD: Financial 55 / 55 (#275) |
@@ -163,6 +164,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Forecast Sheet (#322); progress log row |
 | 2026-10-11 | minor | Worksheet functions 505 / 523 (ODD* bond functions); progress log row |
 | 2026-10-11 | minor | Worksheet functions 503 / 523 (PERCENTOF, EUROCONVERT); progress log row |
 | 2026-10-11 | minor | Worksheet functions 502 / 523 (BAHTTEXT); progress log row |

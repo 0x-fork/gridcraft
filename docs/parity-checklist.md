@@ -237,7 +237,7 @@ Implemented:
 - `formulas.calculateNow` Calculate Now (Calculation)
 - `formulas.calculateSheet` Calculate Sheet (Calculation)
 
-## Data (22 / 28, 79%)
+## Data (23 / 28, 82%)
 
 Implemented:
 
@@ -256,6 +256,7 @@ Implemented:
 - `data.scenarioManager` Scenario Manager (Forecast)
 - `data.goalSeek` Goal Seek (Forecast)
 - `data.dataTable` Data Table (Forecast)
+- `data.forecastSheet` Forecast Sheet (Forecast)
 - `data.group` Group (Outline)
 - `data.ungroup` Ungroup (Outline)
 - `data.subtotal` Subtotal (Outline)
@@ -270,7 +271,6 @@ Missing:
 - `data.stocks` Stocks (Data Types)
 - `data.geography` Geography (Data Types)
 - `data.relationships` Relationships (Data Tools)
-- `data.forecastSheet` Forecast Sheet (Forecast)
 - `data.analyzeData` Analyze Data (Analysis)
 
 ## Review (15 / 18, 83%)

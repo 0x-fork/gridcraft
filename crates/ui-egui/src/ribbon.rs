@@ -1627,6 +1627,9 @@ fn data(app: &mut SheetApp, ui: &mut Ui) {
             ],
         );
     });
+    if big_button(ui, Icon::ChartLine, "Forecast\nSheet", "Forecast Sheet", false).clicked() {
+        app.open_dialog("forecastSheet", json!({}));
+    }
     sep(ui);
     ui.vertical(|ui| {
         if small_button(ui, Icon::Group, "Group", "Group", false).clicked() {

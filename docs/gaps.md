@@ -103,8 +103,8 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   data model (`data.fromWeb`, `data.relationships` missing). **Estimate:** 60–100 h.
 
 ### 13. Analysis tools: Solver, Analysis ToolPak, Forecast Sheet (F)
-- `data.solver`, `data.analysisToolPak`, `data.forecastSheet` missing (the FORECAST.ETS family the
-  Forecast Sheet builds on is in). **Estimate:** 18–30 h.
+- `data.solver`, `data.analysisToolPak` missing. Forecast Sheet (`data.forecastSheet`) and the
+  FORECAST.ETS family are in; the sheet has no Forecast Start (hindcast) option yet. **Estimate:** 15–25 h.
 
 ### 14. Page Layout view and print polish (U, F)
 - Page Layout view landed (#329): paper view with rulers and in-place header/footer editing.
@@ -162,6 +162,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 | 2026-10-11 | minor | §16: comment navigation, Show Comments, Show All Notes and Convert to Comments landed (#281) |
 | 2026-10-11 | minor | §7: `.xls` (BIFF8) import of values, formulas and number formats (#121) |
 | 2026-10-11 | minor | §3: XLSX pass-through keeps custom XML, external links, connections, query tables, printer settings, controls and OLE objects (#330, #324) |
+| 2026-10-11 | minor | §13: Forecast Sheet landed (#322) |
 | 2026-10-11 | minor | §15: ODDFPRICE, ODDFYIELD, ODDLPRICE, ODDLYIELD added (18 functions missing) |
 | 2026-10-11 | minor | §15: PERCENTOF and EUROCONVERT added (20 functions missing) |
 | 2026-10-11 | minor | §15: BAHTTEXT added (21 functions missing) |
