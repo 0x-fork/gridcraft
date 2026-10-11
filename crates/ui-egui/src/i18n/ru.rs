@@ -192,6 +192,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Unfreeze Panes" => "Снять закрепление областей",
         "Dark Mode" => "Тёмный режим",
         "Interface language" => "Язык интерфейса",
+        "Drag to freeze columns" => "Перетащите, чтобы закрепить столбцы",
+        "Drag to freeze rows" => "Перетащите, чтобы закрепить строки",
         "Command\nPalette" => "Палитра\nкоманд",
         "Agent\nControl" => "Управление\nагентом",
         "Action\nJournal" => "Журнал\nдействий",

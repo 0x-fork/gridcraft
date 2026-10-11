@@ -192,6 +192,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Unfreeze Panes" => "取消冻结窗格",
         "Dark Mode" => "深色模式",
         "Interface language" => "界面语言",
+        "Drag to freeze columns" => "拖动以冻结列",
+        "Drag to freeze rows" => "拖动以冻结行",
         "Command\nPalette" => "命令\n面板",
         "Agent\nControl" => "智能体\n控制",
         "Action\nJournal" => "操作\n日志",

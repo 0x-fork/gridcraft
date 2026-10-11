@@ -345,6 +345,8 @@ const JAPANESE: &[(&str, &str)] = &[
     ("Light", "ライト"),
     ("Dark", "ダーク"),
     ("Interface language", "表示言語"),
+    ("Drag to freeze columns", "ドラッグして列を固定"),
+    ("Drag to freeze rows", "ドラッグして行を固定"),
     ("Command\nPalette", "コマンド パレット"),
     ("Agent\nControl", "エージェント制御"),
     ("Action\nJournal", "操作ジャーナル"),
