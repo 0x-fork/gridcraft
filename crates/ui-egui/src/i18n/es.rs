@@ -185,6 +185,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Gridlines" => "Líneas de cuadrícula",
         "Headings" => "Encabezados",
         "Zoom" => "Zoom",
+        "Interface size" => "Tamaño de la interfaz",
+        "Auto" => "Automático",
         "100%" => "100%",
         "Zoom to\nSelection" => "Ampliar\nselección",
         "Freeze\nPanes" => "Inmovilizar\npaneles",

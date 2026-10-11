@@ -184,6 +184,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Gridlines" => "Gitternetzlinien",
         "Headings" => "Überschriften",
         "Zoom" => "Zoom",
+        "Interface size" => "Größe der Benutzeroberfläche",
+        "Auto" => "Automatisch",
         "100%" => "100%",
         "Zoom to\nSelection" => "Zoom auf die\nAuswahl",
         "Freeze\nPanes" => "Fenster\nfixieren",

@@ -253,9 +253,14 @@ fn language_switch_translates_the_ribbon_and_persists() {
     for id in ["app.language.set", "app.language.english", "app.language.japanese"] {
         assert!(ids.contains(&id), "engine.commands lists {id}");
     }
-    for (language, expected) in
-        [(Language::Zh, "数据"), (Language::Ja, "データ"), (Language::Ko, "데이터"), (Language::Ru, "Данные"), (Language::PtBr, "Dados"), (Language::De, "Daten")]
-    {
+    for (language, expected) in [
+        (Language::Zh, "数据"),
+        (Language::Ja, "データ"),
+        (Language::Ko, "데이터"),
+        (Language::Ru, "Данные"),
+        (Language::PtBr, "Dados"),
+        (Language::De, "Daten"),
+    ] {
         h.state_mut().run("app.language.set", json!({"language": language.code()})).unwrap();
         h.run_steps(2); // every locale renders the ribbon without panicking
         assert_eq!(h.state().ui.language, language);
