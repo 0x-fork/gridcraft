@@ -226,6 +226,9 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
             } else {
                 (0, 1)
             };
+            // Left/Right follow the screen on a right-to-left sheet.
+            let rtl = app.session.active().and_then(|d| d.wb.active()).is_some_and(|s| s.right_to_left);
+            let dc = if rtl { -dc } else { dc };
             if ed.can_point() {
                 ui.input_mut(|i| {
                     for k in [Key::ArrowUp, Key::ArrowDown, Key::ArrowLeft, Key::ArrowRight] {

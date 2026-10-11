@@ -272,6 +272,8 @@ const JAPANESE: &[(&str, &str)] = &[
     ("Remove Page Break", "改ページの解除"),
     ("Reset All Page Breaks", "すべての改ページを解除"),
     ("Print\nTitles", "印刷タイトル"),
+    ("Sheet\nRight-to-Left", "シートを右から左へ"),
+    ("Sheet Right-to-Left", "シートを右から左へ"),
     ("Narrow", "狭い"),
     ("Wide", "広い"),
     ("Normal", "標準"),

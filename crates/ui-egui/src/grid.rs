@@ -108,6 +108,11 @@ pub struct Geo {
     pub frozen_w: f32,
     pub frozen_h: f32,
     pub scroll: egui::Vec2,
+    /// Sheet Right-to-Left: everything is laid out left-to-right as usual (these "logical"
+    /// coordinates are what `x`, `cell_rect`, `col_at`… return) and mirrored across `rect`'s
+    /// vertical centre line on screen: painted shapes by `mirror_painted`, widgets by
+    /// `mirror_rect`/`mirror_pos`, and pointer input back by `mirror_pos` (an involution).
+    pub rtl: bool,
     /// Prefix sums over custom row heights / column widths, built once per frame.
     ri: std::sync::Arc<LineIndex>,
     ci: std::sync::Arc<LineIndex>,
@@ -127,7 +132,21 @@ impl Geo {
         let frozen_w = (ci.start(fc) as f32) * z;
         let frozen_h = (ri.start(fr) as f32) * z;
         let cells = Rect::from_min_max(pos2(rect.left() + header_w, rect.top() + header_h), rect.max);
-        Geo { rect, cells, z, header_w, header_h, fr, fc, frozen_w, frozen_h, scroll, ri, ci }
+        Geo { rect, cells, z, header_w, header_h, fr, fc, frozen_w, frozen_h, scroll, rtl: sh.right_to_left, ri, ci }
+    }
+    /// Screen x for a logical x (and back): identity unless the sheet is right-to-left.
+    pub fn mirror_x(&self, x: f32) -> f32 {
+        if self.rtl { self.rect.left() + self.rect.right() - x } else { x }
+    }
+    pub fn mirror_pos(&self, p: Pos2) -> Pos2 {
+        pos2(self.mirror_x(p.x), p.y)
+    }
+    pub fn mirror_rect(&self, r: Rect) -> Rect {
+        if self.rtl { Rect::from_min_max(pos2(self.mirror_x(r.right()), r.top()), pos2(self.mirror_x(r.left()), r.bottom())) } else { r }
+    }
+    /// On-screen rectangle of a cell (`cell_rect` mirrored for right-to-left sheets).
+    pub fn screen_cell_rect(&self, sh: &Sheet, c: CellRef) -> Rect {
+        self.mirror_rect(self.cell_rect(sh, c))
     }
     pub fn x(&self, _sh: &Sheet, col: u32) -> f32 {
         if col < self.fc {
@@ -313,7 +332,14 @@ fn display_text(
 pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let available = ui.available_rect_before_wrap();
-    let rect = Rect::from_min_max(available.min, pos2((available.right() - 14.0).max(available.left()), available.bottom()));
+    // A right-to-left sheet has its vertical scrollbar on the left.
+    let rtl = app.session.active().and_then(|d| d.wb.active()).is_some_and(|s| s.right_to_left);
+    let bar = 14.0_f32.min(available.width());
+    let rect = if rtl {
+        Rect::from_min_max(pos2(available.left() + bar, available.top()), available.max)
+    } else {
+        Rect::from_min_max(available.min, pos2(available.right() - bar, available.bottom()))
+    };
     let resp = ui.allocate_rect(rect, Sense::click_and_drag());
     app.grid.rect = Some(rect);
     let Some(d) = app.session.active() else { return };
@@ -331,6 +357,11 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
         } else if scroll_delta != egui::Vec2::ZERO {
             let z = sh.zoom as f32 / 100.0 * DISPLAY_SCALE;
             let mut d = scroll_delta;
+            // A horizontal swipe moves the content the way the fingers go, which is towards
+            // higher columns on a mirrored sheet.
+            if sh.right_to_left {
+                d.x = -d.x;
+            }
             if modifiers.shift && d.x == 0.0 {
                 d = vec2(d.y, 0.0);
             }
@@ -370,9 +401,11 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     if let Some(v) = app.view_mut() {
         *v = view;
     }
-    app.grid.cells_rect = Some(geo.cells);
+    app.grid.cells_rect = Some(geo.mirror_rect(geo.cells));
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, t.grid_bg);
+    // Everything up to the headers is painted in logical (left-to-right) coordinates.
+    let mirror_from = painter.add(egui::Shape::Noop);
     let mut cf = CfCache::new();
     // Quadrants: (rows, cols, clip).
     let (sr0, sr1) = geo.scroll_rows(sh);
@@ -406,7 +439,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
         painter.line_segment([pos2(split.x, geo.cells.top()), pos2(split.x, geo.cells.bottom())], Stroke::new(1.0, Color32::from_gray(150)));
     }
     // Objects above cells.
-    crate::chartview::paint_objects(app, &painter.with_clip_rect(geo.cells), &geo, &wb, si, sh);
+    let objects = crate::chartview::paint_objects(app, &painter.with_clip_rect(geo.cells), &geo, &wb, si, sh);
     paint_overlays(app, ui, &painter.with_clip_rect(geo.cells), &geo, &wb, si, sh, &sel);
     if app.session.view_mode == "pageBreakPreview" || app.session.view_mode == "pageLayout" {
         paint_pages(app, &painter.with_clip_rect(geo.cells), &geo, sh);
@@ -414,6 +447,10 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     // Headers.
     if sh.show_headings {
         paint_headers(&painter, &geo, sh, &sel, &t, &quads);
+    }
+    if geo.rtl {
+        let mirror_to = painter.add(egui::Shape::Noop);
+        mirror_painted(ui.ctx(), painter.layer_id(), mirror_from.0..mirror_to.0, &geo, &objects);
     }
     // Interaction.
     let previous_popups = (app.grid.filter_menu, app.grid.list_picker, app.grid.header_menu);
@@ -426,7 +463,8 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     list_picker(app, ui, &geo, previous_popups.1 == app.grid.list_picker);
     header_menu(app, ui, previous_popups.2 == app.grid.header_menu);
     context_menu(app, ui);
-    vertical_scrollbar(app, ui, sh, &geo, available.right(), max_y, &t);
+    let track_x = if rtl { (available.left(), rect.left()) } else { (rect.right(), available.right()) };
+    vertical_scrollbar(app, ui, sh, &geo, track_x, max_y, &t);
     if app.session.clipboard.is_some() {
         app.grid.marching_phase = (app.grid.marching_phase + 0.5) % 8.0;
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(60));
@@ -435,8 +473,8 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
 
 /// The worksheet is painted virtually, so it needs its own scrollbar rather than a
 /// ScrollArea containing all million rows. Keep the scroll extent stable during a drag.
-fn vertical_scrollbar(app: &mut SheetApp, ui: &mut egui::Ui, sh: &Sheet, geo: &Geo, right: f32, limit: f32, t: &Tokens) {
-    let track = Rect::from_min_max(pos2(geo.rect.right(), geo.cells.top() + geo.frozen_h), pos2(right, geo.cells.bottom()));
+fn vertical_scrollbar(app: &mut SheetApp, ui: &mut egui::Ui, sh: &Sheet, geo: &Geo, track_x: (f32, f32), limit: f32, t: &Tokens) {
+    let track = Rect::from_min_max(pos2(track_x.0, geo.cells.top() + geo.frozen_h), pos2(track_x.1, geo.cells.bottom()));
     if track.height() <= 0.0 || track.width() <= 0.0 {
         return;
     }
@@ -479,6 +517,59 @@ fn vertical_scrollbar(app: &mut SheetApp, ui: &mut egui::Ui, sh: &Sheet, geo: &G
             v.scroll.y = next;
         }
         ui.ctx().request_repaint();
+    }
+}
+
+/// Mirror what the grid painted into `layer` (the shape indices in `range`) for a right-to-left
+/// sheet. Geometry is reflected; text and meshes (glyphs, pictures) keep their reading direction
+/// and only move so that their box lands mirrored. Floating objects (`objects`: shape index
+/// ranges with their logical rect) move as a whole, so a chart keeps its axes and a picture
+/// isn't flipped.
+fn mirror_painted(ctx: &egui::Context, layer: egui::LayerId, range: std::ops::Range<usize>, geo: &Geo, objects: &[crate::chartview::PaintedObject]) {
+    let axis = geo.rect.left() + geo.rect.right();
+    ctx.graphics_mut(|g| {
+        let list = g.entry(layer);
+        for i in range {
+            let object = objects.iter().find(|o| o.shapes.contains(&i));
+            list.mutate_shape(egui::layers::ShapeIdx(i), |cs| {
+                cs.clip_rect = geo.mirror_rect(cs.clip_rect);
+                match object {
+                    Some(o) => cs.shape.translate(vec2(axis - o.rect.right() - o.rect.left(), 0.0)),
+                    None => mirror_shape(&mut cs.shape, axis),
+                }
+            });
+        }
+    });
+}
+
+/// Reflect one shape across the vertical line `x = axis / 2`.
+fn mirror_shape(shape: &mut egui::Shape, axis: f32) {
+    use egui::Shape;
+    let flip = |p: &mut Pos2| p.x = axis - p.x;
+    match shape {
+        Shape::Noop | Shape::Callback(_) => {}
+        Shape::Vec(v) => v.iter_mut().for_each(|s| mirror_shape(s, axis)),
+        Shape::Circle(c) => flip(&mut c.center),
+        Shape::Ellipse(e) => flip(&mut e.center),
+        Shape::LineSegment { points, .. } => points.iter_mut().for_each(flip),
+        Shape::Path(p) => {
+            p.points.iter_mut().for_each(flip);
+            // Keep the preferred (clockwise) winding for filled polygons.
+            p.points.reverse();
+        }
+        Shape::Rect(r) => {
+            r.rect = Rect::from_min_max(pos2(axis - r.rect.right(), r.rect.top()), pos2(axis - r.rect.left(), r.rect.bottom()));
+            let c = r.corner_radius;
+            r.corner_radius = egui::CornerRadius { nw: c.ne, ne: c.nw, sw: c.se, se: c.sw };
+        }
+        Shape::QuadraticBezier(b) => b.points.iter_mut().for_each(flip),
+        Shape::CubicBezier(b) => b.points.iter_mut().for_each(flip),
+        _ => {
+            let b = shape.visual_bounding_rect();
+            if b.is_finite() {
+                shape.translate(vec2(axis - b.right() - b.left(), 0.0));
+            }
+        }
     }
 }
 
@@ -1057,7 +1148,8 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
     let primary_clicked = resp.clicked_by(egui::PointerButton::Primary);
     let pointer = ctx.input(|i| i.pointer.clone());
     let mods = ctx.input(|i| i.modifiers);
-    let pos = pointer.interact_pos().or(pointer.hover_pos());
+    // Hit-testing works in logical coordinates (see `Geo::rtl`).
+    let pos = pointer.interact_pos().or(pointer.hover_pos()).map(|p| geo.mirror_pos(p));
     let in_cells = pos.is_some_and(|p| geo.cells.contains(p));
     let in_col_header = pos.is_some_and(|p| p.y < geo.cells.top() && p.y >= geo.rect.top() && p.x >= geo.cells.left());
     let in_row_header = pos.is_some_and(|p| p.x < geo.cells.left() && p.x >= geo.rect.left() && p.y >= geo.cells.top());
@@ -1109,10 +1201,10 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                     .ink
                     .iter()
                     .map(|q| {
-                        pos2(
+                        geo.mirror_pos(pos2(
                             geo.cells.left() + geo.frozen_w + (q[0] - sh.col_left(geo.fc) as f32 - geo.scroll.x) * geo.z,
                             geo.cells.top() + geo.frozen_h + (q[1] - sh.row_top(geo.fr) as f32 - geo.scroll.y) * geo.z,
-                        )
+                        ))
                     })
                     .collect();
                 ui.painter().add(egui::epaint::PathShape::line(pts, egui::epaint::PathStroke::new(2.0 * geo.z, Color32::from_rgb(0x1F, 0x5F, 0xC9))));
@@ -1191,7 +1283,7 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
     // Press: decide the drag mode.
     if resp.drag_started() || (primary_clicked && app.grid.drag == Drag::None) {
         // Where the press began (a drag is only recognised after the pointer has moved).
-        let Some(p) = pointer.press_origin().or(pos) else { return };
+        let Some(p) = pointer.press_origin().map(|p| geo.mirror_pos(p)).or(pos) else { return };
         if in_corner {
             let _ = app.session.run("selection.set", json!({"range": RangeRef::all().a1()}));
             return;
@@ -1231,7 +1323,7 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
         }
         // Filter dropdown buttons.
         if is_filter_button(sh, geo, p) {
-            app.grid.filter_menu = Some((c.col, p));
+            app.grid.filter_menu = Some((c.col, geo.mirror_pos(p)));
             return;
         }
         // Point mode while editing a formula: clicking inserts a reference.
@@ -1478,9 +1570,9 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                 let range = if rows { RangeRef::rows(idx, idx) } else { RangeRef::cols(idx, idx) };
                 let _ = app.session.run("selection.set", json!({"range": range.a1()}));
             }
-            app.grid.header_menu = Some((p, rows));
+            app.grid.header_menu = Some((geo.mirror_pos(p), rows));
         } else {
-            app.grid.context_menu = Some(p);
+            app.grid.context_menu = Some(geo.mirror_pos(p));
         }
     }
 
@@ -1677,8 +1769,9 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
                 match key {
                     Key::ArrowUp => mv(app, -1, 0),
                     Key::ArrowDown => mv(app, 1, 0),
-                    Key::ArrowLeft => mv(app, 0, -1),
-                    Key::ArrowRight => mv(app, 0, 1),
+                    // Arrows follow the screen: on a right-to-left sheet Left goes to the next column.
+                    Key::ArrowLeft => mv(app, 0, if sh.right_to_left { 1 } else { -1 }),
+                    Key::ArrowRight => mv(app, 0, if sh.right_to_left { -1 } else { 1 }),
                     Key::PageDown if !cmd => mv(app, page, 0),
                     Key::PageUp if !cmd => mv(app, -page, 0),
                     Key::PageDown => app.run_or_alert("sheet.next", json!({})),
@@ -1751,7 +1844,8 @@ fn in_cell_editor(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet, 
     let lines = ed.text.lines().count().max(1) as f32 + if ed.text.ends_with('\n') { 1.0 } else { 0.0 };
     let w = (text_w + 14.0).max(rect.width()).min(geo.cells.right() - rect.left());
     let h = (size * 1.3 * lines + 4.0).max(rect.height());
-    let erect = Rect::from_min_size(rect.min, vec2(w, h));
+    // Grows to the left on a right-to-left sheet.
+    let erect = geo.mirror_rect(Rect::from_min_size(rect.min, vec2(w, h)));
     let fill = match st.fill.pattern {
         PatternType::Solid => st.fill.fg.resolve(&wb.theme).map(theme::color32).unwrap_or(Color32::WHITE),
         _ => Color32::WHITE,
@@ -1988,8 +2082,8 @@ fn paint_overlays(
         && !(dv.input_title.is_empty() && dv.input_message.is_empty())
     {
         let r = geo.cell_rect(sh, sel.active);
-        let at = pos2(r.left() + 8.0, r.bottom() + 6.0);
-        egui::Area::new(egui::Id::new("dv_input")).fixed_pos(at).order(egui::Order::Tooltip).interactable(false).show(ui.ctx(), |ui| {
+        let (at, pivot) = (geo.mirror_pos(pos2(r.left() + 8.0, r.bottom() + 6.0)), if geo.rtl { Align2::RIGHT_TOP } else { Align2::LEFT_TOP });
+        egui::Area::new(egui::Id::new("dv_input")).fixed_pos(at).pivot(pivot).order(egui::Order::Tooltip).interactable(false).show(ui.ctx(), |ui| {
             egui::Frame::popup(ui.style()).fill(Color32::from_rgb(0xFF, 0xFF, 0xE1)).show(ui, |ui| {
                 ui.set_max_width(220.0);
                 if !dv.input_title.is_empty() {
@@ -2012,17 +2106,21 @@ fn paint_overlays(
         }
         let at = pos2(r.right() + 10.0, r.top());
         p.line_segment([r.right_top(), at + vec2(0.0, 6.0)], Stroke::new(1.0, Color32::from_gray(90)));
-        egui::Area::new(egui::Id::new(("note", c.row, c.col))).fixed_pos(at).order(egui::Order::Tooltip).interactable(false).show(ui.ctx(), |ui| {
-            egui::Frame::popup(ui.style()).fill(if cm.threaded { Color32::WHITE } else { Color32::from_rgb(0xFF, 0xFF, 0xE1) }).show(ui, |ui| {
-                ui.set_max_width(240.0);
-                ui.label(egui::RichText::new(format!("{}:", cm.author)).strong().color(Color32::BLACK));
-                ui.label(egui::RichText::new(&cm.text).color(Color32::BLACK));
-                for (a, t) in &cm.replies {
-                    ui.separator();
-                    ui.label(egui::RichText::new(format!("{a}: {t}")).color(Color32::BLACK));
-                }
-            });
-        });
+        let (at, pivot) = (geo.mirror_pos(at), if geo.rtl { Align2::RIGHT_TOP } else { Align2::LEFT_TOP });
+        egui::Area::new(egui::Id::new(("note", c.row, c.col))).fixed_pos(at).pivot(pivot).order(egui::Order::Tooltip).interactable(false).show(
+            ui.ctx(),
+            |ui| {
+                egui::Frame::popup(ui.style()).fill(if cm.threaded { Color32::WHITE } else { Color32::from_rgb(0xFF, 0xFF, 0xE1) }).show(ui, |ui| {
+                    ui.set_max_width(240.0);
+                    ui.label(egui::RichText::new(format!("{}:", cm.author)).strong().color(Color32::BLACK));
+                    ui.label(egui::RichText::new(&cm.text).color(Color32::BLACK));
+                    for (a, t) in &cm.replies {
+                        ui.separator();
+                        ui.label(egui::RichText::new(format!("{a}: {t}")).color(Color32::BLACK));
+                    }
+                });
+            },
+        );
     }
     // Hyperlink tooltip.
     if let Some(h) = hover.and_then(|c| sh.hyperlinks.get(&c))
@@ -2072,8 +2170,9 @@ fn list_picker(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_open: bool)
     };
     let items = gridcraft_engine::cmd::data::list_items(&wb, si, &dv);
     let r = geo.cell_rect(sh, c);
+    let (at, pivot) = (geo.mirror_pos(r.left_bottom()), if geo.rtl { Align2::RIGHT_TOP } else { Align2::LEFT_TOP });
     let mut close = false;
-    let response = egui::Area::new(egui::Id::new("dv_list")).fixed_pos(r.left_bottom()).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
+    let response = egui::Area::new(egui::Id::new("dv_list")).fixed_pos(at).pivot(pivot).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
         egui::Frame::popup(ui.style()).inner_margin(2.0).show(ui, |ui| {
             ui.set_min_width(r.width().max(100.0));
             egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {

@@ -101,6 +101,7 @@ pub enum Icon {
     Theme,
     Margins,
     Orient,
+    SheetRtl,
     Paper,
     PrintArea,
     Script,
@@ -573,6 +574,14 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, c: Color32) {
         Icon::Orient => {
             g.rect(2.0, 4.0, 8.0, 10.0, None, Some(c));
             g.rect(6.0, 2.0, 8.0, 6.0, Some(Color32::WHITE), Some(BLUE));
+        }
+        Icon::SheetRtl => {
+            // A sheet with an arrow running right to left.
+            g.rect(2.0, 2.5, 12.0, 8.0, None, Some(c));
+            g.stroke(&[(6.0, 2.5), (6.0, 10.5)], light);
+            g.stroke(&[(10.0, 2.5), (10.0, 10.5)], light);
+            g.line(&[(13.5, 13.0), (4.5, 13.0)], BLUE, 1.4);
+            g.poly(&[(2.0, 13.0), (5.0, 10.5), (5.0, 15.5)], BLUE);
         }
         Icon::PrintArea => {
             g.rect(2.5, 2.5, 11.0, 11.0, None, Some(light));
