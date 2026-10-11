@@ -70,9 +70,9 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   routine in business.
 - **Estimate:** 28–42 h (`.xls` read 20–30, encryption 8–12). [file-format-parity.md](file-format-parity.md)
 
-### 8. PivotTables: no slicers, calculated fields, PivotCharts; unverified in Excel (F)
+### 8. PivotTables: no slicers, calculated items, PivotCharts; unverified in Excel (F)
 - **Evidence:** `parity-checklist.md` missing `insert.slicer`, `insert.timeline`,
-  `insert.pivotChart`, `pivot.calculatedField`, `table.insertSlicer`; GETPIVOTDATA missing.
+  `insert.pivotChart`, `table.insertSlicer`; calculated items and GETPIVOTDATA missing (calculated fields done).
 - **Impact:** pivots are the analyst's main tool.
 - **Estimate:** 20–30 h for beta (25–40 h full).
 
@@ -157,6 +157,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 | 2026-10-11 | minor | §15: BAHTTEXT added (21 functions missing) |
 | 2026-10-11 | minor | §15: TRIMRANGE added (21 functions missing; trim-reference operators still missing) |
 | 2026-10-11 | minor | §16: Allow Edit Ranges landed (#307) |
+| 2026-10-11 | minor | §8: calculated fields added |
 | 2026-10-10 | minor | Updated for the 10-10 merges (#17, #31, #38, #62, #82, #104, #116) and the new chart resize bug (#190) |
 | 2026-10-10 | minor | Noted that no gap blocks the alpha gate |
 | 2026-10-10 | major | Created: 24 ranked gaps with evidence, from the full re-measure and the 60 open issues |

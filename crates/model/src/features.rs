@@ -733,6 +733,18 @@ pub struct PivotTable {
     pub show_headers: bool,
     /// Area written by the last refresh.
     pub last_range: Option<RangeRef>,
+    /// Calculated fields, usable in the Values area by name.
+    pub calculated_fields: Vec<PivotCalcField>,
+}
+
+/// A calculated field: a formula over other fields (`=Sales*0.1`, `='Unit Price'*Units`). As in
+/// Excel, it is evaluated on the sums of the fields it names for each report cell, not per record.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PivotCalcField {
+    pub name: String,
+    /// Formula text, starting with `=`.
+    pub formula: String,
 }
 
 impl Default for PivotTable {
@@ -754,6 +766,7 @@ impl Default for PivotTable {
             style: "PivotStyleLight16".into(),
             show_headers: true,
             last_range: None,
+            calculated_fields: vec![],
         }
     }
 }

@@ -14,6 +14,7 @@ pub mod display;
 pub mod fill;
 pub mod io;
 pub mod pivot;
+pub mod pivot_calc;
 pub mod sample;
 pub mod selection;
 pub mod tables;
