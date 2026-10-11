@@ -265,6 +265,7 @@ Implemented:
 - `data.showDetail` Show Detail (Outline)
 - `data.hideDetail` Hide Detail (Outline)
 - `data.analysisToolPak` Data Analysis (Analysis)
+- `data.solver` Solver (Analysis)
 
 Missing:
 
@@ -275,6 +276,7 @@ Missing:
 - `data.forecastSheet` Forecast Sheet (Forecast)
 - `data.analyzeData` Analyze Data (Analysis)
 - `data.solver` Solver (Analysis)
+- `data.analysisToolPak` Data Analysis (Analysis)
 
 ## Review (10 / 18, 56%)
 

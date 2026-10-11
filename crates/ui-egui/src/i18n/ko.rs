@@ -170,6 +170,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Subtotal" => "부분합",
         "Data\nAnalysis" => "데이터 분석",
         "Data Analysis" => "데이터 분석",
+        "Solver" => "해 찾기",
         "What-If\nAnalysis" => "가상 분석",
         "Data Table…" => "데이터 표…",
         "Scenario Manager…" => "시나리오 관리자…",

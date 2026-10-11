@@ -170,6 +170,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Subtotal" => "分类汇总",
         "Data\nAnalysis" => "数据分析",
         "Data Analysis" => "数据分析",
+        "Solver" => "规划求解",
         "What-If\nAnalysis" => "假设分析",
         "Data Table…" => "数据表…",
         "Scenario Manager…" => "方案管理器…",

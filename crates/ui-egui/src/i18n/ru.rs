@@ -170,6 +170,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Subtotal" => "Промежуточный итог",
         "Data\nAnalysis" => "Анализ данных",
         "Data Analysis" => "Анализ данных",
+        "Solver" => "Поиск решения",
         "What-If\nAnalysis" => "Анализ «что\nесли»",
         "Data Table…" => "Таблица данных…",
         "Scenario Manager…" => "Диспетчер сценариев…",

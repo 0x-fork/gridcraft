@@ -378,6 +378,7 @@ fn dialogs_open_and_close() {
         "pivotCalculatedField",
         "about",
         "analysisToolPak",
+        "solver",
     ] {
         h.state_mut().open_dialog(name, json!({}));
         h.run_steps(2);
@@ -418,6 +419,37 @@ fn data_analysis_dialog_runs_a_tool_and_asks_before_overwriting() {
     let d = h.state().dialog.as_ref().expect("the dialog stays open to ask");
     assert_eq!(d.values.get("askOverwrite"), Some(&json!(true)));
     assert!(h.state().message.is_none());
+}
+
+#[test]
+fn solver_dialog_loads_the_saved_model_and_results_can_restore() {
+    let mut s = blank();
+    for (c, v) in [("A1", "0"), ("A2", "0"), ("B1", "=3*A1+5*A2"), ("B2", "=2*A2"), ("B3", "=3*A1+2*A2")] {
+        s.execute("cell.set", json!({"cell": c, "input": v})).unwrap();
+    }
+    let r = s
+        .execute(
+            "data.solver",
+            json!({"objective": "B1", "variables": "A1:A2", "constraints": ["A1 <= 4", "B2 <= 12", "B3 <= 18"], "method": "simplex"}),
+        )
+        .unwrap();
+    assert_eq!(s.active().unwrap().wb.active().unwrap().value(CellRef::parse("B1").unwrap()), Value::Number(36.0));
+    let mut h = harness(s);
+    h.state_mut().open_dialog("solver", json!({}));
+    h.run_steps(2);
+    let d = h.state().dialog.as_ref().unwrap();
+    assert_eq!(d.values.get("objective"), Some(&json!("B1")));
+    assert_eq!(d.values.get("method"), Some(&json!("simplex")));
+    assert_eq!(d.values.get("constraints").and_then(|c| c.as_array()).map(Vec::len), Some(3));
+    h.state_mut().dialog = None;
+    // Solver Results › Restore Original Values undoes the solution.
+    h.state_mut().open_dialog("solverResults", r);
+    h.state_mut().dialog.as_mut().unwrap().values.insert("restore".into(), json!(true));
+    h.run_steps(2);
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    assert!(h.state().dialog.is_none());
+    assert_eq!(value(&h, "A1"), Value::Number(0.0));
+    assert_eq!(value(&h, "B1"), Value::Number(0.0));
 }
 
 #[test]
