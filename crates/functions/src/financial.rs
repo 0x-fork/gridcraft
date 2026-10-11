@@ -6,7 +6,7 @@
 use gridcraft_core::date::{datetime_from_serial, days_in_month, serial_from_ymd};
 use gridcraft_core::{CellError, DateSystem, Value};
 
-use crate::util::{R, S, array_numbers, as_array, flatten, has, num, num_val, numbers, opt_bool, opt_num};
+use crate::util::{R, S, array_numbers, as_array, flatten, has, num, num_val, numbers, opt_bool, opt_num, round_half_away, text, to_sig_digits};
 use crate::{Arg, Ctx, FnSpec, VAR};
 
 // ---------------------------------------------------------------------------------------------
@@ -1305,6 +1305,64 @@ fn oddlyield(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     num_val((red + dc * coupon - paid) / paid * f / dsc)
 }
 
+// ---------------------------------------------------------------------------------------------
+// Euro conversion
+// ---------------------------------------------------------------------------------------------
+
+/// The currencies EUROCONVERT documents: ISO code, the irrevocable conversion rate in units per
+/// euro (Council Regulation (EC) No 2866/98 as amended) and the calculation precision in decimals.
+const EURO_RATES: &[(&str, f64, i32)] = &[
+    ("BEF", 40.3399, 0),
+    ("LUF", 40.3399, 0),
+    ("DEM", 1.95583, 2),
+    ("ESP", 166.386, 0),
+    ("FRF", 6.55957, 2),
+    ("IEP", 0.787564, 2),
+    ("ITL", 1936.27, 0),
+    ("NLG", 2.20371, 2),
+    ("ATS", 13.7603, 2),
+    ("PTE", 200.482, 0),
+    ("FIM", 5.94573, 2),
+    ("GRD", 340.75, 0),
+    ("SIT", 239.64, 2),
+    ("EUR", 1.0, 2),
+];
+
+fn euro_currency(a: &[Arg], i: usize) -> R<(&'static str, f64, i32)> {
+    let code = text(a, i)?;
+    let code = code.trim();
+    EURO_RATES.iter().copied().find(|(c, _, _)| c.eq_ignore_ascii_case(code)).ok_or(CellError::Value)
+}
+
+/// EUROCONVERT(number, source, target, [full_precision], [triangulation_precision]).
+fn euroconvert(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+    let x = num(a, 0)?;
+    let (src, src_rate, _) = euro_currency(a, 1)?;
+    let (tgt, tgt_rate, tgt_prec) = euro_currency(a, 2)?;
+    let full = opt_bool(a, 3, false)?;
+    let triangulation = if has(a, 4) {
+        let t = num(a, 4)?.trunc();
+        if t < 3.0 {
+            return Err(CellError::Value);
+        }
+        // Beyond 17 significant digits rounding changes nothing.
+        Some(t.min(17.0) as usize)
+    } else {
+        None
+    };
+    if src == tgt {
+        return num_val(x);
+    }
+    let mut euros = x / src_rate;
+    if src != "EUR"
+        && let Some(t) = triangulation
+    {
+        euros = to_sig_digits(euros, t);
+    }
+    let out = euros * tgt_rate;
+    num_val(if full { out } else { round_half_away(out, tgt_prec) })
+}
+
 pub(crate) fn specs() -> Vec<FnSpec> {
     vec![
         f!(
@@ -1686,6 +1744,16 @@ pub(crate) fn specs() -> Vec<FnSpec> {
             "Yield of a security with an odd last period.",
             oddlyield
         ),
+        f!(
+            "EUROCONVERT",
+            3,
+            5,
+            AddIn,
+            S,
+            "EUROCONVERT(number, source, target, [full_precision], [triangulation_precision])",
+            "Converts between the euro and the former euro member currencies at the fixed rates.",
+            euroconvert
+        ),
     ]
 }
 
@@ -1914,6 +1982,31 @@ mod tests {
             let _ = ev("ODDLYIELD", last(x, y));
         }
         is_err(ev("ODDFPRICE", vec![n(-5.0), n(1e20), n(0.0), n(1e10), n(0.05), n(0.05), n(100.0), n(2.0)]), CellError::Num);
+    }
+
+    #[test]
+    fn euroconvert() {
+        // The examples on Microsoft's EUROCONVERT page.
+        let ec = |x: f64, s: &str, tg: &str, rest: Vec<Arg>| {
+            let mut a = vec![n(x), t(s), t(tg)];
+            a.extend(rest);
+            ev("EUROCONVERT", a)
+        };
+        close(ec(1.2, "DEM", "EUR", vec![]), 0.61);
+        close(ec(1.0, "FRF", "EUR", vec![b(true), n(3.0)]), 0.152);
+        close(ec(1.0, "FRF", "EUR", vec![b(false), n(3.0)]), 0.15);
+        close(ec(1.0, "FRF", "DEM", vec![b(true), n(3.0)]), 0.29728616);
+        // Euro to a member currency rounds to the target's calculation precision (lira: 0).
+        close(ec(10.0, "eur", "ITL", vec![]), 19363.0);
+        close(ec(100.0, "EUR", "IEP", vec![b(true)]), 78.7564);
+        // Same currency returns the number untouched.
+        close(ec(1.23456, "DEM", "DEM", vec![]), 1.23456);
+        // Unknown codes and a triangulation precision below 3 are #VALUE!.
+        is_err(ec(1.0, "USD", "EUR", vec![]), CellError::Value);
+        is_err(ec(1.0, "FRF", "DEM", vec![b(true), n(2.0)]), CellError::Value);
+        // Hostile magnitudes give a number or #NUM!, never a panic.
+        is_err(ec(f64::MAX, "EUR", "ITL", vec![]), CellError::Num);
+        close(ec(1.0, "FRF", "DEM", vec![b(true), n(1e300)]), 1.95583 / 6.55957);
     }
 
     #[test]
