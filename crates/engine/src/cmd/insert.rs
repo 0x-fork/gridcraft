@@ -1036,9 +1036,10 @@ fn comment(s: &mut Session, p: &Json, threaded: bool) -> Result<Json> {
     let text = str_param(p, "text").unwrap_or("").to_string();
     let author = str_param(p, "author").map(str::to_string).unwrap_or_else(|| s.prefs.user_name.clone());
     edit(s, |cx| {
-        cx.sheet_mut(sheet)?
-            .comments
-            .insert(at, Comment { author: author.clone(), text: text.clone(), replies: vec![], threaded, resolved: false, visible: false });
+        cx.sheet_mut(sheet)?.comments.insert(
+            at,
+            Comment { author: author.clone(), text: text.clone(), replies: vec![], threaded, resolved: false, visible: false, dates: vec![] },
+        );
         Ok(json!({"cell": at.a1()}))
     })
 }
