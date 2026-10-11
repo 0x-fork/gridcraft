@@ -1654,3 +1654,32 @@ fn notes_comments_and_links_survive_a_json_save() {
     assert_eq!(after.hyperlinks, before.hyperlinks);
     assert_eq!(after.cells, before.cells);
 }
+
+/// Icon-set thresholds as read from a file (one per icon, the first the lower bound) decide the
+/// icon; a rule without thresholds uses Excel's defaults (percent 33 and 67) (#235).
+#[test]
+fn icon_set_thresholds_from_files_pick_the_icon() {
+    use gridcraft_model::{CfRule, CfValueKind, CondFormat};
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [[0], [10], [20], [30], [100]]})).unwrap();
+    s.execute("home.conditionalFormat", json!({"range": "A1:A5", "rule": {"type": "iconSet", "set": "3Arrows"}})).unwrap();
+    let icon = |s: &Session, a: &str| {
+        let wb = &s.doc().unwrap().wb;
+        crate::cf::CfCache::new().look(wb, 0, CellRef::parse(a).unwrap()).and_then(|l| l.icon).map(|(_, i)| i)
+    };
+    // Defaults: percent of the 0..100 span, so 30 is still the lowest icon.
+    assert_eq!([icon(&s, "A1"), icon(&s, "A4"), icon(&s, "A5")], [Some(0), Some(0), Some(2)]);
+    let sh = std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb).sheet_mut(0).unwrap();
+    sh.cond_formats = vec![CondFormat {
+        ranges: vec![gridcraft_core::RangeRef::parse("A1:A5").unwrap()],
+        rule: CfRule::IconSet {
+            set: "3Arrows".into(),
+            thresholds: vec![CfValueKind::Percent(0.0), CfValueKind::Number(10.0), CfValueKind::Number(25.0)],
+            reverse: false,
+            show_value: true,
+        },
+        priority: 1,
+        stop_if_true: false,
+    }];
+    assert_eq!([icon(&s, "A1"), icon(&s, "A2"), icon(&s, "A3"), icon(&s, "A4")], [Some(0), Some(1), Some(1), Some(2)]);
+}

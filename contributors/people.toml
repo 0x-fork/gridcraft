@@ -35,3 +35,6 @@ sync_github_name = true
 
 [people.MacJedi42]
 sync_github_name = true
+
+[people.alexanderalber]
+real_name = "Alexander Alber"
