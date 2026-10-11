@@ -3,11 +3,15 @@
 //! Vulkan is never initialized unless `WGPU_BACKEND` asks for it: enumerating Vulkan adapters
 //! crashes inside Intel's `igvk64.dll` on some UHD Graphics drivers (#120), and that access
 //! violation happens in the driver, where no Rust error handling can catch it.
+//!
+//! DirectX 12 shaders are compiled with FXC (`d3dcompiler_47.dll`, part of Windows), never with
+//! whichever `dxcompiler.dll` the DLL search path happens to find (#339, #354): see
+//! [`dx12_compiler`].
 
 use eframe::{
     NativeOptions,
     egui_wgpu::WgpuSetup,
-    wgpu::{Backends, DeviceType},
+    wgpu::{Backends, DeviceType, Dx12Compiler},
 };
 
 /// What the start-up probe learned about one DirectX 12 adapter.
@@ -59,9 +63,24 @@ pub fn fallback_backends(backend_override: Option<Backends>, first: Backends) ->
     (!rest.is_empty()).then_some(rest)
 }
 
-/// Restricts the wgpu instance eframe creates to `backends`.
+/// The DirectX 12 shader compiler: `env_choice` (normally `Dx12Compiler::from_env()`, i.e.
+/// `WGPU_DX12_COMPILER`, for troubleshooting) or else FXC.
+///
+/// wgpu's default (`Auto`) loads the first `dxcompiler.dll` on the DLL search path. GridCraft ships
+/// none, so that is another program's copy (a Windows SDK, an Edge or WebView folder, anything on
+/// `PATH`). Without a matching `dxil.dll` beside it, DXC prints "DXIL signing library not found",
+/// wgpu treats that warning as a compile error, its internal compute pipelines fail, the device is
+/// lost and the app quits before the first frame ("Parent device is lost"). FXC is part of Windows
+/// and needs no extra DLL; egui's shaders don't need anything newer.
+pub fn dx12_compiler(env_choice: Option<Dx12Compiler>) -> Dx12Compiler {
+    env_choice.unwrap_or(Dx12Compiler::Fxc)
+}
+
+/// Restricts the wgpu instance eframe creates to `backends`, and pins its DirectX 12 shader
+/// compiler ([`dx12_compiler`]).
 pub fn configure_backends(options: &mut NativeOptions, backends: Backends) {
     if let WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup {
+        create.instance_descriptor.backend_options.dx12.shader_compiler = dx12_compiler(Dx12Compiler::from_env());
         // eframe's default includes Vulkan and GL. Creating the GL backend can crash inside AMD's
         // atio6axx.dll, and enumerating Vulkan adapters inside Intel's igvk64.dll (#120), before
         // adapter selection or any Rust error handling runs, so the window never appears.
@@ -188,5 +207,26 @@ mod tests {
         assert_eq!(fallback_backends(None, Backends::GL), Some(Backends::DX12));
         // Both were already tried: nothing left to fall back to.
         assert_eq!(fallback_backends(None, Backends::DX12 | Backends::GL), None);
+    }
+
+    #[test]
+    fn dx12_compiles_shaders_with_fxc_unless_asked() {
+        // #339, #354: wgpu's `Auto` would load a stray dxcompiler.dll and lose the device.
+        assert!(matches!(dx12_compiler(None), Dx12Compiler::Fxc));
+        assert!(matches!(dx12_compiler(Some(Dx12Compiler::Auto)), Dx12Compiler::Auto));
+        assert!(matches!(dx12_compiler(Some(Dx12Compiler::default_dynamic_dxc())), Dx12Compiler::DynamicDxc { .. }));
+        // eframe's own default is `Auto`; the configured instance (first start and retry) uses FXC.
+        let WgpuSetup::CreateNew(eframe_default) = NativeOptions::default().wgpu_options.wgpu_setup else {
+            panic!("default native options must create a wgpu instance");
+        };
+        if Dx12Compiler::from_env().is_none() {
+            assert!(matches!(eframe_default.instance_descriptor.backend_options.dx12.shader_compiler, Dx12Compiler::Auto));
+            let mut options = NativeOptions::default();
+            configure_backends(&mut options, Backends::DX12);
+            let WgpuSetup::CreateNew(create) = options.wgpu_options.wgpu_setup else {
+                panic!("default native options must create a wgpu instance");
+            };
+            assert!(matches!(create.instance_descriptor.backend_options.dx12.shader_compiler, Dx12Compiler::Fxc));
+        }
     }
 }
