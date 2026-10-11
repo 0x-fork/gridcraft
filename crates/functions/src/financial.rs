@@ -1099,6 +1099,212 @@ fn mduration(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     num_val(d / (1.0 + y / f))
 }
 
+// ---------------------------------------------------------------------------------------------
+// Odd first and last coupon periods
+// ---------------------------------------------------------------------------------------------
+//
+// An odd period is split into quasi-coupon periods: the regular coupon periods the security
+// would have had, counted back from the first coupon (ODDF*) or forward from the last interest
+// date (ODDL*). For quasi-period i, NL is its normal length, DC the days of it inside the odd
+// period, A the accrued days of it before settlement and DSC the days of it from settlement on.
+
+/// Most quasi-coupon periods an odd period may span (the date range allows ~32,400 quarters).
+const MAX_QUASI: i64 = 40_000;
+
+/// Normal length of the coupon period `[start, end]` under a basis (COUPDAYS semantics).
+fn normal_length(start: f64, end: f64, freq: f64, basis: u32) -> f64 {
+    match basis {
+        1 => end - start,
+        3 => 365.0 / freq,
+        _ => 360.0 / freq,
+    }
+}
+
+/// Days of `[from, to]` under a basis, or 0 when the span is empty.
+fn span(from: f64, to: f64, basis: u32) -> R<f64> {
+    if to > from { day_count(from, to, basis) } else { Ok(0.0) }
+}
+
+/// The odd-first-period terms that ODDFPRICE and ODDFYIELD share.
+struct OddFirst {
+    /// Coupons after the first coupon up to maturity.
+    n: f64,
+    /// Whole quasi-coupon periods between settlement and the first coupon.
+    nq: f64,
+    /// DSC / NL of the quasi-period holding settlement.
+    frac: f64,
+    /// Σ DCi / NLi over the odd period.
+    dc: f64,
+    /// Σ Ai / NLi over the odd period.
+    acc: f64,
+    freq: f64,
+}
+
+fn odd_first(settle: f64, mat: f64, issue: f64, first: f64, freq: f64, basis: u32) -> R<OddFirst> {
+    if !(mat > first && first > settle && settle > issue) {
+        return Err(CellError::Num);
+    }
+    let anchor = ymd(first)?;
+    let eom = anchor.2 == days_in_month(anchor.0, anchor.1);
+    let step = (12.0 / freq) as i64;
+    let quasi = |k: i64| shift_months(anchor, -k * step, eom);
+    let (mut dc, mut acc) = (0.0, 0.0);
+    let (mut nq, mut frac) = (None, 0.0);
+    // Walk back from the first coupon: period k runs from quasi(k + 1) to quasi(k).
+    let mut k = 0;
+    loop {
+        if k >= MAX_QUASI {
+            return Err(CellError::Num);
+        }
+        let (end, start) = (quasi(k)?, quasi(k + 1)?);
+        let nl = normal_length(start, end, freq, basis);
+        if nl <= 0.0 {
+            return Err(CellError::Num);
+        }
+        let from = start.max(issue);
+        dc += span(from, end, basis)? / nl;
+        acc += span(from, settle.min(end), basis)? / nl;
+        if start <= settle && settle < end {
+            nq = Some(k as f64);
+            frac = span(settle, end, basis)? / nl;
+        }
+        if start <= issue {
+            break;
+        }
+        k += 1;
+    }
+    let nq = nq.ok_or(CellError::Num)?;
+    let n = coupons(first, mat, freq)?.num;
+    Ok(OddFirst { n, nq, frac, dc, acc, freq })
+}
+
+fn odd_first_price(t: &OddFirst, rate: f64, yld: f64, red: f64) -> f64 {
+    let coupon = 100.0 * rate / t.freq;
+    let base = 1.0 + yld / t.freq;
+    let lead = t.nq + t.frac;
+    let mut p = red / base.powf(t.n + lead) + coupon * t.dc / base.powf(lead);
+    let mut k = 1.0;
+    while k <= t.n {
+        p += coupon / base.powf(k + lead);
+        k += 1.0;
+    }
+    p - coupon * t.acc
+}
+
+/// settlement, maturity, issue, first_coupon, rate, yld/pr, redemption, frequency, [basis].
+fn odd_first_args(a: &[Arg]) -> R<(OddFirst, f64, f64, f64)> {
+    let (s, m, issue, first) = (date(a, 0)?, date(a, 1)?, date(a, 2)?, date(a, 3)?);
+    let (rate, x, red) = (num(a, 4)?, num(a, 5)?, num(a, 6)?);
+    let (f, basis) = (freq_arg(a, 7)?, basis_arg(a, 8)?);
+    if rate < 0.0 || red <= 0.0 {
+        return Err(CellError::Num);
+    }
+    Ok((odd_first(s, m, issue, first, f, basis)?, rate, x, red))
+}
+
+fn oddfprice(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+    let (t, rate, yld, red) = odd_first_args(a)?;
+    if yld < 0.0 {
+        return Err(CellError::Num);
+    }
+    num_val(odd_first_price(&t, rate, yld, red))
+}
+
+fn oddfyield(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+    let (t, rate, pr, red) = odd_first_args(a)?;
+    if pr <= 0.0 {
+        return Err(CellError::Num);
+    }
+    // The price falls as the yield rises: bracket the root, then bisect.
+    let g = |y: f64| odd_first_price(&t, rate, y, red) - pr;
+    let (mut lo, mut hi) = (-0.999_999 * t.freq, 1.0);
+    let mut guard = 0;
+    while g(hi) > 0.0 && guard < 60 {
+        hi *= 2.0;
+        guard += 1;
+    }
+    // NaN fails both comparisons.
+    if !(g(lo) >= 0.0 && g(hi) <= 0.0) {
+        return Err(CellError::Num);
+    }
+    for _ in 0..200 {
+        let mid = 0.5 * (lo + hi);
+        if g(mid) > 0.0 {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    num_val(0.5 * (lo + hi))
+}
+
+/// Σ DCi/NLi, Σ Ai/NLi and Σ DSCi/NLi over an odd last period.
+fn odd_last(settle: f64, mat: f64, last: f64, freq: f64, basis: u32) -> R<(f64, f64, f64)> {
+    if !(mat > settle && settle > last) {
+        return Err(CellError::Num);
+    }
+    let anchor = ymd(last)?;
+    let eom = anchor.2 == days_in_month(anchor.0, anchor.1);
+    let step = (12.0 / freq) as i64;
+    let (mut dc, mut acc, mut dsc) = (0.0, 0.0, 0.0);
+    // Walk forward from the last interest date: period k runs from quasi(k - 1) to quasi(k).
+    let mut start = last;
+    let mut k = 1;
+    loop {
+        if k > MAX_QUASI {
+            return Err(CellError::Num);
+        }
+        let end = shift_months(anchor, k * step, eom)?;
+        let nl = normal_length(start, end, freq, basis);
+        if nl <= 0.0 {
+            return Err(CellError::Num);
+        }
+        let stop = end.min(mat);
+        dc += span(start, stop, basis)? / nl;
+        acc += span(start, settle.min(stop), basis)? / nl;
+        dsc += span(settle.max(start), stop, basis)? / nl;
+        if end >= mat {
+            break;
+        }
+        start = end;
+        k += 1;
+    }
+    Ok((dc, acc, dsc))
+}
+
+/// settlement, maturity, last_interest, rate, yld/pr, redemption, frequency, [basis].
+fn odd_last_args(a: &[Arg]) -> R<((f64, f64, f64), f64, f64, f64, f64)> {
+    let (s, m, last) = (date(a, 0)?, date(a, 1)?, date(a, 2)?);
+    let (rate, x, red) = (num(a, 3)?, num(a, 4)?, num(a, 5)?);
+    let (f, basis) = (freq_arg(a, 6)?, basis_arg(a, 7)?);
+    if rate < 0.0 || red <= 0.0 {
+        return Err(CellError::Num);
+    }
+    Ok((odd_last(s, m, last, f, basis)?, rate, x, red, f))
+}
+
+fn oddlprice(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+    let ((dc, acc, dsc), rate, yld, red, f) = odd_last_args(a)?;
+    if yld < 0.0 {
+        return Err(CellError::Num);
+    }
+    let coupon = 100.0 * rate / f;
+    num_val((red + dc * coupon) / (1.0 + dsc * yld / f) - acc * coupon)
+}
+
+fn oddlyield(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+    let ((dc, acc, dsc), rate, pr, red, f) = odd_last_args(a)?;
+    if pr <= 0.0 {
+        return Err(CellError::Num);
+    }
+    let coupon = 100.0 * rate / f;
+    let paid = pr + acc * coupon;
+    if paid <= 0.0 || dsc <= 0.0 {
+        return Err(CellError::Num);
+    }
+    num_val((red + dc * coupon - paid) / paid * f / dsc)
+}
+
 pub(crate) fn specs() -> Vec<FnSpec> {
     vec![
         f!(
@@ -1440,6 +1646,46 @@ pub(crate) fn specs() -> Vec<FnSpec> {
             "Modified duration of a security with periodic interest.",
             mduration
         ),
+        f!(
+            "ODDFPRICE",
+            8,
+            9,
+            Financial,
+            S,
+            "ODDFPRICE(settlement, maturity, issue, first_coupon, rate, yld, redemption, frequency, [basis])",
+            "Price per 100 face value of a security with an odd first period.",
+            oddfprice
+        ),
+        f!(
+            "ODDFYIELD",
+            8,
+            9,
+            Financial,
+            S,
+            "ODDFYIELD(settlement, maturity, issue, first_coupon, rate, pr, redemption, frequency, [basis])",
+            "Yield of a security with an odd first period.",
+            oddfyield
+        ),
+        f!(
+            "ODDLPRICE",
+            7,
+            8,
+            Financial,
+            S,
+            "ODDLPRICE(settlement, maturity, last_interest, rate, yld, redemption, frequency, [basis])",
+            "Price per 100 face value of a security with an odd last period.",
+            oddlprice
+        ),
+        f!(
+            "ODDLYIELD",
+            7,
+            8,
+            Financial,
+            S,
+            "ODDLYIELD(settlement, maturity, last_interest, rate, pr, redemption, frequency, [basis])",
+            "Yield of a security with an odd last period.",
+            oddlyield
+        ),
     ]
 }
 
@@ -1597,6 +1843,77 @@ mod tests {
             _ => panic!(),
         };
         close_tol(ev("YIELD", vec![d(2008, 2, 15), d(2008, 6, 15), n(0.05), n(pv), n(100.0), n(2.0)]), 0.04, 1e-9);
+    }
+
+    fn number(v: Value) -> f64 {
+        match v {
+            Value::Number(x) => x,
+            other => panic!("expected a number, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn odd_periods() {
+        // The worked examples on Microsoft's function pages (results as printed there).
+        let first = |x: f64, rest: &[f64]| {
+            let mut a = vec![d(2008, 11, 11), d(2021, 3, 1), d(2008, 10, 15), d(2009, 3, 1), n(x)];
+            a.extend(rest.iter().map(|v| n(*v)));
+            a
+        };
+        close_tol(ev("ODDFPRICE", first(0.0785, &[0.0625, 100.0, 2.0, 1.0])), 113.60, 0.005 / 113.6);
+        close_tol(ev("ODDFYIELD", first(0.0575, &[84.50, 100.0, 2.0, 0.0])), 0.0772, 0.00005);
+        let lp = vec![d(2008, 2, 7), d(2008, 6, 15), d(2007, 10, 15), n(0.0375), n(0.0405), n(100.0), n(2.0), n(0.0)];
+        close_tol(ev("ODDLPRICE", lp), 99.88, 0.005 / 99.88);
+        let ly = vec![d(2008, 4, 20), d(2008, 6, 15), d(2007, 12, 24), n(0.0375), n(99.875), n(100.0), n(2.0), n(0.0)];
+        close_tol(ev("ODDLYIELD", ly), 0.04519, 0.000005);
+
+        // Yield → price → yield, for a short and a long odd first period and a long odd last period.
+        for (issue, basis) in [(d(2008, 10, 15), 0.0), (d(2007, 1, 20), 1.0), (d(2008, 1, 31), 3.0)] {
+            let args = |x: f64| vec![d(2008, 11, 11), d(2021, 3, 1), issue.clone(), d(2009, 3, 1), n(0.06), n(x), n(100.0), n(2.0), n(basis)];
+            let p = number(ev("ODDFPRICE", args(0.05)));
+            close_tol(ev("ODDFYIELD", args(p)), 0.05, 1e-9);
+        }
+        let last = |x: f64| vec![d(2009, 2, 1), d(2009, 12, 15), d(2008, 3, 15), n(0.04), n(x), n(100.0), n(4.0), n(1.0)];
+        let p = number(ev("ODDLPRICE", last(0.07)));
+        close_tol(ev("ODDLYIELD", last(p)), 0.07, 1e-9);
+
+        // Argument checks: frequency, basis, date order, negative yield, non-positive price.
+        is_err(ev("ODDFPRICE", first(0.0785, &[0.0625, 100.0, 3.0, 1.0])), CellError::Num);
+        is_err(ev("ODDFPRICE", first(0.0785, &[0.0625, 100.0, 2.0, 5.0])), CellError::Num);
+        is_err(ev("ODDFPRICE", first(0.0785, &[-0.01, 100.0, 2.0, 1.0])), CellError::Num);
+        is_err(ev("ODDFYIELD", first(0.0575, &[0.0, 100.0, 2.0, 0.0])), CellError::Num);
+        is_err(
+            ev("ODDFPRICE", vec![d(2009, 4, 1), d(2021, 3, 1), d(2008, 10, 15), d(2009, 3, 1), n(0.07), n(0.06), n(100.0), n(2.0)]),
+            CellError::Num,
+        );
+        is_err(ev("ODDLPRICE", vec![d(2007, 10, 1), d(2008, 6, 15), d(2007, 10, 15), n(0.0375), n(0.0405), n(100.0), n(2.0)]), CellError::Num);
+        is_err(ev("ODDLYIELD", vec![d(2008, 4, 20), d(2008, 6, 15), d(2007, 12, 24), n(0.0375), n(-1.0), n(100.0), n(2.0)]), CellError::Num);
+        is_err(
+            ev("ODDFPRICE", first(0.0785, &[0.0625, 100.0, 2.0, 1.0]).into_iter().take(4).chain([t("x"), n(0.06), n(100.0), n(2.0)]).collect()),
+            CellError::Value,
+        );
+    }
+
+    #[test]
+    fn odd_periods_survive_hostile_input() {
+        // Quarterly quasi-periods across the whole date range, huge rates and yields: a value or
+        // an error, never a panic or a hang.
+        let wide = |x: f64, y: f64| vec![n(2_957_000.0), n(2_958_465.0), n(400.0), n(2_957_900.0), n(x), n(y), n(1e300), n(4.0), n(1.0)];
+        for (x, y) in [(0.05, 0.05), (1e300, 1e300), (0.0, 1e-300)] {
+            let _ = ev("ODDFPRICE", wide(x, y));
+            let _ = ev("ODDFYIELD", wide(x, y));
+        }
+        // The long walk itself works: settled early in an odd first period of ~32,000 quarters,
+        // a small yield round-trips.
+        let long = |y: f64| vec![n(500.0), n(2_958_465.0), n(400.0), n(2_957_900.0), n(0.05), n(y), n(100.0), n(4.0), n(1.0)];
+        let p = number(ev("ODDFPRICE", long(0.0001)));
+        close_tol(ev("ODDFYIELD", long(p)), 0.0001, 1e-9);
+        let last = |x: f64, y: f64| vec![n(2_958_000.0), n(2_958_465.0), n(400.0), n(x), n(y), n(1e300), n(4.0), n(1.0)];
+        for (x, y) in [(0.05, 0.05), (1e300, 1e300), (0.0, f64::MAX)] {
+            let _ = ev("ODDLPRICE", last(x, y));
+            let _ = ev("ODDLYIELD", last(x, y));
+        }
+        is_err(ev("ODDFPRICE", vec![n(-5.0), n(1e20), n(0.0), n(1e10), n(0.05), n(0.05), n(100.0), n(2.0)]), CellError::Num);
     }
 
     #[test]
