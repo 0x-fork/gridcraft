@@ -1,10 +1,17 @@
 //! Integration-style tests: round trips, hand-written fixtures, hostile input and CSV.
 
+mod array_export;
 mod csv_tests;
 mod fixtures;
 mod malformed;
+mod ods_tests;
+mod passthrough_tests;
 mod pivot_tests;
+mod richdata_tests;
 mod roundtrip;
+mod smooth_roundtrip;
+mod xls_tests;
+mod xlsb_tests;
 
 use std::io::Write;
 

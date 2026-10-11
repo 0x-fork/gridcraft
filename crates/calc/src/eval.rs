@@ -13,6 +13,10 @@ use gridcraft_model::Workbook;
 
 /// Largest array a reference may expand to.
 pub const MAX_CELLS: u64 = 16_000_000;
+/// References up to this many cells are read at their full size; larger ones (`A:A`, ranges
+/// reserved for data to come such as `$A$2:$A$50000`) stop at the sheet's used range, so that
+/// formulas over them stay fast.
+const FULL_SIZE_CELLS: u64 = 16_384;
 const MAX_DEPTH: usize = 400;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -54,9 +58,23 @@ pub trait Host {
     fn random(&mut self) -> f64;
     /// Called when a volatile or dynamic-reference function is used.
     fn note_volatile(&mut self) {}
+    /// The spill range of the dynamic array anchored at `anchor` (`None`: it doesn't spill).
+    fn spill_range(&mut self, sheet: usize, anchor: CellRef) -> Option<RangeRef> {
+        self.workbook().sheet(sheet)?.spill_ranges.get(&anchor).copied()
+    }
     /// Values of a block, row-major. Hosts can override with a sparse fast path.
     fn range_values(&mut self, sheet: usize, range: RangeRef) -> Vec<Value> {
         range.iter().map(|c| self.cell_value(sheet, c)).collect()
+    }
+    /// The sheet's used range (`Sheet::used_range`, which walks every stored row). Hosts that
+    /// keep the workbook unchanged while evaluating can remember it.
+    fn used_range(&mut self, sheet: usize) -> Option<RangeRef> {
+        self.workbook().sheet(sheet).and_then(|s| s.used_range())
+    }
+    /// Calls `f` on each stored value of a block, row-major (formula cells evaluated first),
+    /// until `f` returns false. `false` when this host can't (callers use `range_values`).
+    fn visit_range(&mut self, _sheet: usize, _range: RangeRef, _f: &mut dyn FnMut(&Value) -> bool) -> bool {
+        false
     }
 }
 
@@ -129,7 +147,10 @@ impl<'h> Evaluator<'h> {
         if a.range.is_single() {
             return self.host.cell_value(a.sheet, a.range.start);
         }
-        let range = self.trim(a);
+        // A reference keeps its size, so the array has its shape and its blanks count
+        // (`=A1:A10`, `SUMPRODUCT(--(A1:A10=""))`).
+        let cells = u64::from(a.range.height()) * u64::from(a.range.width());
+        let range = if cells > FULL_SIZE_CELLS { self.trim(a) } else { a.range };
         let (h, w) = (range.height() as usize, range.width() as usize);
         if (h as u64) * (w as u64) > MAX_CELLS {
             return Value::Error(CellError::Num);
@@ -140,9 +161,11 @@ impl<'h> Evaluator<'h> {
 
     /// Trims the bottom/right of an area to the sheet's used range (keeps the top-left so
     /// positions stay right).
-    pub fn trim(&self, a: &Area) -> RangeRef {
-        let Some(sheet) = self.host.workbook().sheet(a.sheet) else { return a.range };
-        let used = sheet.used_range();
+    pub fn trim(&mut self, a: &Area) -> RangeRef {
+        if self.host.workbook().sheet(a.sheet).is_none() {
+            return a.range;
+        }
+        let used = self.host.used_range(a.sheet);
         let (mut r1, mut c1) = (a.range.end.row, a.range.end.col);
         match used {
             Some(u) => {
@@ -322,6 +345,19 @@ impl<'h> Evaluator<'h> {
     }
 
     fn unary(&mut self, op: UnOp, x: &Expr) -> Ev {
+        if op == UnOp::Spill {
+            return match self.eval(x) {
+                Ev::R(areas) => match areas.as_slice() {
+                    [a] if a.range.is_single() => match self.host.spill_range(a.sheet, a.range.start) {
+                        Some(range) => Ev::R(vec![Area { sheet: a.sheet, range }]),
+                        None => err(CellError::Ref),
+                    },
+                    _ => err(CellError::Ref),
+                },
+                Ev::V(Value::Error(e)) => err(e),
+                _ => err(CellError::Ref),
+            };
+        }
         if op == UnOp::At {
             let ev = self.eval(x);
             return match ev {
@@ -343,7 +379,7 @@ impl<'h> Evaluator<'h> {
                 UnOp::Neg => Value::number(-n),
                 UnOp::Plus => Value::number(n),
                 UnOp::Percent => Value::number(n / 100.0),
-                UnOp::At => Value::number(n),
+                UnOp::At | UnOp::Spill => Value::number(n),
             },
             op == UnOp::Plus,
         ))
@@ -523,7 +559,20 @@ impl<'h> Evaluator<'h> {
                 if args.len() < 2 {
                     return err(CellError::Value);
                 }
-                let i = match self.arg_num(args, 0, 0.0) {
+                let index = self.value(&args[0]);
+                if let Value::Array(_) = index {
+                    // An array of indexes picks element by element: `CHOOSE({1,2},A1:A3,B1:B3)`
+                    // is a two-column array. The library CHOOSE lifts over its arguments.
+                    let Some(spec) = gridcraft_functions::lookup(name) else { return err(CellError::Name) };
+                    let mut evaluated = vec![Arg { value: index, from_ref: false }];
+                    for a in &args[1..] {
+                        let value = self.value(a);
+                        evaluated.push(Arg { value, from_ref: false });
+                    }
+                    let mut ctx = FnCtx { ev: self };
+                    return gridcraft_functions::call(spec, &evaluated, &mut ctx).pipe(Ev::V);
+                }
+                let i = match index.to_number() {
                     Ok(n) => n.trunc() as i64,
                     Err(e) => return err(e),
                 };
@@ -633,6 +682,7 @@ impl<'h> Evaluator<'h> {
             "INDIRECT" => self.indirect(args),
             "INDEX" => self.index(args),
             "CELL" => self.cell_info(args),
+            "TRIMRANGE" => self.trimrange(args),
             "SUBTOTAL" | "AGGREGATE" => self.subtotal(name, args),
             "TEXT" => {
                 if args.len() != 2 {
@@ -695,9 +745,24 @@ impl<'h> Evaluator<'h> {
         if args.len() < spec.min_args || args.len() > spec.max_args {
             return err(CellError::Value);
         }
+        if let Some(kind) = Agg::of(spec.name) {
+            return self.aggregate(kind, args);
+        }
         let mut evaluated = Vec::with_capacity(args.len());
-        for a in args {
-            let ev = self.eval(a);
+        // SUMIF/AVERAGEIF: the size of the criteria range (argument 1), which the sum range takes.
+        let mut criteria_shape = None;
+        for (i, a) in args.iter().enumerate() {
+            let mut ev = self.eval(a);
+            if resizes_sum_range(name, args.len()) {
+                if i == 0 {
+                    criteria_shape = ev_shape(&ev);
+                } else if i == 2
+                    && let (Some((h, w)), Ev::R(areas)) = (criteria_shape, &ev)
+                    && let [area] = areas.as_slice()
+                {
+                    ev = Ev::R(vec![Area { sheet: area.sheet, range: resized_sum_range(area.range, h, w) }]);
+                }
+            }
             let from_ref = matches!(ev, Ev::R(_));
             let value = match ev {
                 Ev::R(areas) if areas.len() > 1 => {
@@ -717,6 +782,70 @@ impl<'h> Evaluator<'h> {
         }
         let mut ctx = FnCtx { ev: self };
         gridcraft_functions::call(spec, &evaluated, &mut ctx).pipe(Ev::V)
+    }
+
+    /// Performs aggregation operations without copying its ranges: blocks are folded over the stored
+    /// cells, so no array is built and there is no `MAX_CELLS` limit. Arguments are evaluated and read one
+    /// after another, as the array path does, so volatile formulas (like `RAND`) see the same order.
+    /// Only `SUM`, `COUNT` and `AVG` are supported currently.
+    fn aggregate(&mut self, kind: Agg, args: &[Expr]) -> Ev {
+        let mut acc = Acc::default();
+        let mut first_error = None;
+        for a in args {
+            let ev = self.eval(a);
+            let steps = match ev {
+                Ev::R(areas) => areas.iter().map(|area| self.aggregate_area(kind, area, &mut acc)).collect(),
+                ev => {
+                    let value = self.deref(ev);
+                    vec![self.aggregate_value(kind, value, false, &mut acc)]
+                }
+            };
+            if first_error.is_none() {
+                first_error = steps.into_iter().find_map(Result::err);
+            }
+        }
+        first_error.unwrap_or_else(|| Ev::V(acc.finish(kind)))
+    }
+
+    /// Adds one area to `acc`; `Err` is the result the function ends with.
+    fn aggregate_area(&mut self, kind: Agg, a: &Area, acc: &mut Acc) -> Result<(), Ev> {
+        if !a.range.is_single() {
+            let mut error = None;
+            let walked = self.host.visit_range(a.sheet, a.range, &mut |v| match acc.add_cell(kind, v) {
+                Ok(()) => true,
+                Err(e) => {
+                    error = Some(e);
+                    false
+                }
+            });
+            if walked {
+                return error.map_or(Ok(()), |e| Err(err(e)));
+            }
+        }
+        let value = self.area_value(a);
+        self.aggregate_value(kind, value, true, acc)
+    }
+
+    /// Adds one argument's value by calling `SUM` and `COUNT` on it, so coercion and error rules
+    /// stay in one place (`AVERAGE` of an argument is its `SUM` over its `COUNT`).
+    fn aggregate_value(&mut self, kind: Agg, value: Value, from_ref: bool, acc: &mut Acc) -> Result<(), Ev> {
+        let (Some(sum), Some(count)) = (gridcraft_functions::lookup("SUM"), gridcraft_functions::lookup("COUNT")) else {
+            return Err(err(CellError::Name));
+        };
+        let args = [Arg { value, from_ref }];
+        if kind != Agg::Count {
+            match gridcraft_functions::call(sum, &args, &mut FnCtx { ev: self }) {
+                Value::Number(n) => acc.sum += n,
+                other => return Err(Ev::V(other)),
+            }
+        }
+        if kind != Agg::Sum {
+            match gridcraft_functions::call(count, &args, &mut FnCtx { ev: self }) {
+                Value::Number(n) => acc.count = acc.count.saturating_add(n as u64),
+                other => return Err(Ev::V(other)),
+            }
+        }
+        Ok(())
     }
 
     pub fn apply_lambda(&mut self, l: &Lambda, args: &[Expr]) -> Ev {
@@ -881,7 +1010,7 @@ impl<'h> Evaluator<'h> {
     }
 
     /// Whole rows/columns trimmed for ROW()/COLUMN() arrays.
-    fn trim_lines(&self, a: &Area) -> RangeRef {
+    fn trim_lines(&mut self, a: &Area) -> RangeRef {
         if a.range.is_full_cols() || a.range.is_full_rows() { self.trim(a) } else { a.range }
     }
 
@@ -1196,6 +1325,57 @@ pub fn r1c1_to_a1(s: &str, at: CellRef) -> Option<String> {
     Some(format!("{sheet}{out}"))
 }
 
+/// The aggregates that can fold a reference without building an array.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Agg {
+    Sum,
+    Count,
+    Average,
+}
+
+impl Agg {
+    fn of(name: &str) -> Option<Agg> {
+        match name {
+            "SUM" => Some(Agg::Sum),
+            "COUNT" => Some(Agg::Count),
+            "AVERAGE" => Some(Agg::Average),
+            _ => None,
+        }
+    }
+}
+
+/// What a folded aggregate carries from one value to the next.
+#[derive(Default)]
+struct Acc {
+    sum: f64,
+    count: u64,
+}
+
+impl Acc {
+    /// Takes a value found inside a reference: only numbers count. `Err` is an error value that
+    /// ends `SUM` and `AVERAGE`; `COUNT` skips errors.
+    fn add_cell(&mut self, kind: Agg, v: &Value) -> Result<(), CellError> {
+        match v {
+            Value::Number(n) => {
+                self.sum += n;
+                self.count = self.count.saturating_add(1);
+                Ok(())
+            }
+            Value::Error(e) if kind != Agg::Count => Err(*e),
+            _ => Ok(()),
+        }
+    }
+
+    fn finish(&self, kind: Agg) -> Value {
+        match kind {
+            Agg::Sum => Value::number(self.sum),
+            Agg::Count => Value::number(self.count as f64),
+            Agg::Average if self.count == 0 => Value::Error(CellError::Div0),
+            Agg::Average => Value::number(self.sum / self.count as f64),
+        }
+    }
+}
+
 // ---------------------------------------------------------------- operators
 
 fn map_unary(v: &Value, f: &dyn Fn(f64) -> Value, plus: bool) -> Value {
@@ -1306,30 +1486,64 @@ fn binary_scalar(op: BinOp, a: &Value, b: &Value) -> Value {
     }
 }
 
+/// SUMIF and AVERAGEIF with a sum range: Excel sizes the sum range like the criteria range.
+fn resizes_sum_range(name: &str, args: usize) -> bool {
+    args == 3 && matches!(name, "SUMIF" | "AVERAGEIF")
+}
+
+/// Height and width of a single-area reference or an array argument.
+fn ev_shape(ev: &Ev) -> Option<(u32, u32)> {
+    match ev {
+        Ev::R(areas) => match areas.as_slice() {
+            [a] => Some((a.range.height(), a.range.width())),
+            _ => None,
+        },
+        Ev::V(Value::Array(a)) => Some((u32::try_from(a.rows).unwrap_or(u32::MAX), u32::try_from(a.cols).unwrap_or(u32::MAX))),
+        Ev::V(_) => Some((1, 1)),
+        Ev::L(_) => None,
+    }
+}
+
+/// The range SUMIF/AVERAGEIF add up: from the sum range's top-left cell, as many rows and columns
+/// as the criteria range (`height` × `width`), cut off at the sheet's edge.
+pub fn resized_sum_range(sum: RangeRef, height: u32, width: u32) -> RangeRef {
+    let row = sum.start.row.saturating_add(height.saturating_sub(1)).min(MAX_ROWS - 1);
+    let col = sum.start.col.saturating_add(width.saturating_sub(1)).min(MAX_COLS - 1);
+    RangeRef::new(sum.start, CellRef::new(row, col))
+}
+
 /// Collects the static references of an expression with their sheets resolved; `dynamic` is
 /// set when the formula uses INDIRECT/OFFSET/names/tables whose targets can change.
 pub fn precedents(wb: &Workbook, sheet: usize, e: &Expr) -> (Vec<Area>, bool) {
     let mut out = Vec::new();
     let mut dynamic = false;
-    e.walk(&mut |x| match x {
-        Expr::Ref(r) => {
-            let range = r.range();
-            match &r.sheet {
-                SheetSel::Current => out.push(Area { sheet, range }),
-                SheetSel::Named(n) => {
-                    if let Some(i) = wb.sheet_index(n) {
-                        out.push(Area { sheet: i, range });
-                    }
-                }
-                SheetSel::Span(a, b) => {
-                    if let (Some(i), Some(j)) = (wb.sheet_index(a), wb.sheet_index(b)) {
-                        for s in i.min(j)..=i.max(j) {
-                            out.push(Area { sheet: s, range });
-                        }
-                    }
+    let push = |out: &mut Vec<Area>, r: &Reference, range: RangeRef| match &r.sheet {
+        SheetSel::Current => out.push(Area { sheet, range }),
+        SheetSel::Named(n) => {
+            if let Some(i) = wb.sheet_index(n) {
+                out.push(Area { sheet: i, range });
+            }
+        }
+        SheetSel::Span(a, b) => {
+            if let (Some(i), Some(j)) = (wb.sheet_index(a), wb.sheet_index(b)) {
+                for s in i.min(j)..=i.max(j) {
+                    out.push(Area { sheet: s, range });
                 }
             }
         }
+    };
+    e.walk(&mut |x| match x {
+        Expr::Ref(r) => push(&mut out, r, r.range()),
+        // The cells SUMIF/AVERAGEIF really read from the sum range (see `resized_sum_range`); when
+        // the criteria range's size isn't known statically, recalculate the formula every time.
+        Expr::Call(n, args) if resizes_sum_range(n, args.len()) => match (args.first(), args.get(2)) {
+            (Some(Expr::Ref(c)), Some(Expr::Ref(s))) => {
+                let (crit, sum) = (c.range(), s.range());
+                push(&mut out, s, resized_sum_range(sum, crit.height(), crit.width()));
+            }
+            (_, Some(Expr::Number(_) | Expr::Text(_) | Expr::Bool(_) | Expr::Error(_) | Expr::Array(_) | Expr::Missing)) => {}
+            _ => dynamic = true,
+        },
         Expr::Call(n, _)
             if matches!(n.as_str(), "INDIRECT" | "OFFSET" | "NOW" | "TODAY" | "RAND" | "RANDBETWEEN" | "RANDARRAY" | "CELL" | "INFO") =>
         {
@@ -1337,6 +1551,20 @@ pub fn precedents(wb: &Workbook, sheet: usize, e: &Expr) -> (Vec<Area>, bool) {
         }
         Expr::Name(_) | Expr::Struct(_) => dynamic = true,
         Expr::Call(n, _) if gridcraft_functions::lookup(n).is_none() && !is_special(n) => dynamic = true,
+        // A range ending in a function's result (`A1:INDEX(B1:B9,n)`) covers the cells between
+        // the references inside it, not only those references.
+        Expr::Binary(BinOp::Range, a, b) if !matches!((&**a, &**b), (Expr::Ref(_), Expr::Ref(_))) => {
+            let mut inner = precedents(wb, sheet, a).0;
+            inner.extend(precedents(wb, sheet, b).0);
+            let mut boxes: Vec<Area> = Vec::new();
+            for area in inner {
+                match boxes.iter_mut().find(|x| x.sheet == area.sheet) {
+                    Some(x) => x.range = x.range.union(&area.range),
+                    None => boxes.push(area),
+                }
+            }
+            out.extend(boxes);
+        }
         _ => {}
     });
     (out, dynamic)
@@ -1364,6 +1592,7 @@ fn is_special(n: &str) -> bool {
             | "INDIRECT"
             | "INDEX"
             | "CELL"
+            | "TRIMRANGE"
             | "SUBTOTAL"
             | "AGGREGATE"
             | "TEXT"
@@ -1401,6 +1630,7 @@ pub const SPECIAL_FUNCTIONS: &[&str] = &[
     "INDIRECT",
     "INDEX",
     "CELL",
+    "TRIMRANGE",
     "SUBTOTAL",
     "AGGREGATE",
     "TEXT",

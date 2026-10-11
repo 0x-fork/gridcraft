@@ -58,7 +58,7 @@ pub fn specs() -> Vec<CommandSpec> {
 }
 
 /// Sheet geometry is in pixels at 96 dpi; PDF units are points.
-const PX_TO_PT: f32 = 0.75;
+pub(crate) const PX_TO_PT: f32 = 0.75;
 /// Most pages one export produces.
 pub const MAX_PAGES: usize = 2000;
 /// Cells in a page block above which only stored cells are visited (not every grid position).
@@ -110,13 +110,15 @@ pub struct SheetLayout {
     /// Heading sizes in sheet pixels (0 when headings are off).
     pub heading_w: f32,
     pub heading_h: f32,
+    /// Manual page breaks apply (they don't when the sheet is fitted to pages).
+    pub manual_breaks: bool,
 }
 
 impl SheetLayout {
     fn k(&self) -> f32 {
         PX_TO_PT * self.scale
     }
-    fn avail(&self) -> (f32, f32) {
+    pub(crate) fn avail(&self) -> (f32, f32) {
         let [l, r, t, b, ..] = self.margins;
         ((self.page_w - l - r).max(36.0), (self.page_h - t - b).max(36.0))
     }
@@ -271,30 +273,11 @@ pub fn layout_sheet(wb: &Workbook, si: usize, opts: &PrintOptions, range_overrid
         title_cols,
         heading_w,
         heading_h,
+        manual_breaks: fit.is_none(),
     };
     let paginate = |lay: &mut SheetLayout, manual: bool| {
-        let k = lay.k();
-        let (aw, ah) = lay.avail();
-        let (aw, ah) = (aw / k, ah / k);
-        let rb: Vec<u32> = if manual { st.row_breaks.clone() } else { vec![] };
-        let cb: Vec<u32> = if manual { st.col_breaks.clone() } else { vec![] };
-        let (mut rb, mut cb) = (rb, cb);
-        rb.sort_unstable();
-        cb.sort_unstable();
-        let title_h = |start: u32| -> f32 {
-            match title_rows {
-                Some((a, b)) if a < start => (a..=b.min(start - 1)).map(|r| sh.row_height(r)).sum(),
-                _ => 0.0,
-            }
-        };
-        let title_w = |start: u32| -> f32 {
-            match title_cols {
-                Some((a, b)) if a < start => (a..=b.min(start - 1)).map(|c| sh.col_width(c)).sum(),
-                _ => 0.0,
-            }
-        };
-        lay.row_bands = bands(area.start.row, area.end.row, |r| sh.row_height(r), |start| (ah - heading_h - title_h(start)).max(1.0), &rb, MAX_PAGES);
-        lay.col_bands = bands(area.start.col, area.end.col, |c| sh.col_width(c), |start| (aw - heading_w - title_w(start)).max(1.0), &cb, MAX_PAGES);
+        lay.manual_breaks = manual;
+        (lay.row_bands, lay.col_bands) = split_bands(sh, lay, MAX_PAGES);
         lay.pages.clear();
         'outer: for ci in 0..lay.col_bands.len() {
             for ri in 0..lay.row_bands.len() {
@@ -330,6 +313,37 @@ pub fn layout_sheet(wb: &Workbook, si: usize, opts: &PrintOptions, range_overrid
         None => paginate(&mut lay, true),
     }
     Some(lay)
+}
+
+/// Splits a layout's area into row and column bands that fit its pages (at most `cap` of each),
+/// honouring manual breaks (when `lay.manual_breaks`), print headings and repeated titles. The
+/// one pagination rule shared by printing, PDF export, Page Break Preview and Page Layout view.
+pub(crate) fn split_bands(sh: &Sheet, lay: &SheetLayout, cap: usize) -> (Vec<(u32, u32)>, Vec<(u32, u32)>) {
+    let k = lay.k();
+    let (aw, ah) = lay.avail();
+    let (aw, ah) = (aw / k, ah / k);
+    let st = &lay.settings;
+    let mut rb: Vec<u32> = if lay.manual_breaks { st.row_breaks.clone() } else { vec![] };
+    let mut cb: Vec<u32> = if lay.manual_breaks { st.col_breaks.clone() } else { vec![] };
+    rb.sort_unstable();
+    cb.sort_unstable();
+    let (title_rows, title_cols) = (lay.title_rows, lay.title_cols);
+    let title_h = |start: u32| -> f32 {
+        match title_rows {
+            Some((a, b)) if a < start => (a..=b.min(start - 1)).map(|r| sh.row_height(r)).sum(),
+            _ => 0.0,
+        }
+    };
+    let title_w = |start: u32| -> f32 {
+        match title_cols {
+            Some((a, b)) if a < start => (a..=b.min(start - 1)).map(|c| sh.col_width(c)).sum(),
+            _ => 0.0,
+        }
+    };
+    let area = lay.area;
+    let rows = bands(area.start.row, area.end.row, |r| sh.row_height(r), |start| (ah - lay.heading_h - title_h(start)).max(1.0), &rb, cap);
+    let cols = bands(area.start.col, area.end.col, |c| sh.col_width(c), |start| (aw - lay.heading_w - title_w(start)).max(1.0), &cb, cap);
+    (rows, cols)
 }
 
 /// Lays out every sheet a print command covers.
@@ -373,6 +387,132 @@ pub struct HfContext {
     pub path: String,
     pub date: String,
     pub time: String,
+}
+
+/// Today's date and the current time as headers and footers show them (`&D`, `&T`).
+pub fn hf_date_time(wb: &Workbook) -> (String, String) {
+    let now = gridcraft_calc::now_serial();
+    let date = crate::display::format(&Value::Number(now.floor()), "m/d/yyyy", wb).text;
+    let time = crate::display::format(&Value::Number(now), "h:mm AM/PM", wb).text;
+    (date, time)
+}
+
+/// Header/footer codes and the field names the Page Layout view shows for them while editing.
+pub const HF_FIELDS: [(char, &str); 8] = [
+    ('P', "&[Page]"),
+    ('N', "&[Pages]"),
+    ('D', "&[Date]"),
+    ('T', "&[Time]"),
+    ('Z', "&[Path]"),
+    ('F', "&[File]"),
+    ('A', "&[Tab]"),
+    ('G', "&[Picture]"),
+];
+
+/// Splits a header/footer string into its raw left, centre and right sections (codes kept).
+/// Text before the first `&L`/`&C`/`&R` belongs to the centre, as when printing.
+pub fn split_header_footer(spec: &str) -> [String; 3] {
+    let mut out: [String; 3] = Default::default();
+    let mut cur = 1usize;
+    let chars: Vec<char> = spec.chars().take(10_000).collect();
+    let mut i = 0;
+    while let Some(&c) = chars.get(i) {
+        let next = chars.get(i + 1).copied();
+        let sec = cur.min(2);
+        match (c, next) {
+            ('&', Some('L' | 'l')) => cur = 0,
+            ('&', Some('C' | 'c')) => cur = 1,
+            ('&', Some('R' | 'r')) => cur = 2,
+            ('&', Some('"')) => {
+                // &"Font,Style" is kept whole.
+                let end = chars[i + 2..].iter().position(|ch| *ch == '"').map_or(chars.len(), |p| i + 3 + p);
+                out[sec].extend(&chars[i..end.min(chars.len())]);
+                i = end;
+                continue;
+            }
+            ('&', Some(n)) => {
+                out[sec].push('&');
+                out[sec].push(n);
+            }
+            ('&', None) => {}
+            (ch, _) => {
+                out[sec].push(ch);
+                i += 1;
+                continue;
+            }
+        }
+        i += 2;
+    }
+    out
+}
+
+/// Joins raw left, centre and right sections into one header/footer string.
+pub fn join_header_footer(sections: &[String; 3]) -> String {
+    let mut s = String::new();
+    for (code, text) in ["&L", "&C", "&R"].iter().zip(sections) {
+        if !text.is_empty() {
+            s.push_str(code);
+            s.push_str(text);
+        }
+    }
+    s
+}
+
+/// A raw section as the user edits it: `&P` shows as `&[Page]`, `&N` as `&[Pages]`, and so on.
+pub fn codes_to_fields(raw: &str) -> String {
+    let mut out = String::new();
+    let mut it = raw.chars().peekable();
+    while let Some(c) = it.next() {
+        if c != '&' {
+            out.push(c);
+            continue;
+        }
+        // A dangling `&` at the end is dropped (printing ignores it too).
+        if let Some(n) = it.next() {
+            match HF_FIELDS.iter().find(|(code, _)| *code == n.to_ascii_uppercase()) {
+                Some((_, field)) => out.push_str(field),
+                None => {
+                    out.push('&');
+                    out.push(n);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The inverse of [`codes_to_fields`]: field names become codes again; a dangling `&` at the end
+/// becomes a literal ampersand so it can't swallow the next section's code.
+pub fn fields_to_codes(text: &str) -> String {
+    let chars: Vec<char> = text.chars().take(10_000).collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while let Some(&c) = chars.get(i) {
+        if c != '&' {
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if chars.get(i + 1) == Some(&'&') {
+            out.push_str("&&");
+            i += 2;
+            continue;
+        }
+        let rest: String = chars[i..].iter().take(12).collect();
+        if let Some((code, field)) = HF_FIELDS.iter().find(|(_, f)| rest.starts_with(f)) {
+            out.push('&');
+            out.push(*code);
+            i += field.chars().count();
+            continue;
+        }
+        if i + 1 == chars.len() {
+            out.push_str("&&");
+        } else {
+            out.push('&');
+        }
+        i += 1;
+    }
+    out
 }
 
 /// One header/footer section: its text and whether `&B` made it bold.
@@ -847,9 +987,39 @@ fn draw_block(pg: &mut Page, b: &Block, gridlines: bool, cf: &mut Option<crate::
         if w <= 0.0 || h <= 0.0 {
             continue;
         }
-        draw_text(pg, b, *c, l, (x, y, w, h), merged, &merges, (bx, bx + bw));
+        if let Some(picture) = sh.cell_pictures.get(c) {
+            draw_cell_picture(pg, &picture.data, (x, y, w, h), b.k);
+        } else {
+            draw_text(pg, b, *c, l, (x, y, w, h), merged, &merges, (bx, bx + bw));
+        }
     }
     pg.restore();
+}
+
+/// Cell pictures fit the current cell (or merged-cell) rectangle without changing aspect ratio.
+fn draw_cell_picture(pg: &mut Page, data: &[u8], rect: (f32, f32, f32, f32), k: f32) {
+    let (x, y, w, h) = rect;
+    let pad = 2.0 * k;
+    let (w, h) = ((w - 2.0 * pad).max(0.0), (h - 2.0 * pad).max(0.0));
+    if w <= 0.0 || h <= 0.0 || data.len() > 16 * 1024 * 1024 {
+        return;
+    }
+    let Some((iw, ih)) = crate::io::image_size(data) else { return };
+    if iw == 0 || ih == 0 || iw > 8192 || ih > 8192 || u64::from(iw) * u64::from(ih) > 16_000_000 {
+        return;
+    }
+    let Ok(mut reader) = image::ImageReader::new(std::io::Cursor::new(data)).with_guessed_format() else { return };
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(8192);
+    limits.max_image_height = Some(8192);
+    limits.max_alloc = Some(64 * 1024 * 1024);
+    reader.limits(limits);
+    let Ok(image) = reader.decode() else { return };
+    let image =
+        image.thumbnail(((w / 72.0) * 150.0).ceil().clamp(1.0, 4000.0) as u32, ((h / 72.0) * 150.0).ceil().clamp(1.0, 4000.0) as u32).to_rgba8();
+    let fit = (w / iw as f32).min(h / ih as f32);
+    let (pw, ph) = (iw as f32 * fit, ih as f32 * fit);
+    pg.image_rgba(x + pad + (w - pw) / 2.0, y + pad + (h - ph) / 2.0, pw, ph, image.as_raw(), image.width(), image.height());
 }
 
 /// Is a cell free for text to overflow into?
@@ -923,7 +1093,15 @@ fn draw_text(pg: &mut Page, b: &Block, c: CellRef, l: &Look, rect: (f32, f32, f3
         HAlign::Justify | HAlign::Fill => HAlign::Left,
         other => other,
     };
-    let lines: Vec<String> = if wrap { wrap_lines(&text, font, size, avail.max(size)) } else { vec![text] };
+    let rot = st.align.rotation;
+    let rotated = rot != 0 && rot != 255;
+    // Rotated text wraps along its own direction: upright (±90°) text to the row height.
+    let lines: Vec<String> = match (wrap, rotated) {
+        (true, false) => wrap_lines(&text, font, size, avail.max(size)),
+        (true, true) if rot.abs() == 90 => wrap_lines(&text, font, size, (h - 2.0 * pad).max(size)),
+        (true, true) => vec![text.lines().next().unwrap_or_default().to_string()],
+        (false, _) => vec![text],
+    };
     let line_h = size * 1.2;
     let n = lines.len().max(1) as f32;
     let first_baseline = match st.align.v {
@@ -933,7 +1111,7 @@ fn draw_text(pg: &mut Page, b: &Block, c: CellRef, l: &Look, rect: (f32, f32, f3
     };
     // Overflow into empty neighbours (single-line text, not merged).
     let (mut clip_l, mut clip_r) = (x, x + w);
-    if !wrap && !merged && !is_num && tw + 2.0 * pad + indent > w {
+    if !wrap && !merged && !is_num && rot.abs() != 90 && tw + 2.0 * pad + indent > w {
         let need = tw + 2.0 * pad + indent - w;
         let grow = |dir: i64, mut need: f32| -> f32 {
             let mut ext = 0.0;
@@ -966,13 +1144,20 @@ fn draw_text(pg: &mut Page, b: &Block, c: CellRef, l: &Look, rect: (f32, f32, f3
     let clip_r = clip_r.min(limits.1);
     pg.save();
     pg.clip_rect(clip_l, y, (clip_r - clip_l).max(0.0), h);
-    let rot = st.align.rotation;
-    if rot != 0 && rot != 255 && !wrap {
+    if rotated {
         // Rotated text: anchored at the bottom-left (upward) or top-left (downward) of the cell.
+        // Wrapped lines stack rightward for upward text and leftward for downward text, so
+        // downward text starts its first line far enough in for the last to end at the left pad.
         let deg = (rot as f32).clamp(-90.0, 90.0);
         let angle = -deg.to_radians();
-        let (ox, oy) = if deg > 0.0 { (x + pad + size * 0.8 * deg.to_radians().sin(), y + h - pad) } else { (x + pad, y + pad + size * 0.8) };
-        if let Some(t) = lines.first() {
+        let last = lines.len().saturating_sub(1) as f32;
+        for (i, t) in lines.iter().enumerate() {
+            let i = i as f32;
+            let (ox, oy) = if deg > 0.0 {
+                (x + pad + size * 0.8 * deg.to_radians().sin() + i * line_h, y + h - pad)
+            } else {
+                (x + pad + (last - i) * line_h, y + pad + size * 0.8)
+            };
             pg.text_rotated(ox, oy, size, font, color, t, angle);
         }
         pg.restore();
@@ -1241,9 +1426,7 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
     doc.info.title = if wb.props.title.is_empty() { file.to_string() } else { wb.props.title.clone() };
     doc.info.author = wb.props.author.clone();
     let total: usize = layouts.iter().map(|l| l.pages.len()).sum();
-    let now = gridcraft_calc::now_serial();
-    let date = crate::display::format(&Value::Number(now.floor()), "m/d/yyyy", wb).text;
-    let time = crate::display::format(&Value::Number(now), "h:mm AM/PM", wb).text;
+    let (date, time) = hf_date_time(wb);
     let mut page_no = 0usize;
     for lay in layouts {
         let Some(sh) = wb.sheet(lay.sheet) else { continue };
@@ -1543,6 +1726,63 @@ mod tests {
     }
 
     #[test]
+    fn header_sections_split_join_and_field_names() {
+        let spec = "&L&\"Arial,Bold\"Sales &&Co&CPage &P of &N&R&D";
+        let parts = split_header_footer(spec);
+        assert_eq!(parts, ["&\"Arial,Bold\"Sales &&Co".to_string(), "Page &P of &N".into(), "&D".into()]);
+        assert_eq!(join_header_footer(&parts), spec);
+        // Text before any section code is the centre section, as when printing.
+        assert_eq!(split_header_footer("Report"), [String::new(), "Report".into(), String::new()]);
+        assert_eq!(codes_to_fields("Page &P of &N, &A (&F) &&"), "Page &[Page] of &[Pages], &[Tab] (&[File]) &&");
+        assert_eq!(fields_to_codes("Page &[Page] of &[Pages], &[Tab] (&[File]) &&"), "Page &P of &N, &A (&F) &&");
+        // A dangling ampersand stays literal instead of eating the next section's code.
+        assert_eq!(fields_to_codes("R&"), "R&&");
+        let joined = join_header_footer(&[fields_to_codes("R&"), "x".into(), String::new()]);
+        assert_eq!(split_header_footer(&joined)[0], "R&&");
+        let cx = HfContext { page: 2, pages: 5, sheet: "Data".into(), ..Default::default() };
+        let out = expand_header_footer(&join_header_footer(&[String::new(), fields_to_codes("&[Page] / &[Pages]"), fields_to_codes("&[Tab]")]), &cx);
+        assert_eq!((out[1].text.as_str(), out[2].text.as_str()), ("2 / 5", "Data"));
+        // Hostile input never panics.
+        for t in ["&", "&\"", "&\"unterminated", "&&&", "&[Pag", "\u{1F600}&[Page]"] {
+            let _ = join_header_footer(&split_header_footer(t));
+            let _ = fields_to_codes(&codes_to_fields(t));
+        }
+    }
+
+    #[test]
+    fn header_footer_section_edits_are_undoable_and_views_are_per_sheet() {
+        let mut s = s();
+        s.execute("pageLayout.headerFooter", json!({"header": "&LLeft&RRight"})).unwrap();
+        let r = s.execute("pageLayout.headerFooter", json!({"part": "header", "section": "center", "text": "Page &[Page] of &[Pages]"})).unwrap();
+        assert_eq!(r["header"], "&LLeft&CPage &P of &N&RRight");
+        s.execute("pageLayout.headerFooter", json!({"part": "footer", "section": "right", "text": "&[Date]"})).unwrap();
+        assert_eq!(s.doc().unwrap().wb.sheet(0).unwrap().print.footer, "&R&D");
+        s.execute("edit.undo", json!({})).unwrap();
+        s.execute("edit.undo", json!({})).unwrap();
+        assert_eq!(s.doc().unwrap().wb.sheet(0).unwrap().print.header, "&LLeft&RRight");
+        assert!(s.execute("pageLayout.headerFooter", json!({"part": "middle", "text": "x"})).is_err());
+        assert!(s.execute("pageLayout.headerFooter", json!({"section": "top"})).is_err());
+        let long = "x".repeat(1000);
+        s.execute("pageLayout.headerFooter", json!({"part": "header", "section": "left", "text": long})).unwrap();
+        assert!(s.doc().unwrap().wb.sheet(0).unwrap().print.header.chars().count() <= 255);
+        // The view is per sheet and doesn't dirty a clean workbook.
+        let mut fresh = Session::new();
+        fresh.new_workbook();
+        fresh.execute("home.insertSheet", json!({})).unwrap();
+        fresh.doc_mut().unwrap().saved = fresh.doc().unwrap().wb.clone();
+        fresh.execute("view.pageLayout", json!({"sheet": 0})).unwrap();
+        let wb = &fresh.doc().unwrap().wb;
+        assert_eq!((wb.sheet(0).unwrap().view, wb.sheet(1).unwrap().view), (SheetViewMode::PageLayout, SheetViewMode::Normal));
+        assert!(!fresh.doc().unwrap().is_dirty(), "switching views is not an edit");
+        s.execute("view.pageLayout", json!({"sheet": 0})).unwrap();
+        s.execute("view.normal", json!({"sheet": 0})).unwrap();
+        assert_eq!(s.doc().unwrap().wb.sheet(0).unwrap().view, SheetViewMode::Normal);
+        assert_eq!(s.execute("view.ruler", json!({"on": false})).unwrap()["on"], false);
+        assert!(s.hide_ruler);
+        assert_eq!(s.execute("view.ruler", json!({})).unwrap()["on"], true);
+    }
+
+    #[test]
     fn page_count_300_rows_letter_portrait() {
         let mut s = s();
         let rows: Vec<Vec<Json>> = (1..=300).map(|i| vec![json!(i)]).collect();
@@ -1673,7 +1913,7 @@ mod tests {
         let id = wb.next_object_id();
         wb.sheet_mut(0).unwrap().images.push(Image {
             id,
-            anchor: Anchor { cell: CellRef::new(5, 5), dx: 0.0, dy: 0.0, width: 40.0, height: 40.0 },
+            anchor: Anchor { cell: CellRef::new(5, 5), dx: 0.0, dy: 0.0, width: 40.0, height: 40.0, mode: gridcraft_model::AnchorMode::MoveAndSize },
             data: png,
             mime: "image/png".into(),
             alt: String::new(),
@@ -1761,5 +2001,27 @@ mod tests {
         assert!(w.iter().all(|l| gridcraft_pdf::text_width(Font::Helvetica, 10.0, l) <= 50.0 || !l.contains(' ')));
         let w = wrap_lines("Supercalifragilistic", Font::Helvetica, 10.0, 20.0);
         assert!(w.len() > 2);
+    }
+
+    #[test]
+    fn rotated_wrapped_text_prints_rotated() {
+        // Upright headers over narrow columns (mark sheets) combine rotation with Wrap Text.
+        let mut s = s();
+        let header = "Term 1 : Drama : Continuous Assessment";
+        s.execute("range.setValues", json!({"range": "A1", "values": [[header, header]]})).unwrap();
+        s.execute("home.wrapText", json!({"range": "A1:B1", "on": true})).unwrap();
+        s.execute("home.orientation", json!({"range": "A1", "angle": "up"})).unwrap();
+        s.execute("home.orientation", json!({"range": "B1", "angle": "down"})).unwrap();
+        s.execute("home.columnWidth", json!({"cols": "A:B", "chars": 6})).unwrap();
+        s.execute("home.rowHeight", json!({"rows": "1:1", "height": 267})).unwrap();
+        let (pdf, _) = pdf_of(&mut s, json!({}));
+        let pdf = String::from_utf8_lossy(&pdf);
+        // The page holds only these two cells, so every text block on it is a piece of a header.
+        let blocks: Vec<&str> = pdf.split("BT\n").skip(1).filter(|b| b.contains(" Tj")).collect();
+        let up = blocks.iter().filter(|b| b.contains("\n0 1 -1 0 ")).count();
+        let down = blocks.iter().filter(|b| b.contains("\n0 -1 1 0 ")).count();
+        // Every piece of both headers is rotated, each wrapped along the row height into a few long lines.
+        assert_eq!(up + down, blocks.len(), "a header line printed flat: {blocks:?}");
+        assert!((1..=3).contains(&up) && (1..=3).contains(&down), "up {up}, down {down}: {blocks:?}");
     }
 }

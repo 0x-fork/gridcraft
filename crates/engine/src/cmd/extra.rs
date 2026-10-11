@@ -15,7 +15,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add Chart Element",
             ["Chart Design", "Chart Layouts"],
             None,
-            "{chart?, element: title|legend|dataLabels|gridlines|axisTitles, on?: bool, position?: bottom|top|left|right}",
+            "{chart?, element: title|legend|dataLabels|gridlines|axisTitles|smooth, on?: bool, position?: bottom|top|left|right}",
             has_doc,
             add_element
         ),
@@ -34,7 +34,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Select Data…",
             ["Chart Design", "Data"],
             None,
-            "{chart?, range: \"Sheet1!A1:D7\", byRows?: bool}",
+            "{chart?, range?: \"Sheet1!A1:D7\", byRows?: bool, categories?: \"Sheet1!A2:A7\" (Horizontal (Category) Axis Labels for every series; \"\" clears), removeSeries?: [index…]}",
             has_doc,
             select_data
         ),
@@ -116,9 +116,29 @@ pub fn specs() -> Vec<CommandSpec> {
             rotate
         ),
         // Views
-        cmd!(noundo "view.normal", "Normal", ["View", "Workbook Views"], None, "{}", has_doc, |s, _| set_view(s, "normal")),
-        cmd!(noundo "view.pageLayout", "Page Layout", ["View", "Workbook Views"], None, "{}", has_doc, |s, _| set_view(s, "pageLayout")),
-        cmd!(noundo "view.pageBreakPreview", "Page Break Preview", ["View", "Workbook Views"], None, "{}", has_doc, |s, _| set_view(s, "pageBreakPreview")),
+        cmd!(noundo "view.normal", "Normal", ["View", "Workbook Views"], None, "{sheet?} → {view} (per sheet, saved with the file)", has_doc, |s, p| set_view(
+            s,
+            p,
+            SheetViewMode::Normal
+        )),
+        cmd!(
+            noundo "view.pageLayout",
+            "Page Layout",
+            ["View", "Workbook Views"],
+            None,
+            "{sheet?} → {view}: pages on paper with rulers; headers and footers are edited in place (per sheet, saved with the file)",
+            has_doc,
+            |s, p| set_view(s, p, SheetViewMode::PageLayout)
+        ),
+        cmd!(
+            noundo "view.pageBreakPreview",
+            "Page Break Preview",
+            ["View", "Workbook Views"],
+            None,
+            "{sheet?} → {view} (per sheet, saved with the file)",
+            has_doc,
+            |s, p| set_view(s, p, SheetViewMode::PageBreakPreview)
+        ),
         cmd!(noundo "view.customViews", "Custom Views…", ["View", "Workbook Views"], None, "{save?: name, show?: name, delete?: name} → list", has_doc, custom_views),
         cmd!(noundo "view.split", "Split", ["View", "Window"], None, "{} (toggles a split at the active cell; shown as frozen panes in this version)", has_doc, split),
         cmd!(noundo "view.newWindow", "New Window", ["View", "Window"], None, "{} opens a second window on the same workbook (a linked copy)", has_doc, new_window),
@@ -126,7 +146,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "view.hideWindow", "Hide", ["View", "Window"], None, "{}", has_doc, hide_window),
         cmd!(noundo "view.unhideWindow", "Unhide…", ["View", "Window"], None, "{index?}", has_doc, unhide_window),
         cmd!(query "view.switchWindows", "Switch Windows", ["View", "Window"], None, "{} → open windows", always, switch_windows),
-        cmd!(noundo "view.ruler", "Ruler", ["View", "Show"], None, "{on?}", has_doc, |_, _| ok()),
+        cmd!(noundo "view.ruler", "Ruler", ["View", "Show"], None, "{on?} → {on}: rulers in Page Layout view (an application option)", has_doc, ruler),
         cmd!(query "view.macros", "Macros", ["View", "Macros"], None, "{} → scripts", has_doc, all_scripts),
         // Table tools
         cmd!("table.resize", "Resize Table", ["Table Design", "Properties"], None, "{table?, range: \"A1:F20\"}", has_doc, table_resize),
@@ -181,7 +201,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Checkbox",
             ["Insert", "Cell Controls"],
             None,
-            "{range?} (cells hold TRUE/FALSE and draw as checkboxes; Space toggles)",
+            "{range?} (TRUE/FALSE and empty cells draw as checkboxes, empty ones become FALSE, other values show as they are; click or Space toggles; Delete unchecks, then removes; Clear Formats removes and keeps the values)",
             has_doc,
             checkbox
         ),
@@ -291,6 +311,11 @@ fn add_element(s: &mut Session, p: &Json) -> Result<Json> {
                 c.x_title = on.then(|| c.x_title.clone().unwrap_or_else(|| "Axis Title".into()));
                 c.y_title = on.then(|| c.y_title.clone().unwrap_or_else(|| "Axis Title".into()));
             }
+            "smooth" => {
+                for s in &mut c.series {
+                    s.smooth = on;
+                }
+            }
             other => return Err(bad("chart.addElement", format!("unknown element `{other}`"))),
         }
         Ok(())
@@ -345,22 +370,70 @@ fn change_colors(s: &mut Session, p: &Json) -> Result<Json> {
 }
 
 fn select_data(s: &mut Session, p: &Json) -> Result<Json> {
-    let range = str_param(p, "range").ok_or_else(|| bad("chart.selectData", "missing `range`"))?.to_string();
-    let (sheet_name, body) = split_sheet(&range);
     let d = s.doc()?;
-    let src_si = match sheet_name {
-        Some(n) => d.wb.sheet_index(&n).ok_or_else(|| bad("chart.selectData", "no such sheet"))?,
-        None => d.wb.active_sheet,
+    // A new data range rebuilds the series, as in Excel's Select Data › Chart data range.
+    let rebuilt = match str_param(p, "range") {
+        Some(range) => {
+            let range = range.trim_start_matches('=');
+            let (sheet_name, body) = split_sheet(range);
+            let src_si = match sheet_name {
+                Some(n) => d.wb.sheet_index(&n).ok_or_else(|| bad("chart.selectData", "no such sheet"))?,
+                None => d.wb.active_sheet,
+            };
+            let r = RangeRef::parse(body).ok_or_else(|| bad("chart.selectData", "not a range"))?;
+            if r.count() > 1_000_000 {
+                return Err(bad("chart.selectData", "range too large for a chart"));
+            }
+            let src = d.wb.sheet(src_si).ok_or(EngineError::NoDocument)?;
+            let by_rows = bool_param(p, "byRows").unwrap_or(r.width() > r.height() + 1);
+            let series = super::insert::series_from_range(src, r, by_rows);
+            Some((series, format!("{}!{}", gridcraft_formula::quote_sheet(&src.name), r.a1()), by_rows))
+        }
+        None => None,
     };
-    let r = RangeRef::parse(body).ok_or_else(|| bad("chart.selectData", "not a range"))?;
-    let src = d.wb.sheet(src_si).ok_or(EngineError::NoDocument)?;
-    let by_rows = bool_param(p, "byRows").unwrap_or(r.width() > r.height() + 1);
-    let series = super::insert::series_from_range(src, r, by_rows);
-    let source = format!("{}!{}", gridcraft_formula::quote_sheet(&src.name), r.a1());
+    // Horizontal (Category) Axis Labels › Edit: one labels range for every series ("" clears).
+    let categories = match str_param(p, "categories") {
+        None => None,
+        Some(t) if t.trim().trim_start_matches('=').is_empty() => Some(None),
+        Some(t) => {
+            let t = t.trim().trim_start_matches('=');
+            let (sheet_name, body) = split_sheet(t);
+            let si = match sheet_name {
+                Some(n) => d.wb.sheet_index(&n).ok_or_else(|| bad("chart.selectData", "no such sheet"))?,
+                None => d.wb.active_sheet,
+            };
+            let r = RangeRef::parse(body).ok_or_else(|| bad("chart.selectData", "`categories` is not a range"))?;
+            let name = d.wb.sheet(si).map(|sh| sh.name.clone()).ok_or(EngineError::NoDocument)?;
+            let abs = |c: CellRef| format!("${}${}", gridcraft_core::col_to_letters(c.col), c.row + 1);
+            Some(Some(format!("{}!{}:{}", gridcraft_formula::quote_sheet(&name), abs(r.start), abs(r.end))))
+        }
+    };
+    let mut remove: Vec<usize> = p
+        .get("removeSeries")
+        .and_then(Json::as_array)
+        .map(|a| a.iter().filter_map(Json::as_u64).filter_map(|i| usize::try_from(i).ok()).collect())
+        .unwrap_or_default();
+    remove.sort_unstable();
+    remove.dedup();
+    if rebuilt.is_none() && categories.is_none() && remove.is_empty() {
+        return Err(bad("chart.selectData", "missing `range`, `categories` or `removeSeries`"));
+    }
     with_chart(s, p, move |c| {
-        c.series = series;
-        c.source = Some(source);
-        c.by_rows = by_rows;
+        if let Some((series, source, by_rows)) = rebuilt {
+            c.series = series;
+            c.source = Some(source);
+            c.by_rows = by_rows;
+        }
+        for i in remove.iter().rev() {
+            if *i < c.series.len() && c.series.len() > 1 {
+                c.series.remove(*i);
+            }
+        }
+        if let Some(cats) = categories {
+            for se in &mut c.series {
+                se.categories = cats.clone();
+            }
+        }
         Ok(())
     })
 }
@@ -371,7 +444,7 @@ fn move_chart(s: &mut Session, p: &Json) -> Result<Json> {
         Some(n) => Some(s.doc()?.wb.sheet_index(n).ok_or_else(|| bad("chart.move", "no such sheet"))?),
         None => None,
     };
-    let at = cell_param(p, "at");
+    let at = cell_param_on(s, p, "at", target.unwrap_or(si))?;
     edit(s, |cx| {
         let mut chart = cx.sheet_mut(si)?.charts.remove(ci);
         if let Some(a) = at {
@@ -468,13 +541,13 @@ fn selection_pane(s: &mut Session, _: &Json) -> Result<Json> {
     let sh = d.wb.active().ok_or(EngineError::NoDocument)?;
     let mut v = Vec::new();
     for c in &sh.shapes {
-        v.push(json!({"kind": "shape", "id": c.id, "name": format!("{:?} {}", c.kind, c.id), "at": c.anchor.cell.a1()}));
+        v.push(json!({"kind": "shape", "id": c.id, "name": format!("{:?} {}", c.kind, c.id), "at": c.anchor.cell.a1(), "anchorMode": anchor_mode_name(c.anchor.mode)}));
     }
     for c in &sh.images {
-        v.push(json!({"kind": "image", "id": c.id, "name": format!("Picture {}", c.id), "at": c.anchor.cell.a1()}));
+        v.push(json!({"kind": "image", "id": c.id, "name": format!("Picture {}", c.id), "at": c.anchor.cell.a1(), "anchorMode": anchor_mode_name(c.anchor.mode)}));
     }
     for c in &sh.charts {
-        v.push(json!({"kind": "chart", "id": c.id, "name": format!("Chart {}", c.id), "title": c.title, "at": c.anchor.cell.a1()}));
+        v.push(json!({"kind": "chart", "id": c.id, "name": format!("Chart {}", c.id), "title": c.title, "at": c.anchor.cell.a1(), "anchorMode": anchor_mode_name(c.anchor.mode)}));
     }
     Ok(Json::Array(v))
 }
@@ -535,9 +608,26 @@ fn rotate(s: &mut Session, p: &Json) -> Result<Json> {
     with_shape(s, p, |sh| std::mem::swap(&mut sh.anchor.width, &mut sh.anchor.height))
 }
 
-fn set_view(s: &mut Session, mode: &str) -> Result<Json> {
-    s.view_mode = mode.to_string();
-    Ok(json!({"view": mode}))
+/// Switches a sheet's view. Like zoom, the view is saved with the file but is not an edit: it
+/// neither records an undo step nor marks a clean workbook as changed.
+fn set_view(s: &mut Session, p: &Json, mode: SheetViewMode) -> Result<Json> {
+    let si = target_sheet(s, p)?;
+    let d = s.doc_mut()?;
+    let dirty = d.is_dirty();
+    let wb = std::sync::Arc::make_mut(&mut d.wb);
+    if let Some(sh) = wb.sheet_mut(si) {
+        sh.view = mode;
+    }
+    if !dirty {
+        d.saved = d.wb.clone();
+    }
+    Ok(json!({"view": mode.as_str()}))
+}
+
+fn ruler(s: &mut Session, p: &Json) -> Result<Json> {
+    let on = bool_param(p, "on").unwrap_or(s.hide_ruler);
+    s.hide_ruler = !on;
+    Ok(json!({"on": on}))
 }
 
 const VIEWS_NAME: &str = "_sc_custom_views";
@@ -829,6 +919,11 @@ fn delete_script(s: &mut Session, p: &Json) -> Result<Json> {
 /// Number format that marks checkbox cells (TRUE/FALSE values drawn as boxes).
 pub const CHECKBOX_FORMAT: &str = "\"☐\";\"☐\";\"☐\";[=1]\"☑\"";
 
+/// Whether `c` has checkbox formatting.
+pub(crate) fn is_checkbox_cell(wb: &gridcraft_model::Workbook, sh: &gridcraft_model::Sheet, c: CellRef) -> bool {
+    wb.styles.get(sh.style_id(c)).num_fmt.as_str() == "checkbox"
+}
+
 fn checkbox(s: &mut Session, p: &Json) -> Result<Json> {
     let ranges = target_ranges(s, p)?;
     let si = target_sheet(s, p)?;
@@ -844,9 +939,14 @@ fn checkbox(s: &mut Session, p: &Json) -> Result<Json> {
                     s.align.h = HAlign::Center;
                 });
                 let sh = cx.sheet_mut(si)?;
-                let v = sh.value(c);
-                let value = if matches!(v, Value::Bool(_)) { v } else { Value::Bool(false) };
-                sh.cells.set(c, Cell { value, formula: None, style: new });
+                // Values and formulas already there stay (only TRUE/FALSE draw as a box); an empty
+                // cell starts unchecked.
+                let mut cell = sh.cell(c).cloned().unwrap_or_default();
+                if cell.value.is_empty() && cell.formula.is_none() {
+                    cell.value = Value::Bool(false);
+                }
+                cell.style = new;
+                sh.set_cell(c, cell);
                 cx.touch(si, c);
             }
         }
@@ -857,18 +957,24 @@ fn checkbox(s: &mut Session, p: &Json) -> Result<Json> {
 fn toggle_checkbox(s: &mut Session, p: &Json) -> Result<Json> {
     let si = target_sheet(s, p)?;
     let d = s.doc()?;
-    let cells: Vec<CellRef> = match cell_param(p, "cell") {
+    let cells: Vec<CellRef> = match cell_param_on(s, p, "cell", si)? {
         Some(c) => vec![c],
         None => d.selection.ranges.iter().flat_map(|r| r.iter().take(100_000).collect::<Vec<_>>()).collect(),
     };
     edit(s, |cx| {
         for c in cells {
+            let checkbox = cx.wb.sheet(si).is_some_and(|sh| is_checkbox_cell(&cx.wb, sh, c));
             let sh = cx.sheet_mut(si)?;
             if let Some(cell) = sh.cells.get_mut(c)
-                && let Value::Bool(b) = cell.value
                 && cell.formula.is_none()
             {
-                cell.value = Value::Bool(!b);
+                // An empty checkbox cell counts as FALSE.
+                let next = match cell.value {
+                    Value::Bool(b) if checkbox => Value::Bool(!b),
+                    Value::Empty if checkbox => Value::Bool(true),
+                    _ => continue,
+                };
+                cell.value = next;
                 cx.changed.push((si, c));
             }
         }
@@ -923,7 +1029,7 @@ fn new_cell_style(s: &mut Session, p: &Json) -> Result<Json> {
     let name = str_param(p, "name").ok_or_else(|| bad("home.newCellStyle", "missing `name`"))?.to_string();
     let d = s.doc()?;
     let sh = d.wb.active().ok_or(EngineError::NoDocument)?;
-    let c = cell_param(p, "fromCell").unwrap_or(d.selection.active);
+    let c = cell_param(s, p, "fromCell")?.unwrap_or(d.selection.active);
     let style = d.wb.styles.get(sh.style_id(c)).clone();
     edit(s, |cx| {
         cx.wb.cell_styles.retain(|(n, _)| !n.eq_ignore_ascii_case(&name));

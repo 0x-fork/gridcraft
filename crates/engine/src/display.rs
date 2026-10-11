@@ -31,11 +31,59 @@ pub fn format(v: &Value, code: &str, wb: &Workbook) -> Formatted {
     format_value(v, &parsed(code), wb.date_system)
 }
 
+/// What the cell editor and the formula bar start from. Same as `Cell::input_text`, except that a
+/// constant number in a date or time format is shown as a date (as the grid shows it), not as its
+/// serial. When the formatted text would not read back as the same date (for example
+/// `dddd, mmmm d`), an ISO `yyyy-mm-dd` (with `hh:mm:ss` for a time of day; just `hh:mm:ss`
+/// for a time alone) is used instead, and if even that would not read back, the serial.
+pub fn edit_text(wb: &Workbook, sheet: &Sheet, c: CellRef) -> String {
+    let raw = sheet.input_text(c);
+    let Some(cell) = sheet.cell(c) else { return raw };
+    let Value::Number(n) = &cell.value else { return raw };
+    let code = wb.styles.get(cell.style).num_fmt.as_str();
+    if cell.formula.is_some() || !parsed(code).is_date() {
+        return raw;
+    }
+    let reads_back = |s: &str| matches!(gridcraft_core::parse::parse_input(s, wb.date_system).value, Value::Number(m) if (m - n).abs() < 1e-9);
+    let shown = format(&cell.value, code, wb).text;
+    if reads_back(&shown) {
+        return shown;
+    }
+    let Some(dt) = gridcraft_core::date::datetime_from_serial(wb.date_system, *n) else { return raw };
+    let time = format!("{:02}:{:02}:{:02}", dt.hour, dt.minute, dt.second);
+    let date = format!("{:04}-{:02}-{:02}", dt.year, dt.month, dt.day);
+    let iso = if *n < 1.0 {
+        time
+    } else if n.fract() == 0.0 {
+        date
+    } else {
+        format!("{date} {time}")
+    };
+    if reads_back(&iso) { iso } else { raw }
+}
+
+/// Whether `c` has a formula that must not be shown: its cell is formatted Hidden on a
+/// protected sheet. A spilled cell follows its anchor.
+pub fn formula_hidden(wb: &Workbook, sheet: &Sheet, c: CellRef) -> bool {
+    if !sheet.is_protected() {
+        return false;
+    }
+    let at = match sheet.cell(c) {
+        Some(x) if x.formula.is_some() => c,
+        _ => match sheet.spill_ranges.iter().find(|(_, r)| r.contains(c)) {
+            Some((anchor, _)) => *anchor,
+            None => return false,
+        },
+    };
+    wb.styles.get(sheet.style_id(at)).protection.hidden
+}
+
 /// The text a cell shows (full precision General; the grid narrows General to fit the column).
 pub fn cell_text(wb: &Workbook, sheet: &Sheet, c: CellRef) -> String {
     let v = sheet.value(c);
     if sheet.show_formulas
         && let Some(f) = sheet.cell(c).and_then(|x| x.formula.as_ref())
+        && !formula_hidden(wb, sheet, c)
     {
         return format!("={}", f.text);
     }
@@ -57,7 +105,7 @@ pub fn cell_text(wb: &Workbook, sheet: &Sheet, c: CellRef) -> String {
 pub fn range_text(wb: &Workbook, sheet: usize, r: RangeRef) -> String {
     let Some(sh) = wb.sheet(sheet) else { return String::new() };
     let mut out = String::new();
-    let r = if r.count() > 2_000_000 { RangeRef::new(r.start, r.start.offset_clamped(1999, 999)) } else { r };
+    let r = clipboard_range(r);
     for row in r.start.row..=r.end.row {
         if sh.is_row_hidden(row) {
             continue;
@@ -80,6 +128,11 @@ pub fn range_text(wb: &Workbook, sheet: usize, r: RangeRef) -> String {
         out.push('\n');
     }
     out
+}
+
+/// The existing plain-text clipboard limit, shared with its HTML representation.
+pub(crate) fn clipboard_range(r: RangeRef) -> RangeRef {
+    if r.count() > 2_000_000 { RangeRef::new(r.start, r.start.offset_clamped(1999, 999)) } else { r }
 }
 
 /// Status-bar statistics for a selection: average, count (non-empty), numerical count, min,

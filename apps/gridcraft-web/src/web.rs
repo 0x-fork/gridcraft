@@ -37,8 +37,17 @@ pub fn start() {
                     } else if q.contains("sample") {
                         let _ = session.execute("file.new", serde_json::json!({"sample": "sales"}));
                     }
-                    let app = SheetApp::new(session, services(inbox.clone(), cc.egui_ctx.clone()));
-                    SheetApp::setup_context(&cc.egui_ctx, false);
+                    let mut app = SheetApp::new(session, services(inbox.clone(), cc.egui_ctx.clone()));
+                    // Follow the browser's language, except a CJK one: the web build has no system
+                    // CJK fonts (none are bundled), so that interface would render as tofu.
+                    let browser = gridcraft_ui_egui::i18n::Language::system();
+                    if !matches!(
+                        browser,
+                        gridcraft_ui_egui::i18n::Language::Zh | gridcraft_ui_egui::i18n::Language::Ja | gridcraft_ui_egui::i18n::Language::Ko
+                    ) {
+                        app.ui.language = browser;
+                    }
+                    SheetApp::setup_context_for_language(&cc.egui_ctx, false, app.ui.language);
                     Ok(Box::new(WebShell { app, inbox }))
                 }),
             )
@@ -92,13 +101,17 @@ impl eframe::App for WebShell {
 
 fn services(inbox: Inbox, ctx: egui::Context) -> Services {
     let open_inbox = inbox.clone();
+    let picture_ctx = ctx.clone();
     Services {
+        copy_html: Some(Box::new(copy_html)),
         open_async: Some(Box::new(move || {
             let inbox = open_inbox.clone();
             let ctx = ctx.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                let Some(file) =
-                    rfd::AsyncFileDialog::new().add_filter("Spreadsheets", &["xlsx", "xlsm", "csv", "tsv", "txt", "json"]).pick_file().await
+                let Some(file) = rfd::AsyncFileDialog::new()
+                    .add_filter("Spreadsheets", &["xlsx", "xlsm", "xls", "xlsb", "ods", "csv", "tsv", "txt", "json"])
+                    .pick_file()
+                    .await
                 else {
                     return;
                 };
@@ -107,9 +120,25 @@ fn services(inbox: Inbox, ctx: egui::Context) -> Services {
                 ctx.request_repaint();
             });
         })),
+        pick_picture_async: Some(Box::new(move |inbox| {
+            let ctx = picture_ctx.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let Some(file) = rfd::AsyncFileDialog::new().add_filter("Pictures (PNG, JPEG)", &["png", "jpg", "jpeg"]).pick_file().await else {
+                    return;
+                };
+                let bytes = file.read().await;
+                inbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((file.file_name(), bytes));
+                ctx.request_repaint();
+            });
+        })),
         download: Some(Box::new(|name: &str, bytes: &[u8]| {
             if let Err(e) = download(name, bytes) {
                 log::error!("download of {name} failed: {e}");
+            }
+        })),
+        print: Some(Box::new(|bytes: &[u8]| {
+            if let Err(e) = print_pdf(bytes) {
+                log::error!("print failed: {e}");
             }
         })),
         open_url: Some(Box::new(|url: &str| {
@@ -120,6 +149,81 @@ fn services(inbox: Inbox, ctx: egui::Context) -> Services {
         inbox: Some(inbox),
         ..Default::default()
     }
+}
+
+/// Start inside the copy gesture; deferring `write` can lose browser user activation.
+fn copy_html(html: &str, text: &str) -> Result<(), String> {
+    let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
+    let window = web_sys::window().ok_or("no window")?;
+    let clipboard = window.navigator().clipboard();
+    if clipboard.is_undefined() || clipboard.is_null() {
+        return Err("browser clipboard is unavailable (a secure context is required)".into());
+    }
+    if !js_sys::Reflect::get(&clipboard, &"write".into()).map_err(js)?.is_function() {
+        return Err("browser does not support rich clipboard writes".into());
+    }
+    let data = js_sys::Object::new();
+    for (mime, value) in [("text/html", html), ("text/plain", text)] {
+        let opts = web_sys::BlobPropertyBag::new();
+        opts.set_type(mime);
+        let parts = js_sys::Array::of1(&wasm_bindgen::JsValue::from_str(value));
+        let blob = web_sys::Blob::new_with_str_sequence_and_options(&parts, &opts).map_err(js)?;
+        js_sys::Reflect::set(&data, &mime.into(), &blob).map_err(js)?;
+    }
+    let item = web_sys::ClipboardItem::new_with_record_from_str_to_blob_promise(&data).map_err(js)?;
+    let promise = clipboard.write(&js_sys::Array::of1(&item));
+    let text = text.to_owned();
+    wasm_bindgen_futures::spawn_local(async move {
+        if let Err(e) = wasm_bindgen_futures::JsFuture::from(promise).await {
+            log::warn!("Rich clipboard write failed; trying plain text: {e:?}");
+            if let Err(e) = wasm_bindgen_futures::JsFuture::from(clipboard.write_text(&text)).await {
+                log::error!("Plain-text clipboard fallback also failed: {e:?}");
+            }
+        }
+    });
+    Ok(())
+}
+
+/// Opens `bytes` (a PDF) as an object URL in a hidden iframe and calls the iframe's own
+/// `print()` once it has finished loading — the standard way to drive the browser's native print
+/// dialog on a PDF without a download or a popup window the browser might block. The blob URL and
+/// the iframe are both cleaned up once the print dialog closes, so repeated prints don't leak
+/// them.
+fn print_pdf(bytes: &[u8]) -> Result<(), String> {
+    let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
+    let window = web_sys::window().ok_or("no window")?;
+    let document = window.document().ok_or("no document")?;
+
+    let parts = js_sys::Array::of1(&js_sys::Uint8Array::from(bytes));
+    let opts = web_sys::BlobPropertyBag::new();
+    opts.set_type("application/pdf");
+    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts).map_err(js)?;
+    let url = web_sys::Url::create_object_url_with_blob(&blob).map_err(js)?;
+
+    let iframe: web_sys::HtmlIFrameElement = document.create_element("iframe").map_err(js)?.dyn_into().map_err(|_| "not an iframe")?;
+    iframe.style().set_property("display", "none").map_err(js)?;
+    document.body().ok_or("no body")?.append_child(&iframe).map_err(js)?;
+
+    // `onload` fires once the PDF has actually rendered inside the iframe;
+    // printing before that would show a blank page. Set the handler BEFORE
+    // `src` so a fast/cached load can't fire before we're listening.
+    let iframe_for_load = iframe.clone();
+    let url_for_cleanup = url.clone();
+    let on_load = wasm_bindgen::closure::Closure::once_into_js(move || {
+        let Some(content_window) = iframe_for_load.content_window() else { return };
+        let _ = content_window.print();
+        // `afterprint` fires once the print dialog (or print preview) closes, whether the user
+        // printed or cancelled — the right moment to release the blob URL and drop the iframe.
+        let iframe_for_cleanup = iframe_for_load.clone();
+        let on_after_print = wasm_bindgen::closure::Closure::once_into_js(move || {
+            web_sys::Url::revoke_object_url(&url_for_cleanup).ok();
+            iframe_for_cleanup.remove();
+        });
+        let _ = content_window.add_event_listener_with_callback("afterprint", on_after_print.unchecked_ref());
+    });
+    iframe.set_onload(Some(on_load.unchecked_ref()));
+    iframe.set_src(&url);
+    Ok(())
 }
 
 /// Triggers a browser download of `bytes`.
