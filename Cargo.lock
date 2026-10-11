@@ -1599,6 +1599,7 @@ dependencies = [
  "sys-locale",
  "toml",
  "web-sys",
+ "zbus",
 ]
 
 [[package]]
