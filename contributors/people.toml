@@ -32,3 +32,6 @@ sync_github_name = true
 [people.vangel76]
 real_name = "Valentin Klein"
 sync_github_name = true
+
+[people.MacJedi42]
+sync_github_name = true
