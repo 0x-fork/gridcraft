@@ -317,6 +317,7 @@ fn sample() -> Workbook {
         fill: Color::Rgb(0x4472C4),
         line: Color::Rgb(0x000000),
         text: "Hi\nthere".into(),
+        format: Default::default(),
     });
     s.shapes.push(Shape {
         id: 12,
@@ -325,6 +326,7 @@ fn sample() -> Workbook {
         fill: Color::Auto,
         line: Color::Rgb(0xFF0000),
         text: String::new(),
+        format: Default::default(),
     });
     s.shapes.push(Shape {
         id: 13,
@@ -333,6 +335,17 @@ fn sample() -> Workbook {
         fill: Color::Auto,
         line: Color::Auto,
         text: "box".into(),
+        format: ShapeFormat {
+            no_line: true,
+            font_size: Some(20.0),
+            bold: true,
+            italic: true,
+            font: Some("Arial".into()),
+            text_color: Some(Color::Rgb(0x112233)),
+            text_outline: Some((Color::Rgb(0xFF0000), 1.5)),
+            align: Some(ShapeTextAlign::Right),
+            anchor: Some(ShapeTextAnchor::Bottom),
+        },
     });
     let base_chart = Chart {
         id: 20,
@@ -498,7 +511,7 @@ fn full_roundtrip() {
     assert_eq!(b.shapes[1].anchor.mode, AnchorMode::MoveAndSize, "default anchor mode");
     assert_eq!(b.shapes.len(), 3);
     for (x, y) in a.shapes.iter().zip(&b.shapes) {
-        assert_eq!((x.kind, &x.text, x.fill, x.line), (y.kind, &y.text, y.fill, y.line));
+        assert_eq!((x.kind, &x.text, x.fill, x.line, &x.format), (y.kind, &y.text, y.fill, y.line, &y.format));
     }
     assert_eq!(b.charts.len(), a.charts.len());
     for (x, y) in a.charts.iter().zip(&b.charts) {

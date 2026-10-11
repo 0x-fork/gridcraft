@@ -300,6 +300,8 @@ impl SheetApp {
             names.extend(d.wb.styles.iter().map(|(_, s)| s.font.name.clone()));
             names.push(d.wb.theme.major_font.clone());
             names.push(d.wb.theme.minor_font.clone());
+            // Text boxes and shapes name their own typefaces.
+            names.extend(d.wb.sheets.iter().flat_map(|sh| sh.shapes.iter().filter_map(|s| s.format.font.clone())));
         }
         names
     }
