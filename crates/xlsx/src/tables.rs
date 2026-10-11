@@ -323,6 +323,7 @@ mod tests {
     #[test]
     fn functions() {
         assert_eq!(file_function_name("xlookup").as_deref(), Some("_xlfn.XLOOKUP"));
+        assert_eq!(file_function_name("forecast.ets.confint").as_deref(), Some("_xlfn.FORECAST.ETS.CONFINT"));
         assert_eq!(file_function_name("FILTER").as_deref(), Some("_xlfn._xlws.FILTER"));
         assert_eq!(file_function_name("PERCENTOF").as_deref(), Some("_xlfn.PERCENTOF"));
         assert_eq!(file_function_name("TRIMRANGE").as_deref(), Some("_xlfn.TRIMRANGE"));

@@ -16,6 +16,7 @@ Excel's worksheet functions, category by category, against GridCraft's function 
 - **Ours (503):** every function spec in `crates/functions/src/*.rs` (`f!("NAME", …)`) plus the
 - **Ours (502):** every function spec in `crates/functions/src/*.rs` (`f!("NAME", …)`) plus the
 - **Ours (502):** every function spec in `crates/functions/src/*.rs` (`f!("NAME", …)`) plus the
+- **Ours (505):** every function spec in `crates/functions/src/*.rs` (`f!("NAME", …)`) plus the
   evaluator's special forms in `crates/calc/src/eval.rs` (`SPECIAL_FUNCTIONS`: IF, IFS, CHOOSE,
   OFFSET, INDIRECT, INDEX, SUBTOTAL, AGGREGATE, TEXT, LET, LAMBDA, MAP, REDUCE, SCAN, BYROW, BYCOL,
   MAKEARRAY…), excluding the test-only `ADD2`. Every one is an Excel name.
@@ -30,7 +31,7 @@ Excel's worksheet functions, category by category, against GridCraft's function 
 
 | Category | Excel | Ours | Working | % working | Missing |
 |---|---|---|---|---|---|
-| Statistical | 111 | 107 | 107 | 96% | FORECAST.ETS, FORECAST.ETS.CONFINT, FORECAST.ETS.SEASONALITY, FORECAST.ETS.STAT |
+| Statistical | 111 | 111 | 111 | 100% | — |
 | Math and trigonometry | 80 | 79 | 79 | 99% | PERCENTOF |
 | Financial | 55 | 55 | 55 | 100% | — |
 | Engineering | 54 | 54 | 54 | 100% | — |
@@ -57,6 +58,7 @@ PIVOTBY, REGEXTEST…) are all present.
 | Function(s) | In scope? | Estimate | Note |
 |---|---|---|---|
 | FORECAST.ETS family (4) | yes | 4–6 h | AAA exponential smoothing with seasonality detection; needed for Forecast Sheet too |
+| ODDFPRICE, ODDFYIELD, ODDLPRICE, ODDLYIELD | yes | 2–4 h | Odd first/last period bond maths |
 | GETPIVOTDATA | yes | 2–3 h | Needs the pivot engine's result cache; also the "Generate GetPivotData" option |
 | TRIMRANGE, BAHTTEXT | yes | 1–2 h | TRIMRANGE also implies the `.:` trim-ref operators |
 | TRIMRANGE, PERCENTOF | yes | 1–2 h | TRIMRANGE also implies the `.:` trim-ref operators |
@@ -105,4 +107,5 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 | 2026-10-11 | minor | PERCENTOF and EUROCONVERT added: 503 / 523 by name, 494 working |
 | 2026-10-11 | minor | BAHTTEXT added: 502 / 523 by name, 493 working |
 | 2026-10-11 | minor | TRIMRANGE added (the trim-reference operators not yet): 502 / 523 by name, 493 working |
+| 2026-10-11 | minor | FORECAST.ETS, .CONFINT, .SEASONALITY, .STAT added (AAA exponential smoothing; Excel's optimiser is undocumented, so last digits on noisy data may differ): 505 / 523 by name, 496 working |
 | 2026-10-10 | major | Created: 501 / 523 by name, 492 working, per category, against Microsoft's published list |

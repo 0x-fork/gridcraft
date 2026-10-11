@@ -259,6 +259,12 @@ fn implicit_intersection_metadata_respects_function_argument_context() {
             ("LET(x,A1:A3,SUM(x*2))", true),
             ("XLOOKUP(1,A1:A3,B1:B3)", false),
             ("XLOOKUP(1,A1:A3,B1:C3)", true),
+            ("FORECAST.LINEAR(4,A1:A3,B1:B3)", false),
+            ("FORECAST.ETS(4,A1:A3,B1:B3,1,1,1)", false),
+            ("FORECAST.ETS(C1:C3,A1:A3,B1:B3)", true),
+            ("FORECAST.ETS.CONFINT(4,A1:A3,B1:B3,0.95)", false),
+            ("FORECAST.ETS.SEASONALITY(A1:A3,B1:B3)", false),
+            ("FORECAST.ETS.STAT(A1:A3,B1:B3,1)", false),
         ],
     );
 }

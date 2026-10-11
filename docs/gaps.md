@@ -98,8 +98,8 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   data model (`data.fromWeb`, `data.relationships` missing). **Estimate:** 60–100 h.
 
 ### 13. Analysis tools: Solver, Analysis ToolPak, Forecast Sheet (F)
-- `data.solver`, `data.analysisToolPak`, `data.forecastSheet` missing; FORECAST.ETS family missing.
-  **Estimate:** 22–35 h.
+- `data.solver`, `data.analysisToolPak`, `data.forecastSheet` missing (the FORECAST.ETS family the
+  Forecast Sheet builds on is in). **Estimate:** 18–30 h.
 
 ### 14. Page Layout view and print polish (U, F)
 - No paper view with rulers and in-place header/footer editing; web print exports only (#141, PR
@@ -110,6 +110,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 - 20 missing, 9 stubs; no Excel-computed oracle corpus; #137, #138. **Estimate:** 17–29 h.
 - 21 missing, 9 stubs; no Excel-computed oracle corpus; #137, #138. **Estimate:** 18–30 h.
 - 21 missing, 9 stubs; trim-reference operators (`A1:.E10`) not parsed; no Excel-computed oracle corpus; #137, #138. **Estimate:** 18–30 h.
+- 18 missing, 9 stubs; no Excel-computed oracle corpus; #137, #138. **Estimate:** 18–30 h.
   [function-parity.md](function-parity.md)
 
 ### 16. Collaboration and review (F)
@@ -159,6 +160,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 | 2026-10-11 | minor | §16: Allow Edit Ranges landed (#307) |
 | 2026-10-11 | minor | §8: calculated fields added |
 | 2026-10-11 | minor | §8: PivotCharts added |
+| 2026-10-11 | minor | §13, §15: FORECAST.ETS family landed (#314) |
 | 2026-10-10 | minor | Updated for the 10-10 merges (#17, #31, #38, #62, #82, #104, #116) and the new chart resize bug (#190) |
 | 2026-10-10 | minor | Noted that no gap blocks the alpha gate |
 | 2026-10-10 | major | Created: 24 ranked gaps with evidence, from the full re-measure and the 60 open issues |

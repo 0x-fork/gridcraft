@@ -218,6 +218,9 @@ fn scalar_arg(name: &str, i: usize) -> bool {
         "FILTER" | "SORTBY" => i > 1,
         "SORT" | "UNIQUE" | "TAKE" | "DROP" | "CHOOSECOLS" | "CHOOSEROWS" | "TOROW" | "TOCOL" | "WRAPROWS" | "WRAPCOLS" | "EXPAND" => i != 0,
         "LINEST" | "LOGEST" | "TREND" | "GROWTH" => i > 1,
+        "FORECAST" | "FORECAST.LINEAR" => i == 0,
+        "FORECAST.ETS" | "FORECAST.ETS.CONFINT" => i != 1 && i != 2,
+        "FORECAST.ETS.SEASONALITY" | "FORECAST.ETS.STAT" => i > 1,
         _ => true,
     }
 }
