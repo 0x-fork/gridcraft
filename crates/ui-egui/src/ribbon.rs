@@ -570,16 +570,9 @@ fn home(app: &mut SheetApp, ui: &mut Ui) {
                 (Icon::AlignMiddle, VAlign::Center, "home.alignMiddle", "Middle Align"),
                 (Icon::AlignBottom, VAlign::Bottom, "home.alignBottom", "Bottom Align"),
             ] {
-                let response = toggle_button(ui, icon, st.align.v == v, tip);
-                if matches!(app.keytips.prefix(), Some("H" | "HA")) {
-                    let sequence = match v {
-                        VAlign::Top => "HAT",
-                        VAlign::Center => "HAM",
-                        _ => "HAB",
-                    };
-                    keytip(app, ui, sequence, response.rect.center_bottom());
-                }
-                if response.clicked() {
+                let __k = toggle_button(ui, icon, st.align.v == v, tip);
+                control_keytip(app, ui, &__k, id);
+                if __k.clicked() {
                     act(app, id, json!({}));
                 }
             }
@@ -936,12 +929,16 @@ fn home(app: &mut SheetApp, ui: &mut Ui) {
 fn font_combo(app: &mut SheetApp, ui: &mut Ui, st: &Style) {
     let mut name = st.font.name.clone();
     let before = name.clone();
-    egui::ComboBox::from_id_salt("font_name").width(150.0).selected_text(egui::RichText::new(&name).font(theme::ui_font(12.5))).show_ui(ui, |ui| {
-        for f in crate::fonts::families() {
-            let fam = theme::cell_family(&f, false, false);
-            ui.selectable_value(&mut name, f.clone(), egui::RichText::new(&f).font(egui::FontId::new(14.0, fam)));
-        }
-    });
+    let resp = egui::ComboBox::from_id_salt("font_name").width(150.0).selected_text(egui::RichText::new(&name).font(theme::ui_font(12.5))).show_ui(
+        ui,
+        |ui| {
+            for f in FONTS {
+                let fam = theme::cell_family(f, false, false);
+                ui.selectable_value(&mut name, f.to_string(), egui::RichText::new(*f).font(egui::FontId::new(14.0, fam)));
+            }
+        },
+    );
+    control_keytip(app, ui, &resp.response, "home.fontName");
     if name != before {
         act(app, "home.fontName", json!({"name": name}));
     }
@@ -971,11 +968,15 @@ fn size_combo(app: &mut SheetApp, ui: &mut Ui, st: &Style) {
     let mut size = st.font.size;
     let before = size;
     let label = if size.fract() == 0.0 { format!("{}", size as i32) } else { format!("{size}") };
-    egui::ComboBox::from_id_salt("font_size").width(52.0).selected_text(egui::RichText::new(label).font(theme::ui_font(12.5))).show_ui(ui, |ui| {
-        for s in [8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 36.0, 48.0, 72.0] {
-            ui.selectable_value(&mut size, s, format!("{}", s as i32));
-        }
-    });
+    let resp = egui::ComboBox::from_id_salt("font_size").width(52.0).selected_text(egui::RichText::new(label).font(theme::ui_font(12.5))).show_ui(
+        ui,
+        |ui| {
+            for s in [8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 36.0, 48.0, 72.0] {
+                ui.selectable_value(&mut size, s, format!("{}", s as i32));
+            }
+        },
+    );
+    control_keytip(app, ui, &resp.response, "home.fontSize");
     if size != before {
         act(app, "home.fontSize", json!({"size": size}));
     }
@@ -988,7 +989,7 @@ fn number_combo(app: &mut SheetApp, ui: &mut Ui, st: &Style) {
     let lang = app.ui.language;
     let sample = app.session.active().and_then(|d| d.wb.active().map(|sh| sh.value(d.selection.active))).unwrap_or_default();
     let mut picked: Option<&str> = None;
-    egui::ComboBox::from_id_salt("number_format")
+    let resp = egui::ComboBox::from_id_salt("number_format")
         .width(150.0)
         .selected_text(egui::RichText::new(lang.tr(&current)).font(theme::ui_font(12.5)))
         .show_ui(ui, |ui| {
@@ -1007,6 +1008,7 @@ fn number_combo(app: &mut SheetApp, ui: &mut Ui, st: &Style) {
                 picked = Some("__more");
             }
         });
+    anchor_keytip(app, ui, &resp.response, &["home.numberFormat"]);
     match picked {
         Some("__more") => app.open_dialog("formatCells", json!({"tab": "Number"})),
         Some(n) => act(app, "home.numberFormat", json!({"format": n})),
@@ -1554,7 +1556,7 @@ fn page_layout(app: &mut SheetApp, ui: &mut Ui) {
         );
     });
     let __k = big_button(ui, Icon::Sheet, "Print\nTitles", "Print Titles", false);
-    control_keytip(app, ui, &__k, "pageSetup");
+    control_keytip(app, ui, &__k, "pageLayout.printTitles");
     if __k.clicked() {
         app.open_dialog("pageSetup", json!({"tab": "Sheet"}));
     }

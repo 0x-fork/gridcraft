@@ -17,6 +17,9 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("E", Entry::Tab("Home")), // Legacy Edit-menu path (Excel 2003); leads to the same Home menus.
     ("O", Entry::Tab("Home")), // Legacy Format-menu path (Excel 2003); leads to the same Home menus.
     ("HAR", Entry::Finish(Action::Command("home.alignRight"))),
+    ("HAT", Entry::Finish(Action::Command("home.alignTop"))),    // Excel: Excel: Top Align
+    ("HAM", Entry::Finish(Action::Command("home.alignMiddle"))), // Excel: Excel: Middle Align
+    ("HAB", Entry::Finish(Action::Command("home.alignBottom"))), // Excel: Excel: Bottom Align
     ("HAL", Entry::Finish(Action::Command("home.alignLeft"))),
     ("HAC", Entry::Finish(Action::Command("home.alignCenter"))),
     ("HVS", Entry::Finish(Action::Dialog("pasteSpecial"))),
@@ -33,9 +36,7 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("H0", Entry::Finish(Action::Command("home.increaseDecimal"))), // Excel: Increase Decimals; containment(Increase Decimal)
     ("H1", Entry::Finish(Action::Command("home.bold"))), // Excel: Bold
     ("H2", Entry::Finish(Action::Command("home.italic"))), // Excel: Italic
-    ("H3", Entry::Continue),                         // Excel: Underline Menu; group level:
-    ("H3D", Entry::Finish(Action::Command("home.doubleUnderline"))), // Excel: Double Underline
-    ("H3U", Entry::Finish(Action::Command("home.underline"))), // Excel: Underline
+    ("H3", Entry::Finish(Action::Command("home.underline"))), // Excel: Excel: Underline; fires immediately (not a menu)
     ("H5", Entry::Finish(Action::Command("home.decreaseIndent"))), // Excel: Decrease Indent
     ("H6", Entry::Finish(Action::Command("home.increaseIndent"))), // Excel: Increase Indent
     ("H9", Entry::Finish(Action::Command("home.decreaseDecimal"))), // Excel: Decrease Decimals; containment(Decrease Decimal)
@@ -140,7 +141,7 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("HOUR", Entry::Finish(Action::Command("home.hideRows"))), // Excel: Hide Rows
     ("HOUS", Entry::Finish(Action::Command("sheet.hide"))), // Excel: Hide Sheet
     ("HOW", Entry::Finish(Action::Command("home.columnWidth"))), // Excel: Column Width
-    ("HP", Entry::Finish(Action::Command("home.numberFormat"))), // Excel: Percentage Style; format TBD
+    ("HP", Entry::Finish(Action::Command("home.percent"))), // Excel: Excel: Percentage Style
     ("HSC", Entry::Finish(Action::Command("data.clearFilter"))), // Excel: Clear Filter
     ("HSF", Entry::Finish(Action::Command("data.filter"))), // Excel: Filter
     ("HSO", Entry::Finish(Action::Command("data.sortDescending"))), // Excel: Sort Z to A
@@ -176,6 +177,7 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("HX", Entry::Finish(Action::Command("edit.cut"))),           // Excel: Cut
     ("NC1", Entry::Finish(Action::Command("insert.chart"))),      // Excel: Column Chart; Column chart (kind TBD)
     ("NC2", Entry::Finish(Action::Command("review.newComment"))), // Excel: New Comment
+    ("NCM", Entry::Finish(Action::Command("review.newComment"))), // Excel: Excel: New Comment (modern)
     ("NCB", Entry::Finish(Action::Command("insert.checkbox"))),   // Excel: Checkbox
     ("ND", Entry::Finish(Action::Command("insert.chart"))),       // Excel: Scatter Chart; Scatter (kind TBD)
     ("NE", Entry::Finish(Action::Pending("insert.equation"))),    // pending; Excel: Equations; Equations; reserved until the command lands
@@ -209,6 +211,7 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("NSZ", Entry::Finish(Action::Pending("insert.pivotChart"))), // pending; Excel: PivotChart; PivotChart; reserved until the command lands
     ("NT", Entry::Finish(Action::Command("insert.table"))),       // Excel: Table
     ("NU", Entry::Finish(Action::Command("insert.symbol"))),      // Excel: Symbols; containment(Symbol)
+    ("NZS", Entry::Finish(Action::Command("insert.symbol"))),     // Excel: Excel: Symbol (modern)
     ("NV", Entry::Finish(Action::Command("insert.pivotTable"))),  // Excel: PivotTable
     ("NW", Entry::Finish(Action::Pending("insert.wordArt"))),     // pending; Excel: WordArt; WordArt; reserved until the command lands
     ("NX", Entry::Finish(Action::Command("insert.textBox"))),     // Excel: Text Box
@@ -217,6 +220,7 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("NZKSO", Entry::Finish(Action::Command("insert.sparkline"))), // Excel: Column Sparkline
     ("NZKSW", Entry::Finish(Action::Command("insert.sparkline"))), // Excel: Win/Loss Sparkline
     ("NZTX", Entry::Finish(Action::Command("insert.textBox"))),   // Excel: Text Box
+    ("NZT", Entry::Finish(Action::Command("insert.textBox"))),    // Excel: Excel: Text Box (modern)
     ("PAE", Entry::Finish(Action::Command("arrange.sendBackward"))), // Excel: Send Backward
     ("PAF", Entry::Finish(Action::Command("arrange.bringForward"))), // Excel: Bring Forward
     ("PB", Entry::Continue),                                      // Excel: Breaks; group level:
@@ -253,6 +257,7 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("MGF", Entry::Finish(Action::Command("formulas.insertFunction"))),        // Excel: Math & Trig - Insert Function; containment(Insert Function)
     ("MH", Entry::Finish(Action::Command("formulas.showFormulas"))),           // Excel: Show Formulas
     ("MI", Entry::Continue),                                                   // Excel: Financial Menu; group level: containment(Financial)
+    ("MI1", Entry::Finish(Action::Command("formulas.insertFunction"))),        // Excel: Excel: Financial; first item of the dropdown
     ("MIF", Entry::Finish(Action::Command("formulas.insertFunction"))),        // Excel: Financial - Insert Function; containment(Insert Function)
     ("MJ", Entry::Finish(Action::Command("formulas.calculateSheet"))),         // Excel: Calculate Sheet
     ("MK", Entry::Continue),                                                   // Excel: Error Checking Menu; group level: containment(Error Checking)

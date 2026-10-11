@@ -70,6 +70,24 @@
       "target": "home.alignRight"
     },
     {
+      "seq": "HAT",
+      "kind": "command",
+      "target": "home.alignTop",
+      "excel": "Excel: Top Align"
+    },
+    {
+      "seq": "HAM",
+      "kind": "command",
+      "target": "home.alignMiddle",
+      "excel": "Excel: Middle Align"
+    },
+    {
+      "seq": "HAB",
+      "kind": "command",
+      "target": "home.alignBottom",
+      "excel": "Excel: Bottom Align"
+    },
+    {
       "seq": "HAL",
       "kind": "command",
       "target": "home.alignLeft"
@@ -177,23 +195,9 @@
     },
     {
       "seq": "H3",
-      "kind": "continue",
-      "excel": "Underline Menu",
-      "note": "group level:"
-    },
-    {
-      "seq": "H3D",
       "kind": "command",
-      "target": "home.doubleUnderline",
-      "excel": "Double Underline",
-      "note": ""
-    },
-    {
-      "seq": "H3U",
-      "kind": "command",
-      "target": "home.underline",
-      "excel": "Underline",
-      "note": ""
+      "excel": "Excel: Underline; fires immediately (not a menu)",
+      "target": "home.underline"
     },
     {
       "seq": "H5",
@@ -924,9 +928,8 @@
     {
       "seq": "HP",
       "kind": "command",
-      "target": "home.numberFormat",
-      "excel": "Percentage Style",
-      "note": "format TBD"
+      "target": "home.percent",
+      "excel": "Excel: Percentage Style"
     },
     {
       "seq": "HSC",
@@ -1171,6 +1174,12 @@
       "note": ""
     },
     {
+      "seq": "NCM",
+      "kind": "command",
+      "target": "review.newComment",
+      "excel": "Excel: New Comment (modern)"
+    },
+    {
       "seq": "NCB",
       "kind": "command",
       "target": "insert.checkbox",
@@ -1405,6 +1414,12 @@
       "note": "containment(Symbol)"
     },
     {
+      "seq": "NZS",
+      "kind": "command",
+      "target": "insert.symbol",
+      "excel": "Excel: Symbol (modern)"
+    },
+    {
       "seq": "NV",
       "kind": "command",
       "target": "insert.pivotTable",
@@ -1459,6 +1474,12 @@
       "target": "insert.textBox",
       "excel": "Text Box",
       "note": ""
+    },
+    {
+      "seq": "NZT",
+      "kind": "command",
+      "target": "insert.textBox",
+      "excel": "Excel: Text Box (modern)"
     },
     {
       "seq": "PAE",
@@ -1705,6 +1726,12 @@
       "kind": "continue",
       "excel": "Financial Menu",
       "note": "group level: containment(Financial)"
+    },
+    {
+      "seq": "MI1",
+      "kind": "command",
+      "target": "formulas.insertFunction",
+      "excel": "Excel: Financial; first item of the dropdown"
     },
     {
       "seq": "MIF",
