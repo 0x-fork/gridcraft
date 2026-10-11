@@ -724,6 +724,7 @@ pub fn export_as(app: &mut SheetApp, fmt: &str) -> bool {
             }
         };
     }
+    app.store_view_state();
     match app.session.run("file.saveBytes", json!({"format": fmt})) {
         Ok(r) => {
             let bytes = r.get("base64").and_then(Json::as_str).and_then(gridcraft_engine::io::base64_decode);

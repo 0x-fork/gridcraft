@@ -256,6 +256,10 @@ fn read_views(e: &El, sheet: &mut Sheet) {
             let rows = p.attr_f64("ySplit").unwrap_or(0.0).clamp(0.0, (MAX_ROWS - 1) as f64) as u32;
             if rows > 0 || cols > 0 {
                 sheet.freeze = Some((rows, cols));
+                // With frozen panes the scroll position is the scrolling pane's first cell.
+                if let Some(c) = p.attr("topLeftCell").and_then(CellRef::parse) {
+                    sheet.view_top_left = c;
+                }
             }
         }
         active_pane = p.attr("activePane");

@@ -813,3 +813,28 @@ fn bad_comment_dates_are_left_out() {
     let c = &back.sheets[0].comments[&at("A1")];
     assert!(c.threaded && c.dates.is_empty());
 }
+
+/// #378: the saved scroll position survives a round trip, with and without frozen panes (where it
+/// is the scrolling pane's `topLeftCell`).
+#[test]
+fn scroll_position_round_trips_with_and_without_frozen_panes() {
+    let mut wb = Workbook::new();
+    wb.sheet_mut(0).unwrap().view_top_left = at("A31");
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    assert_eq!(back.sheet(0).unwrap().view_top_left, at("A31"));
+
+    let s = wb.sheet_mut(0).unwrap();
+    s.freeze = Some((1, 0));
+    s.view_top_left = at("C40");
+    let bytes = write_xlsx(&wb).unwrap();
+    let (xml, _) = sheet1_xml(&bytes);
+    assert!(xml.contains(r#"<pane ySplit="1" topLeftCell="C40""#), "{xml}");
+    let (back, _) = read_xlsx(&bytes).unwrap();
+    assert_eq!(back.sheet(0).unwrap().view_top_left, at("C40"));
+    assert_eq!(back.sheet(0).unwrap().freeze, Some((1, 0)));
+
+    // A scroll position inside the frozen rows is written as the first scrolling row.
+    wb.sheet_mut(0).unwrap().view_top_left = at("A1");
+    let (xml, _) = sheet1_xml(&write_xlsx(&wb).unwrap());
+    assert!(xml.contains(r#"topLeftCell="A2""#), "{xml}");
+}

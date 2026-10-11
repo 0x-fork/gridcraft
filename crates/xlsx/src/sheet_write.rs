@@ -182,7 +182,11 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
             let _ = write!(
                 s,
                 " topLeftCell=\"{}\" activePane=\"{pane}\" state=\"frozen\"/>",
-                CellRef::new(rows.min(gridcraft_core::MAX_ROWS - 1), cols.min(gridcraft_core::MAX_COLS - 1)).a1()
+                CellRef::new(
+                    rows.max(sheet.view_top_left.row).min(gridcraft_core::MAX_ROWS - 1),
+                    cols.max(sheet.view_top_left.col).min(gridcraft_core::MAX_COLS - 1)
+                )
+                .a1()
             );
             let _ = write!(s, "<selection pane=\"{pane}\" activeCell=\"{active}\" sqref=\"{active}\"/>");
         }
