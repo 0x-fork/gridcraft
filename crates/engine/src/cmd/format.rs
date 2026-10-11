@@ -156,7 +156,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Row Height…",
             ["Home", "Cells", "Format"],
             None,
-            "{rows?: \"2:5\", height: 20 (points on screen)}",
+            "{rows?: \"2:5\" | \"2:2,4:5\", height: 20 (points on screen)}",
             has_doc,
             row_height
         ),
@@ -165,7 +165,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Column Width…",
             ["Home", "Cells", "Format"],
             None,
-            "{cols?: \"B:D\", width: 64 (points) | chars: 8.43}",
+            "{cols?: \"B:D\" | \"B:B,D:F\", width: 64 (points) | chars: 8.43}",
             has_doc,
             col_width
         ),
@@ -910,8 +910,14 @@ fn cell_style(s: &mut Session, p: &Json) -> Result<Json> {
 fn line_targets(s: &Session, p: &Json, rows: bool) -> Result<Vec<(u32, u32)>> {
     let key = if rows { "rows" } else { "cols" };
     if let Some(t) = str_param(p, key) {
-        let r = RangeRef::parse(t).ok_or_else(|| bad(key, format!("not a range: {t}")))?;
-        return Ok(vec![if rows { (r.start.row, r.end.row) } else { (r.start.col, r.end.col) }]);
+        // A comma-separated list ("B:B,D:F") targets several areas, like a multi-area selection.
+        return t
+            .split(',')
+            .map(|part| {
+                let r = RangeRef::parse(part).ok_or_else(|| bad(key, format!("not a range: {part}")))?;
+                Ok(if rows { (r.start.row, r.end.row) } else { (r.start.col, r.end.col) })
+            })
+            .collect();
     }
     Ok(s.doc()?.selection.ranges.iter().map(|r| if rows { (r.start.row, r.end.row) } else { (r.start.col, r.end.col) }).collect())
 }
