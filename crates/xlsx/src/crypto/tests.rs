@@ -145,3 +145,13 @@ fn damaged_files_are_malformed_not_panics() {
     assert!(bad(xml.replace("<keyData", "<other")));
     assert!(bad("<encryption".into()));
 }
+
+#[test]
+fn non_ascii_passwords_hash_as_utf16le_like_msoffcrypto() {
+    // "Pässwörd€" plus an emoji outside the BMP, a surrogate pair in UTF-16.
+    let h = iterated_hash(Hash::Sha512, "P\u{e4}ssw\u{f6}rd\u{20ac}\u{1F511}", &salt(), 1000);
+    assert_eq!(
+        h,
+        hex("2bca96ca0a7e8d88d9314a2eb1819a1ece94ff9ce34266ff82f891a88c4240c4c9f39c729b7c5c410c27fc8e2b7ad90d8c005eb68a603377b8a4ab858041c76a")
+    );
+}
