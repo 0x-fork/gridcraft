@@ -512,6 +512,26 @@ fn sort_and_filter() {
     assert_eq!(r["hiddenRows"], 1);
 }
 
+/// Turning the filter on with only the header row selected filters the data below it (#201).
+#[test]
+fn filter_on_a_selected_header_row_covers_the_data_below() {
+    let mut s = s();
+    s.execute(
+        "range.setValues",
+        json!({"range": "A1", "values": [["Name", "City"], ["Ana", "SP"], ["Bia", "RJ"], ["Caio", "SP"], ["Duda", "BH"], ["Eva", "RJ"]]}),
+    )
+    .unwrap();
+    s.execute("selection.set", json!({"range": "A1:B1"})).unwrap();
+    let r = s.execute("data.filter", json!({})).unwrap();
+    assert_eq!(r["range"], "A1:B6");
+    let r = s.execute("data.filterBy", json!({"column": "B", "values": ["SP"]})).unwrap();
+    assert_eq!(r["hiddenRows"], 3);
+    // An explicit range is taken as given.
+    s.execute("data.filter", json!({})).unwrap();
+    let r = s.execute("data.filter", json!({"range": "A1:B1"})).unwrap();
+    assert_eq!(r["range"], "A1:B1");
+}
+
 /// A sheet with locked data in A1:B3, unlocked cells in D1:D3 and row 10, then protected.
 fn protected(extra: serde_json::Value) -> Session {
     let mut s = s();

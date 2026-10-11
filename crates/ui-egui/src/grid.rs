@@ -1803,6 +1803,7 @@ fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_open: bool)
     let wb = app.session.active().map(|d| d.wb.clone()).unwrap_or(wb);
     let values = gridcraft_engine::cmd::data::filter_values(&wb, si, col);
     let key = egui::Id::new(("filter_sel", col));
+    let search_key = egui::Id::new(("filter_search", col));
     let mut close = false;
     let area = egui::Area::new(egui::Id::new("filter_menu")).fixed_pos(at + vec2(-180.0, 10.0)).order(egui::Order::Foreground);
     let response = area.show(ui.ctx(), |ui| {
@@ -1819,19 +1820,32 @@ fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_open: bool)
             ui.separator();
             ui.label(egui::RichText::new("Filter").strong());
             let mut checks: Vec<(String, bool)> = ui.ctx().data_mut(|d| d.get_temp::<Vec<(String, bool)>>(key)).unwrap_or(values.clone());
-            let all = checks.iter().all(|(_, b)| *b);
+            // A search narrows the list; Select All and Apply then only cover the matches.
+            let mut search: String = ui.ctx().data_mut(|d| d.get_temp(search_key)).unwrap_or_default();
+            let field = ui.add(egui::TextEdit::singleline(&mut search).hint_text("Search").desired_width(f32::INFINITY));
+            if !was_open {
+                field.request_focus();
+            }
+            let needle = search.trim().to_lowercase();
+            let matches = |v: &str| needle.is_empty() || v.to_lowercase().contains(&needle);
+            let all = checks.iter().filter(|(v, _)| matches(v)).all(|(_, b)| *b);
             let mut all_new = all;
-            if ui.checkbox(&mut all_new, "(Select All)").changed() {
-                for c in checks.iter_mut() {
+            let label = if needle.is_empty() { "(Select All)" } else { "(Select All Search Results)" };
+            if ui.checkbox(&mut all_new, label).changed() {
+                for c in checks.iter_mut().filter(|(v, _)| matches(v)) {
                     c.1 = all_new;
                 }
             }
             egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
-                for (v, on) in checks.iter_mut() {
+                for (v, on) in checks.iter_mut().filter(|(v, _)| matches(v)) {
                     ui.checkbox(on, v.as_str());
                 }
             });
-            ui.ctx().data_mut(|d| d.insert_temp(key, checks.clone()));
+            ui.ctx().data_mut(|d| {
+                d.insert_temp(key, checks.clone());
+                d.insert_temp(search_key, search.clone());
+            });
+            let checks: Vec<(String, bool)> = checks.iter().map(|(v, on)| (v.clone(), *on && matches(v))).collect();
             ui.separator();
             ui.horizontal(|ui| {
                 if ui.button("Clear Filter").clicked() {
@@ -1853,7 +1867,10 @@ fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_open: bool)
         });
     });
     if close || popup_dismissed(&response.response, was_open) {
-        ui.ctx().data_mut(|d| d.remove::<Vec<(String, bool)>>(key));
+        ui.ctx().data_mut(|d| {
+            d.remove::<Vec<(String, bool)>>(key);
+            d.remove::<String>(search_key);
+        });
         app.grid.filter_menu = None;
     }
 }

@@ -431,7 +431,16 @@ fn toggle_filter(s: &mut Session, p: &Json) -> Result<Json> {
             Ok(json!({"filter": false}))
         });
     }
-    let r = data_range(s, p)?;
+    let mut r = data_range(s, p)?;
+    // A selected header row filters the data below it (#201).
+    if p.get("range").is_none() && r.height() == 1 {
+        let d = s.doc()?;
+        let sh = d.wb.active().ok_or(EngineError::NoDocument)?;
+        let below = current_region(sh, r.start).end.row;
+        if below > r.end.row {
+            r = RangeRef::new(r.start, CellRef::new(below, r.end.col));
+        }
+    }
     edit(s, |cx| {
         cx.sheet_mut(sheet)?.autofilter = Some(AutoFilter { range: r, criteria: vec![] });
         Ok(json!({"filter": true, "range": r.a1()}))
