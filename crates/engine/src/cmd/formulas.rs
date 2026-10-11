@@ -253,7 +253,15 @@ fn define_name(s: &mut Session, p: &Json) -> Result<Json> {
         Some(sh) => Some(d.wb.sheet_index(sh).ok_or_else(|| bad("formulas.defineName", "no such sheet"))?),
     };
     let refers = match str_param(p, "refersTo") {
-        Some(r) => r.trim_start_matches('=').to_string(),
+        // As in Excel, relative references are relative to the active cell; names keep them
+        // relative to A1, as files do.
+        Some(r) => match gridcraft_formula::parse(r.trim_start_matches('=')) {
+            Ok(e) if gridcraft_formula::adjust::has_relative_refs(&e) => {
+                let at = d.selection.active;
+                gridcraft_formula::print(&gridcraft_formula::adjust::shift_relative_wrapping(e, -(at.row as i64), -(at.col as i64)))
+            }
+            _ => r.trim_start_matches('=').to_string(),
+        },
         None => {
             let sh = d.wb.active().ok_or(EngineError::NoDocument)?;
             let r = d.selection.current();
@@ -444,7 +452,7 @@ fn create_from_selection(s: &mut Session, p: &Json) -> Result<Json> {
 
 fn trace_precedents(s: &mut Session, p: &Json) -> Result<Json> {
     let d = s.doc()?;
-    let at = cell_param(p, "cell").unwrap_or(d.selection.active);
+    let at = cell_param(s, p, "cell")?.unwrap_or(d.selection.active);
     let areas = d.calc.graph.precedents_of((d.wb.active_sheet, at));
     let v: Vec<Json> = areas.iter().map(|a| json!({"sheet": d.wb.sheet(a.sheet).map(|s| s.name.clone()), "range": a.range.a1()})).collect();
     Ok(Json::Array(v))
@@ -452,7 +460,7 @@ fn trace_precedents(s: &mut Session, p: &Json) -> Result<Json> {
 
 fn trace_dependents(s: &mut Session, p: &Json) -> Result<Json> {
     let d = s.doc()?;
-    let at = cell_param(p, "cell").unwrap_or(d.selection.active);
+    let at = cell_param(s, p, "cell")?.unwrap_or(d.selection.active);
     let mut deps = Vec::new();
     d.calc.graph.dependents(d.wb.active_sheet, at, &mut deps);
     deps.sort();
@@ -493,7 +501,7 @@ fn error_checking(s: &mut Session, _: &Json) -> Result<Json> {
 
 fn evaluate_formula(s: &mut Session, p: &Json) -> Result<Json> {
     let d = s.doc()?;
-    let at = cell_param(p, "cell").unwrap_or(d.selection.active);
+    let at = cell_param(s, p, "cell")?.unwrap_or(d.selection.active);
     let sheet = d.wb.active_sheet;
     let text = match str_param(p, "formula") {
         Some(f) => f.trim_start_matches('=').to_string(),
@@ -525,7 +533,7 @@ fn evaluate_formula(s: &mut Session, p: &Json) -> Result<Json> {
 fn evaluate(s: &mut Session, p: &Json) -> Result<Json> {
     let d = s.doc()?;
     let f = str_param(p, "formula").ok_or_else(|| bad("formulas.evaluate", "missing `formula`"))?;
-    let at = cell_param(p, "cell").unwrap_or(d.selection.active);
+    let at = cell_param(s, p, "cell")?.unwrap_or(d.selection.active);
     let v = gridcraft_calc::evaluate(&d.wb, d.wb.active_sheet, at, f);
     Ok(crate::cmd::inspect::value_json(&v))
 }
@@ -563,4 +571,28 @@ fn calc_options(s: &mut Session, p: &Json) -> Result<Json> {
         }
         Ok(json!({"mode": format!("{:?}", cx.wb.calc.mode)}))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_with_relative_references() {
+        let mut s = Session::new();
+        s.new_workbook();
+        s.execute("range.setValues", json!({"range": "A1", "values": [[1], [2], [3]]})).unwrap();
+        // Defined from B2, `=Sheet1!A2` is "the cell to the left".
+        s.execute("selection.set", json!({"range": "B2"})).unwrap();
+        let r = s.execute("formulas.defineName", json!({"name": "LeftCell", "refersTo": "=Sheet1!A2"})).unwrap();
+        assert_eq!(r["refersTo"], "=Sheet1!XFD1");
+        s.execute("cell.set", json!({"cell": "B1", "input": "=LeftCell"})).unwrap();
+        s.execute("cell.set", json!({"cell": "B3", "input": "=LeftCell*10"})).unwrap();
+        let v = |s: &mut Session, a: &str| s.execute("cell.get", json!({"cell": a})).unwrap()["value"].clone();
+        assert_eq!(v(&mut s, "B1"), json!(1.0));
+        assert_eq!(v(&mut s, "B3"), json!(30.0));
+        // Absolute references are kept as they are.
+        let r = s.execute("formulas.defineName", json!({"name": "First", "refersTo": "=Sheet1!$A$1"})).unwrap();
+        assert_eq!(r["refersTo"], "=Sheet1!$A$1");
+    }
 }

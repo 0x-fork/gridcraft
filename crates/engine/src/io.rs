@@ -1,4 +1,4 @@
-//! Opening and saving files: XLSX, XLSB and ODS data import, CSV/TSV, JSON (debug), HTML export.
+//! Opening and saving files: XLSX, legacy XLS import, XLSB and ODS data import, CSV/TSV, JSON (debug), HTML export.
 
 use std::fmt::Write as _;
 
@@ -11,6 +11,8 @@ use crate::{EngineError, Result};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileKind {
     Xlsx,
+    /// Excel 97-2003 workbook (import only).
+    Xls,
     Xlsb,
     Ods,
     Csv,
@@ -24,6 +26,7 @@ impl FileKind {
         let ext = std::path::Path::new(path).extension()?.to_str()?.to_ascii_lowercase();
         Some(match ext.as_str() {
             "xlsx" | "xlsm" | "xltx" | "xltm" => FileKind::Xlsx,
+            "xls" | "xlt" => FileKind::Xls,
             "xlsb" => FileKind::Xlsb,
             "ods" => FileKind::Ods,
             "csv" => FileKind::Csv,
@@ -45,9 +48,13 @@ pub fn open_bytes(name: &str, bytes: &[u8]) -> Result<(Workbook, Vec<String>)> {
             "'{name}' is password-protected. GridCraft can't open encrypted workbooks yet; remove the password in Excel and try again."
         )));
     }
+    if sniffed == gridcraft_xlsx::Format::Xls {
+        let (wb, report) = gridcraft_xlsx::read_xls(bytes).map_err(|e| EngineError::Other(format!("We can't open '{name}': {e}")))?;
+        return Ok((wb, report.warnings));
+    }
     if sniffed == gridcraft_xlsx::Format::LegacyBinary {
         return Err(EngineError::Other(format!(
-            "'{name}' is an Excel 97-2003 (.xls) workbook or another legacy binary file. GridCraft doesn't open these yet; save it as .xlsx in Excel and try again."
+            "'{name}' is a legacy binary file but not an Excel workbook (no workbook stream). GridCraft can't open it."
         )));
     }
     // Content wins over the extension: an ODS or XLSB package is imported as what it is,
@@ -106,7 +113,17 @@ fn rename_first_sheet(wb: &mut Workbook, path: &str) {
 pub fn save_bytes(wb: &Workbook, path: &str) -> Result<Vec<u8>> {
     let sheet = wb.active_sheet;
     match FileKind::from_path(path).unwrap_or(FileKind::Xlsx) {
+        // A macro-free .xlsx can't hold a VBA project (Excel refuses such a file), so only a .xlsm
+        // keeps the macros; any other name saves without them, as Excel does.
+        FileKind::Xlsx if wb.vba_project.is_some() && !path.to_ascii_lowercase().ends_with(".xlsm") => {
+            let mut plain = wb.clone();
+            plain.vba_project = None;
+            gridcraft_xlsx::write_xlsx(&plain).map_err(|e| EngineError::Other(e.to_string()))
+        }
         FileKind::Xlsx => gridcraft_xlsx::write_xlsx(wb).map_err(|e| EngineError::Other(e.to_string())),
+        FileKind::Xls => {
+            Err(EngineError::Other("Excel 97-2003 (.xls) is supported for import only. Save as .xlsx or another supported export format.".into()))
+        }
         FileKind::Xlsb => Err(EngineError::Other("XLSB is supported for data import only. Save as .xlsx or another supported export format.".into())),
         FileKind::Ods => Err(EngineError::Other("ODS is supported for data import only. Save as .xlsx or another supported export format.".into())),
         FileKind::Csv => Ok(wb.sheet(sheet).map(|sh| gridcraft_xlsx::write_csv(sh, wb, b',')).unwrap_or_default()),
@@ -356,6 +373,20 @@ pub fn image_size(data: &[u8]) -> Option<(u32, u32)> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn macros_are_saved_only_into_xlsm() {
+        let mut wb = Workbook::new();
+        wb.vba_project = Some(b"vba".to_vec());
+        let has_macros = |path: &str| {
+            let bytes = save_bytes(&wb, path).unwrap();
+            gridcraft_xlsx::read_xlsx(&bytes).unwrap().0.vba_project.is_some()
+        };
+        assert!(has_macros("book.xlsm"));
+        assert!(has_macros("BOOK.XLSM"));
+        assert!(!has_macros("book.xlsx"), "an .xlsx never carries a VBA project");
+        assert!(wb.vba_project.is_some(), "the open workbook keeps its macros");
+    }
+
     /// A minimal compound (CFB/OLE2) file — FAT in sector 0, directory in sector 1 — holding a
     /// root entry and the given stream names.
     fn cfb(streams: &[&str]) -> Vec<u8> {
@@ -388,10 +419,10 @@ mod tests {
     }
 
     #[test]
-    fn legacy_xls_is_not_called_encrypted() {
-        let err = open_bytes("old.xls", &cfb(&["Workbook", "\u{5}SummaryInformation"])).unwrap_err();
+    fn other_compound_files_are_not_called_encrypted() {
+        let err = open_bytes("old.doc", &cfb(&["WordDocument", "\u{5}SummaryInformation"])).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("97-2003") && msg.contains(".xlsx"), "got: {msg}");
+        assert!(msg.contains("not an Excel workbook"), "got: {msg}");
         assert!(!msg.contains("password"), "got: {msg}");
     }
 }

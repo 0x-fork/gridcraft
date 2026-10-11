@@ -444,7 +444,7 @@ fn move_chart(s: &mut Session, p: &Json) -> Result<Json> {
         Some(n) => Some(s.doc()?.wb.sheet_index(n).ok_or_else(|| bad("chart.move", "no such sheet"))?),
         None => None,
     };
-    let at = cell_param(p, "at");
+    let at = cell_param_on(s, p, "at", target.unwrap_or(si))?;
     edit(s, |cx| {
         let mut chart = cx.sheet_mut(si)?.charts.remove(ci);
         if let Some(a) = at {
@@ -876,10 +876,16 @@ fn new_script(s: &mut Session, p: &Json) -> Result<Json> {
 }
 
 fn all_scripts(s: &mut Session, _: &Json) -> Result<Json> {
-    let all = stash_get(&s.doc()?.wb, SCRIPTS_NAME);
-    Ok(Json::Array(
-        all.as_object().map(|o| o.iter().map(|(k, v)| json!({"name": k, "steps": v.as_array().map_or(0, Vec::len)})).collect()).unwrap_or_default(),
-    ))
+    let wb = &s.doc()?.wb;
+    let all = stash_get(wb, SCRIPTS_NAME);
+    let mut list: Vec<Json> =
+        all.as_object().map(|o| o.iter().map(|(k, v)| json!({"name": k, "steps": v.as_array().map_or(0, Vec::len)})).collect()).unwrap_or_default();
+    // A preserved VBA project is reported alongside GridCraft's own scripts; it is carried on
+    // save but never executed here, so it has no step count.
+    if let Some(bytes) = &wb.vba_project {
+        list.push(json!({"name": "(VBA)", "steps": 0, "kind": "vba", "size": bytes.len(), "executed": false}));
+    }
+    Ok(Json::Array(list))
 }
 
 fn run_script(s: &mut Session, p: &Json) -> Result<Json> {
@@ -951,7 +957,7 @@ fn checkbox(s: &mut Session, p: &Json) -> Result<Json> {
 fn toggle_checkbox(s: &mut Session, p: &Json) -> Result<Json> {
     let si = target_sheet(s, p)?;
     let d = s.doc()?;
-    let cells: Vec<CellRef> = match cell_param(p, "cell") {
+    let cells: Vec<CellRef> = match cell_param_on(s, p, "cell", si)? {
         Some(c) => vec![c],
         None => d.selection.ranges.iter().flat_map(|r| r.iter().take(100_000).collect::<Vec<_>>()).collect(),
     };
@@ -1023,7 +1029,7 @@ fn new_cell_style(s: &mut Session, p: &Json) -> Result<Json> {
     let name = str_param(p, "name").ok_or_else(|| bad("home.newCellStyle", "missing `name`"))?.to_string();
     let d = s.doc()?;
     let sh = d.wb.active().ok_or(EngineError::NoDocument)?;
-    let c = cell_param(p, "fromCell").unwrap_or(d.selection.active);
+    let c = cell_param(s, p, "fromCell")?.unwrap_or(d.selection.active);
     let style = d.wb.styles.get(sh.style_id(c)).clone();
     edit(s, |cx| {
         cx.wb.cell_styles.retain(|(n, _)| !n.eq_ignore_ascii_case(&name));

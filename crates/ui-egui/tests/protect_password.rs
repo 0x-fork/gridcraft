@@ -57,7 +57,7 @@ fn protect_and_unprotect_sheet_mask_the_password() {
     h.get_by_label("   OK   ").click();
     h.run_steps(3);
     assert!(h.state().dialog.is_none());
-    assert!(h.state().session.active().unwrap().wb.active().unwrap().protection.as_ref().is_some_and(|p| p.password_hash.is_some()));
+    assert!(h.state().session.active().unwrap().wb.active().unwrap().protection.as_ref().is_some_and(|p| p.password.is_some()));
 
     // Unprotect asks for the password with a masked field too, and it starts hidden again.
     h.state_mut().open_dialog("unprotectSheet", json!({}));

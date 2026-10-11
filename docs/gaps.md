@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (§15: the ODD* bond functions landed) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (§3 narrowed by XLSX pass-through, #330) · **Target:** Microsoft Excel (Microsoft 365)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -33,12 +33,14 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 - **Impact:** finance and data users routinely have big workbooks.
 - **Estimate:** 25–40 h. [target-app-parity.md](target-app-parity.md#performance), [hardware-parity.md](hardware-parity.md)
 
-### 3. Unmodelled XLSX content is dropped on save (FF)
-- **Missing:** pass-through of parts and extensions we don't model (form controls, slicers,
-  timelines, external links, OLE objects, custom XML, query tables, data model, chart details).
-- **Evidence:** reader warns and skips (`crates/xlsx/src/read.rs`); external links "not supported".
-- **Impact:** open-edit-save silently simplifies colleagues' workbooks.
-- **Estimate:** 10–15 h. [file-format-parity.md](file-format-parity.md)
+### 3. Some unmodelled XLSX content is dropped on save (FF)
+- **Missing:** slicers and their caches, timelines, the data model, query tables attached to
+  tables, unmodelled `extLst` entries, chart details. Pass-through (#330) keeps custom XML,
+  external links, connections, sheet query tables, printer settings, form and ActiveX controls,
+  OLE objects and sheet backgrounds; never checked in Excel (repair prompts unknown).
+- **Evidence:** `crates/xlsx/src/passthrough.rs` (what is kept, and why the rest isn't).
+- **Impact:** open-edit-save still simplifies workbooks with slicers, timelines or Power Pivot.
+- **Estimate:** 6–10 h. [file-format-parity.md](file-format-parity.md)
 
 ### 4. Charts lose type and options on round trip; shallow chart model (F, FF)
 - **Missing:** kinds that survive XLSX (stock, combo, histogram, box, waterfall, funnel, treemap,
@@ -64,11 +66,14 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 - **Impact:** wrong numbers are worse than missing features.
 - **Estimate:** 10–15 h. [function-parity.md](function-parity.md#formula-language)
 
-### 7. No legacy `.xls`; no password-protected workbooks (FF)
-- **Evidence:** #121. Since #17 (closed #11) both are recognised through a CFB sniff and refused with a clear message, but neither opens.
+### 7. Legacy `.xls` only partly read; no password-protected workbooks (FF)
+- **Evidence:** #121: Excel 97-2003 (BIFF8) `.xls` files now open (values, formulas, number
+  formats, merges, sizes, names); fonts, fills, borders, charts, pictures, comments, conditional
+  formats, validation and BIFF5 files are not read, and `.xls` is never written. Encrypted
+  workbooks (OOXML and `.xls`) are recognised and refused with a clear message since #17 (closed #11).
 - **Impact:** common in finance, government and anything older than 2007; encrypted files are
   routine in business.
-- **Estimate:** 28–42 h (`.xls` read 20–30, encryption 8–12). [file-format-parity.md](file-format-parity.md)
+- **Estimate:** 18–27 h (`.xls` styles and objects 10–15, encryption 8–12). [file-format-parity.md](file-format-parity.md)
 
 ### 8. PivotTables: no slicers, calculated items, PivotCharts; unverified in Excel (F)
 - **Evidence:** `parity-checklist.md` missing `insert.slicer`, `insert.timeline`,
@@ -98,8 +103,8 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   data model (`data.fromWeb`, `data.relationships` missing). **Estimate:** 60–100 h.
 
 ### 13. Analysis tools: Solver, Analysis ToolPak, Forecast Sheet (F)
-- `data.solver`, `data.analysisToolPak`, `data.forecastSheet` missing (the FORECAST.ETS family the
-  Forecast Sheet builds on is in). **Estimate:** 18–30 h.
+- `data.solver`, `data.analysisToolPak` missing. Forecast Sheet (`data.forecastSheet`) and the
+  FORECAST.ETS family are in; the sheet has no Forecast Start (hindcast) option yet. **Estimate:** 15–25 h.
 
 ### 14. Page Layout view and print polish (U, F)
 - Page Layout view landed (#329): paper view with rulers and in-place header/footer editing.
@@ -155,6 +160,9 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-11 | minor | §16: comment navigation, Show Comments, Show All Notes and Convert to Comments landed (#281) |
+| 2026-10-11 | minor | §7: `.xls` (BIFF8) import of values, formulas and number formats (#121) |
+| 2026-10-11 | minor | §3: XLSX pass-through keeps custom XML, external links, connections, query tables, printer settings, controls and OLE objects (#330, #324) |
+| 2026-10-11 | minor | §13: Forecast Sheet landed (#322) |
 | 2026-10-11 | minor | §15: ODDFPRICE, ODDFYIELD, ODDLPRICE, ODDLYIELD added (18 functions missing) |
 | 2026-10-11 | minor | §15: PERCENTOF and EUROCONVERT added (20 functions missing) |
 | 2026-10-11 | minor | §15: BAHTTEXT added (21 functions missing) |

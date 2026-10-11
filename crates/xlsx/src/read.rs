@@ -98,6 +98,7 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         return Err(IoError::Format(format!("unexpected root element <{}> in workbook part", wb_xml.name)));
     }
     let wb_rels = cx.pkg.rels(&wb_part)?;
+    let mut kept = crate::passthrough::KeptReader::new(&mut cx);
     cx.cell_pictures = match crate::richdata::read(&mut cx, &wb_rels) {
         Ok(pictures) => pictures,
         Err(error) => {
@@ -184,6 +185,7 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     }
     if let Some(p) = wb_xml.child("workbookProtection") {
         wb.protected_structure = p.flag("lockStructure", false);
+        wb.structure_password = if wb.protected_structure { crate::sheet_read::read_password(p, "workbook") } else { None };
     }
     let active_tab = wb_xml.path(&["bookViews", "workbookView"]).and_then(|v| v.attr_u32("activeTab")).unwrap_or(0) as usize;
 
@@ -218,6 +220,7 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
             Err(IoError::TooLarge(m)) => return Err(IoError::TooLarge(m)),
             Err(e) => cx.warn(format!("PivotTables on sheet \"{name}\" could not be read: {e}")),
         }
+        sheet.preserved = kept.sheet(&mut cx, &rel.target, &name);
         sheet.visibility = match se.attr("state") {
             Some("hidden") => Visibility::Hidden,
             Some("veryHidden") => Visibility::VeryHidden,
@@ -311,12 +314,20 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         wb.props.company = x.child("Company").map(|e| e.text.trim().to_string()).unwrap_or_default();
     }
 
-    if wb_rels.iter().any(|r| r.kind == "vbaProject") {
-        cx.warn("macros (VBA project) are not supported and were dropped");
+    // A VBA project is carried through unchanged: GridCraft never runs macros, but preserving the
+    // binary keeps macro-enabled workbooks from being silently stripped on save.
+    if let Some(r) = find_rel(&wb_rels, "vbaProject").cloned() {
+        match cx.pkg.read(&r.target) {
+            Ok(Some(data)) => {
+                wb.vba_project = Some(data);
+                cx.warn("macros (VBA project) were kept but not executed");
+            }
+            Ok(None) => cx.warn("macros (VBA project) reference a missing part and were dropped"),
+            Err(IoError::TooLarge(m)) => return Err(IoError::TooLarge(m)),
+            Err(e) => cx.warn(format!("macros (VBA project) could not be read and were dropped: {e}")),
+        }
     }
-    if wb_rels.iter().any(|r| r.kind == "externalLink") {
-        cx.warn("links to external workbooks are not supported");
-    }
+    wb.preserved = kept.workbook(&mut cx, &wb_part, &wb_xml);
     // Calls of LAMBDA names are spelled like the names (the parser upper-cases them).
     wb.apply_name_call_case();
     wb.styles = cx.styles;

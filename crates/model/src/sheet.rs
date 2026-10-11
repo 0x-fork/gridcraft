@@ -90,6 +90,9 @@ pub struct Sheet {
     pub images: Vec<Image>,
     pub shapes: Vec<Shape>,
     pub sparklines: Vec<Sparkline>,
+    /// On-sheet slicer widgets (filter a table column by clicking value tiles).
+    #[serde(default)]
+    pub slicers: Vec<Slicer>,
     /// PivotTables whose output lives on this sheet.
     #[serde(default)]
     pub pivots: Vec<PivotTable>,
@@ -104,6 +107,10 @@ pub struct Sheet {
     /// Normal, Page Layout or Page Break Preview.
     #[serde(default)]
     pub view: SheetViewMode,
+    /// Unmodelled file content of this sheet kept for saving (form controls, OLE objects, query
+    /// tables). Goes away with the sheet; not in JSON.
+    #[serde(skip)]
+    pub preserved: Option<Arc<crate::preserved::Preserved>>,
 }
 
 /// Default width of a column (points) and height of a row (points) for the default font.
@@ -142,6 +149,7 @@ impl Sheet {
             images: vec![],
             shapes: vec![],
             sparklines: vec![],
+            slicers: vec![],
             pivots: vec![],
             protection: None,
             edit_ranges: vec![],
@@ -149,6 +157,7 @@ impl Sheet {
             view_active: CellRef::default(),
             view_top_left: CellRef::default(),
             view: SheetViewMode::Normal,
+            preserved: None,
         }
     }
 

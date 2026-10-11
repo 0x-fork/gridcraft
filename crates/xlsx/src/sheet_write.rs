@@ -182,7 +182,11 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
             let _ = write!(
                 s,
                 " topLeftCell=\"{}\" activePane=\"{pane}\" state=\"frozen\"/>",
-                CellRef::new(rows.min(gridcraft_core::MAX_ROWS - 1), cols.min(gridcraft_core::MAX_COLS - 1)).a1()
+                CellRef::new(
+                    rows.max(sheet.view_top_left.row).min(gridcraft_core::MAX_ROWS - 1),
+                    cols.max(sheet.view_top_left.col).min(gridcraft_core::MAX_COLS - 1)
+                )
+                .a1()
             );
             let _ = write!(s, "<selection pane=\"{pane}\" activeCell=\"{active}\" sqref=\"{active}\"/>");
         }
@@ -332,6 +336,9 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
         if !p.select_unlocked {
             s.push_str(" selectUnlockedCells=\"1\"");
         }
+        if let Some(h) = &p.password {
+            s.push_str(&password_attrs(h, ""));
+        }
         s.push_str("/>");
     }
     s.push_str(&protected_ranges_xml(sheet));
@@ -420,6 +427,8 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
         }
         s.push_str("/>");
     }
+    // Unmodelled content kept from the source file (printer settings, controls, OLE objects…).
+    let kept = crate::passthrough::SheetKept::write(sheet, &mut rels, out);
     let m = |i: usize| num(p.margins.get(i).copied().unwrap_or(0.75) as f64);
     let _ =
         write!(s, "<pageMargins left=\"{}\" right=\"{}\" top=\"{}\" bottom=\"{}\" header=\"{}\" footer=\"{}\"/>", m(0), m(1), m(2), m(3), m(4), m(5));
@@ -435,14 +444,36 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
     if let Some((w, h)) = p.fit_to {
         let _ = write!(s, " fitToWidth=\"{w}\" fitToHeight=\"{h}\"");
     }
-    let _ = write!(s, " orientation=\"{}\"/>", if p.orientation == Orientation::Landscape { "landscape" } else { "portrait" });
-    if !p.header.is_empty() || !p.footer.is_empty() {
-        s.push_str("<headerFooter>");
-        if !p.header.is_empty() {
-            let _ = write!(s, "<oddHeader>{}</oddHeader>", esc(&p.header));
+    let _ = write!(s, " orientation=\"{}\"", if p.orientation == Orientation::Landscape { "landscape" } else { "portrait" });
+    if let Some(id) = kept.page_setup_id() {
+        let _ = write!(s, " r:id=\"{id}\"");
+    }
+    s.push_str("/>");
+    if p.has_header_footer() || p.different_first || p.different_odd_even || !p.hf_scale_with_doc || !p.hf_align_with_margins {
+        s.push_str("<headerFooter");
+        for (attr, on, default) in [
+            ("differentOddEven", p.different_odd_even, false),
+            ("differentFirst", p.different_first, false),
+            ("scaleWithDoc", p.hf_scale_with_doc, true),
+            ("alignWithMargins", p.hf_align_with_margins, true),
+        ] {
+            if on != default {
+                let _ = write!(s, " {attr}=\"{}\"", u8::from(on));
+            }
         }
-        if !p.footer.is_empty() {
-            let _ = write!(s, "<oddFooter>{}</oddFooter>", esc(&p.footer));
+        s.push('>');
+        // CT_HeaderFooter's element order.
+        for (tag, text) in [
+            ("oddHeader", &p.header),
+            ("oddFooter", &p.footer),
+            ("evenHeader", &p.even_header),
+            ("evenFooter", &p.even_footer),
+            ("firstHeader", &p.first_header),
+            ("firstFooter", &p.first_footer),
+        ] {
+            if !text.is_empty() {
+                let _ = write!(s, "<{tag}>{}</{tag}>", esc(text));
+            }
         }
         s.push_str("</headerFooter>");
     }
@@ -519,11 +550,16 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
             rels.add_uri(REL_THREADED_COMMENT, &format!("../threadedComments/threadedComment{n}.xml"));
         }
         out.default_type("vml", "application/vnd.openxmlformats-officedocument.vmlDrawing");
-        out.part(&format!("xl/drawings/vmlDrawing{n}.vml"), None, vml_xml(sheet, n).into_bytes());
+        let vml_name = format!("xl/drawings/vmlDrawing{n}.vml");
+        let vml = kept.notes_vml(vml_xml(sheet, n), &vml_name, out);
+        out.part(&vml_name, None, vml.into_bytes());
         rels.add("comments", &format!("../comments{n}.xml"));
         let rid = rels.add("vmlDrawing", &format!("../drawings/vmlDrawing{n}.vml"));
         let _ = write!(s, "<legacyDrawing r:id=\"{rid}\"/>");
+    } else if let Some(rid) = kept.lone_vml(&mut rels, out) {
+        let _ = write!(s, "<legacyDrawing r:id=\"{rid}\"/>");
     }
+    s.push_str(&kept.elements());
     // Tables.
     if !tables.is_empty() {
         let mut parts = String::new();
@@ -1107,26 +1143,33 @@ fn threaded_xml(sheet: &Sheet, ids: &BTreeMap<CellRef, Vec<String>>, persons: &m
     s
 }
 
+/// A protection password hash as attributes, each name preceded by `prefix` (see
+/// [`crate::sheet_read::read_password`]).
+pub(crate) fn password_attrs(h: &gridcraft_model::PasswordHash, prefix: &str) -> String {
+    let name = |base: &str| crate::sheet_read::password_attr(prefix, base);
+    match h {
+        gridcraft_model::PasswordHash::Legacy(h) => format!(" {}=\"{h:04X}\"", name("password")),
+        gridcraft_model::PasswordHash::Iterated { algorithm, hash, salt, spin_count } => format!(
+            " {}=\"{}\" {}=\"{}\" {}=\"{}\" {}=\"{spin_count}\"",
+            name("algorithmName"),
+            esc_attr(algorithm),
+            name("hashValue"),
+            esc_attr(hash),
+            name("saltValue"),
+            esc_attr(salt),
+            name("spinCount")
+        ),
+    }
+}
+
 /// Allow Edit Ranges: `<protectedRanges>` (after `sheetProtection`).
 fn protected_ranges_xml(sheet: &Sheet) -> String {
     let mut s = String::new();
     for r in sheet.edit_ranges.iter().filter(|r| !r.ranges.is_empty()) {
         let sqref: Vec<String> = r.ranges.iter().map(|x| x.a1()).collect();
         let _ = write!(s, "<protectedRange name=\"{}\" sqref=\"{}\"", esc_attr(&r.title), sqref.join(" "));
-        match &r.password {
-            Some(gridcraft_model::PasswordHash::Legacy(h)) => {
-                let _ = write!(s, " password=\"{h:04X}\"");
-            }
-            Some(gridcraft_model::PasswordHash::Iterated { algorithm, hash, salt, spin_count }) => {
-                let _ = write!(
-                    s,
-                    " algorithmName=\"{}\" hashValue=\"{}\" saltValue=\"{}\" spinCount=\"{spin_count}\"",
-                    esc_attr(algorithm),
-                    esc_attr(hash),
-                    esc_attr(salt)
-                );
-            }
-            None => {}
+        if let Some(h) = &r.password {
+            s.push_str(&password_attrs(h, ""));
         }
         if let Some(sd) = &r.security_descriptor {
             let _ = write!(s, " securityDescriptor=\"{}\"", esc_attr(sd));

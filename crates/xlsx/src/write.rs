@@ -20,6 +20,11 @@ pub const CT_DRAWING: &str = "application/vnd.openxmlformats-officedocument.draw
 pub const CT_CHART: &str = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
 pub const CT_TABLE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml";
 pub const CT_COMMENTS: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml";
+/// Main workbook part: macro-free and macro-enabled variants (Excel refuses a `.xlsm` whose main
+/// part uses the macro-free content type, and vice versa).
+pub const CT_WORKBOOK_MAIN: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml";
+pub const CT_WORKBOOK_MAIN_MACRO: &str = "application/vnd.ms-excel.sheet.macroEnabled.main+xml";
+pub const CT_VBA: &str = "application/vnd.ms-office.vbaProject";
 pub const CT_THREADED_COMMENTS: &str = "application/vnd.ms-excel.threadedcomments+xml";
 pub const CT_PERSONS: &str = "application/vnd.ms-excel.person+xml";
 pub const REL_THREADED_COMMENT: &str = "http://schemas.microsoft.com/office/2017/10/relationships/threadedComment";
@@ -39,6 +44,9 @@ impl Rels {
         let id = format!("rId{}", self.items.len() + 1);
         let ty = match kind {
             "core-properties" => "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties".to_string(),
+            // The VBA project relationship lives in the Microsoft-documented namespace, not the
+            // OpenXML one; Excel rejects the file if this type is wrong.
+            "vbaProject" => "http://schemas.microsoft.com/office/2006/relationships/vbaProject".to_string(),
             k => format!("{NS_REL}/{k}"),
         };
         self.items.push((id.clone(), ty, target.to_string(), false));
@@ -53,6 +61,12 @@ impl Rels {
     pub fn add_uri(&mut self, ty: &str, target: &str) -> String {
         let id = format!("rId{}", self.items.len() + 1);
         self.items.push((id.clone(), ty.to_string(), target.to_string(), false));
+        id
+    }
+    /// Adds a relationship with its complete type URI, internal or external (kept content).
+    pub fn add_raw(&mut self, ty: &str, target: &str, external: bool) -> String {
+        let id = format!("rId{}", self.items.len() + 1);
+        self.items.push((id.clone(), crate::xml::esc_attr(ty), target.to_string(), external));
         id
     }
     pub fn is_empty(&self) -> bool {
@@ -114,6 +128,8 @@ pub struct Out {
     pub dynamic_arrays: bool,
     pub needs_calc: bool,
     pub cell_pictures: crate::richdata::PicturesOut,
+    /// Kept (pass-through) parts written so far.
+    pub kept: crate::passthrough::KeptOut,
 }
 
 impl Out {
@@ -173,6 +189,7 @@ pub fn write_xlsx(wb: &Workbook) -> Result<Vec<u8>, IoError> {
         dynamic_arrays: false,
         needs_calc: false,
         cell_pictures: Default::default(),
+        kept: Default::default(),
     };
     out.default_type("rels", "application/vnd.openxmlformats-package.relationships+xml");
     out.default_type("xml", "application/xml");
@@ -259,9 +276,11 @@ pub fn write_xlsx(wb: &Workbook) -> Result<Vec<u8>, IoError> {
     let mut w = format!("{XML_DECL}<workbook xmlns=\"{NS_MAIN}\" xmlns:r=\"{NS_REL}\">");
     w.push_str(if wb.date_system == gridcraft_core::DateSystem::D1904 { "<workbookPr date1904=\"1\"/>" } else { "<workbookPr/>" });
     if wb.protected_structure {
-        w.push_str("<workbookProtection lockStructure=\"1\"/>");
+        let pw = wb.structure_password.as_ref().map(|h| crate::sheet_write::password_attrs(h, "workbook")).unwrap_or_default();
+        let _ = write!(w, "<workbookProtection{pw} lockStructure=\"1\"/>");
     }
     let _ = write!(w, "<bookViews><workbookView activeTab=\"{active}\"/></bookViews><sheets>{sheets_xml}</sheets>");
+    w.push_str(&crate::passthrough::write_workbook(wb, &mut wb_rels, &mut out));
     if !names.is_empty() {
         let _ = write!(w, "<definedNames>{names}</definedNames>");
     }
@@ -327,7 +346,11 @@ pub fn write_xlsx(wb: &Workbook) -> Result<Vec<u8>, IoError> {
         out.part("xl/persons/person.xml", Some(CT_PERSONS), x.into_bytes());
         wb_rels.add_uri(REL_PERSON, "persons/person.xml");
     }
-    out.part("xl/workbook.xml", Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"), w.into_bytes());
+    out.part("xl/workbook.xml", Some(if wb.vba_project.is_some() { CT_WORKBOOK_MAIN_MACRO } else { CT_WORKBOOK_MAIN }), w.into_bytes());
+    if let Some(data) = &wb.vba_project {
+        wb_rels.add("vbaProject", "vbaProject.bin");
+        out.part("xl/vbaProject.bin", Some(CT_VBA), data.clone());
+    }
     out.part("xl/_rels/workbook.xml.rels", None, wb_rels.xml().into_bytes());
 
     // Document properties.
@@ -359,15 +382,17 @@ pub fn write_xlsx(wb: &Workbook) -> Result<Vec<u8>, IoError> {
     root.add("officeDocument", "xl/workbook.xml");
     root.add("core-properties", "docProps/core.xml");
     root.add("extended-properties", "docProps/app.xml");
+    crate::passthrough::write_package_rels(&mut root, &mut out);
     out.part("_rels/.rels", None, root.xml().into_bytes());
 
     // Content types first, then the parts in creation order.
     let mut ct = format!("{XML_DECL}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">");
     for (ext, t) in &out.defaults {
-        let _ = write!(ct, "<Default Extension=\"{ext}\" ContentType=\"{t}\"/>");
+        // Kept parts bring their content types (and extensions) from the input file: escape them.
+        let _ = write!(ct, "<Default Extension=\"{}\" ContentType=\"{}\"/>", esc_attr(ext), esc_attr(t));
     }
     for (part, t) in &out.overrides {
-        let _ = write!(ct, "<Override PartName=\"{}\" ContentType=\"{t}\"/>", esc_attr(part));
+        let _ = write!(ct, "<Override PartName=\"{}\" ContentType=\"{}\"/>", esc_attr(part), esc_attr(t));
     }
     ct.push_str("</Types>");
     let mut zip = ZipOut::new();
