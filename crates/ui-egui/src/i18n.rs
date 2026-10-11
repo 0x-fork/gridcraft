@@ -353,6 +353,7 @@ const JAPANESE: &[(&str, &str)] = &[
     ("Add Chart\nElement", "グラフ要素を追加"),
     ("Change\nChart Type", "グラフの種類の変更"),
     ("Switch\nRow/Column", "行/列の切り替え"),
+    ("Select\nData", "データの選択"),
     ("Data Labels: None", "データ ラベル: なし"),
     ("Data Labels: Show", "データ ラベル: 表示"),
     ("Legend: None", "凡例: なし"),

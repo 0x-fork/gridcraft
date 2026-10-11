@@ -517,6 +517,29 @@ impl Dialog {
                 };
                 d
             }
+            "selectData" => {
+                // Chart Design › Select Data: data range, series to keep, category axis labels.
+                let id = p("chart").as_u64();
+                let found = app.session.active().and_then(|doc| {
+                    let si = doc.wb.active_sheet;
+                    let sh = doc.wb.sheet(si)?;
+                    let ch = sh.charts.iter().find(|c| Some(u64::from(c.id)) == id)?;
+                    let data = gridcraft_chart::resolve(&doc.wb, si, ch);
+                    let names: Vec<String> = data.series.iter().map(|x| x.name.clone()).collect();
+                    let cats = ch.series.first().and_then(|x| x.categories.clone()).unwrap_or_default();
+                    Some((ch.source.clone().unwrap_or_default(), cats, names))
+                });
+                let Some((range, cats, names)) = found else {
+                    app.message = Some(("Select Data".into(), "Select a chart first.".into()));
+                    return None;
+                };
+                let eq = |t: &str| if t.is_empty() { String::new() } else { format!("={t}") };
+                Dialog::custom(
+                    "selectData",
+                    "Select Data Source",
+                    json!({"chart": id, "range": eq(&range), "range0": eq(&range), "categories": eq(&cats), "categories0": eq(&cats), "names": names, "remove": []}),
+                )
+            }
             "journal" => Dialog::custom("journal", "Action Journal", json!({})),
             "statistics" => {
                 let mut d = Dialog::custom("statistics", "Workbook Statistics", json!({}));
@@ -679,6 +702,7 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
                 "sort" => sort(app, ui, &mut d, &mut confirm),
                 "nameManager" => name_manager(app, ui),
                 "manageRules" => manage_rules(app, ui),
+                "selectData" => select_data(app, ui, &mut d, &mut confirm, &mut open),
                 "commandSearch" => command_search(app, ui, &mut d, &mut confirm),
                 "goalSeek" => goal_seek(app, ui, &mut d, &mut confirm),
                 "spelling" => spelling(app, ui, &mut d, &mut open),
@@ -1508,6 +1532,69 @@ fn name_manager(app: &mut SheetApp, ui: &mut egui::Ui) {
     });
     if ui.button("New…").clicked() {
         app.open_dialog("defineName", json!({}));
+    }
+}
+
+fn select_data(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, open: &mut bool) {
+    let text = |d: &Dialog, k: &str| d.values.get(k).and_then(Json::as_str).unwrap_or("").to_string();
+    let edit = |ui: &mut egui::Ui, d: &mut Dialog, key: &str, label: &str| {
+        ui.label(label);
+        let mut v = text(d, key);
+        if ui.add(egui::TextEdit::singleline(&mut v).desired_width(420.0)).changed() {
+            d.values.insert(key.into(), json!(v));
+        }
+    };
+    edit(ui, d, "range", "Chart data range:");
+    ui.add_space(6.0);
+    ui.strong("Legend Entries (Series)");
+    let names: Vec<String> =
+        d.values.get("names").and_then(Json::as_array).map(|a| a.iter().map(|n| n.as_str().unwrap_or("").to_string()).collect()).unwrap_or_default();
+    let mut remove: Vec<u64> =
+        d.values.get("remove").and_then(Json::as_array).map(|a| a.iter().filter_map(Json::as_u64).collect()).unwrap_or_default();
+    let kept = names.len().saturating_sub(remove.len());
+    egui::ScrollArea::vertical().id_salt("series").max_height(160.0).show(ui, |ui| {
+        for (i, name) in names.iter().enumerate() {
+            let i = i as u64;
+            let removed = remove.contains(&i);
+            ui.horizontal(|ui| {
+                let label = if name.is_empty() { format!("Series{}", i + 1) } else { name.clone() };
+                ui.label(if removed { egui::RichText::new(label).strikethrough().weak() } else { egui::RichText::new(label) });
+                if removed {
+                    if ui.small_button("Keep").clicked() {
+                        remove.retain(|x| *x != i);
+                    }
+                } else if ui.add_enabled(kept > 1, egui::Button::new("Remove").small()).clicked() {
+                    remove.push(i);
+                }
+            });
+        }
+    });
+    d.values.insert("remove".into(), json!(remove));
+    ui.add_space(6.0);
+    edit(ui, d, "categories", "Horizontal (Category) Axis Labels:");
+    ok_cancel(ui, confirm, open);
+    if *confirm {
+        *confirm = false;
+        let mut params = serde_json::Map::new();
+        params.insert("chart".into(), d.values.get("chart").cloned().unwrap_or(Json::Null));
+        let range_changed = text(d, "range") != text(d, "range0");
+        if range_changed {
+            params.insert("range".into(), json!(text(d, "range")));
+        } else if !remove.is_empty() {
+            // A new range rebuilds the series; removals only apply to the current ones.
+            params.insert("removeSeries".into(), json!(remove));
+        }
+        if text(d, "categories") != text(d, "categories0") || (range_changed && !text(d, "categories").is_empty()) {
+            params.insert("categories".into(), json!(text(d, "categories")));
+        }
+        if params.len() == 1 {
+            *open = false;
+            return;
+        }
+        match app.run("chart.selectData", Json::Object(params)) {
+            Ok(_) => *open = false,
+            Err(e) => app.message = Some((d.title.clone(), crate::clean_error(&e))),
+        }
     }
 }
 

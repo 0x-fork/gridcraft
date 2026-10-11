@@ -200,6 +200,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Add Chart\nElement" => "차트\n요소 추가",
         "Change\nChart Type" => "차트 종류\n변경",
         "Switch\nRow/Column" => "행/열\n전환",
+        "Select\nData" => "데이터\n선택",
         "Data Labels: None" => "데이터 레이블: 없음",
         "Data Labels: Show" => "데이터 레이블: 표시",
         "Legend: None" => "범례: 없음",

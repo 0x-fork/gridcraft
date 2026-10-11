@@ -53,6 +53,37 @@ fn entering_empty_cells_preserves_whole_sheet_formatting() {
 }
 
 #[test]
+fn chart_category_axis_from_blank_corner_and_select_data() {
+    // #287: numeric X values must be the category axis, not a series of their own.
+    let mut s = s();
+    let series = |s: &Session| -> Vec<(Option<String>, String)> {
+        let d = s.doc().unwrap();
+        d.wb.active().unwrap().charts.last().unwrap().series.iter().map(|x| (x.categories.clone(), x.values.clone())).collect()
+    };
+    // A blank top-left cell marks the first column as category labels, numbers or not.
+    s.execute("range.setValues", json!({"range": "A1", "values": [[null, "Sales"], [2020, 5], [2021, 7], [2022, 9]]})).unwrap();
+    s.execute("insert.chart", json!({"range": "A1:B4", "type": "line"})).unwrap();
+    assert_eq!(series(&s), [(Some("Sheet1!$A$2:$A$4".to_string()), "Sheet1!$B$2:$B$4".to_string())]);
+
+    // With a "Year" header the year column is a series, as before; Select Data fixes it:
+    // Horizontal (Category) Axis Labels and Remove on the year series.
+    s.execute("range.setValues", json!({"range": "D1", "values": [["Year", "Sales"], [2020, 5], [2021, 7], [2022, 9]]})).unwrap();
+    s.execute("insert.chart", json!({"range": "D1:E4", "type": "line"})).unwrap();
+    assert_eq!(series(&s).len(), 2);
+    assert!(s.execute("chart.selectData", json!({})).is_err(), "nothing to change");
+    assert!(s.execute("chart.selectData", json!({"categories": "not a range"})).is_err());
+    s.execute("chart.selectData", json!({"categories": "=D2:D4", "removeSeries": [0, 7]})).unwrap();
+    assert_eq!(series(&s), [(Some("Sheet1!$D$2:$D$4".to_string()), "Sheet1!$E$2:$E$4".to_string())]);
+    let d = s.doc().unwrap();
+    let sh = d.wb.active().unwrap();
+    let data = gridcraft_chart::resolve(&d.wb, d.wb.active_sheet, sh.charts.last().unwrap());
+    assert_eq!(data.categories, ["2020", "2021", "2022"]);
+    // The last series can't be removed; "" clears the labels.
+    s.execute("chart.selectData", json!({"categories": "", "removeSeries": [0]})).unwrap();
+    assert_eq!(series(&s), [(None, "Sheet1!$E$2:$E$4".to_string())]);
+}
+
+#[test]
 fn entry_and_text_paste_use_inherited_formats_and_cell_overrides() {
     let mut s = s();
     s.execute("home.bold", json!({"range": "B:B", "on": true})).unwrap();
