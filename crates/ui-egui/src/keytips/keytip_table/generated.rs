@@ -63,7 +63,6 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("HBW", Entry::Finish(Action::Command("home.drawBorder"))), // Excel: Draw Border
     ("HBY", Entry::Finish(Action::Command("home.borders"))),    // Excel: Line Style; Line Style (submenu TBD)
     ("HC", Entry::Finish(Action::Command("edit.copy"))),        // Excel: Copy; fires immediately in Excel; deeper aliases dropped as unreachable
-    ("HCP", Entry::Finish(Action::Pending("home.copyAsPicture"))), // pending; Excel: Copy as Picture; reserved until the command lands
     ("HDC", Entry::Finish(Action::Command("home.deleteColumns"))), // Excel: Delete Columns; Delete Columns
     ("HDD", Entry::Finish(Action::Command("home.deleteCells"))), // Excel: Delete Cells
     ("HDR", Entry::Finish(Action::Command("home.deleteRows"))), // Excel: Delete Rows; Delete Rows
@@ -172,7 +171,7 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("HVV", Entry::Finish(Action::Command("edit.pasteSpecial"))), // Excel: Paste Values; paste variant, params TBD: what=values
     ("HVW", Entry::Finish(Action::Command("edit.pasteSpecial"))), // Excel: Paste Keep Source Column Widths; paste variant, params TBD: what=TBD(col-widths)
     ("HW", Entry::Continue),                                      // Excel: Wrap Text Menu; group level: containment(Wrap Text)
-    ("HWS", Entry::Finish(Action::Pending("home.shrinkToFit"))),  // pending; Excel: Shrink to Fit; Shrink to Fit; reserved until the command lands
+    ("HWS", Entry::Finish(Action::Command("home.shrinkToFit"))),  // Excel: Shrink to Fit; landed in the catalog; live since T7 probe
     ("HWW", Entry::Finish(Action::Command("home.wrapText"))),     // Excel: Wrap Text
     ("HX", Entry::Finish(Action::Command("edit.cut"))),           // Excel: Cut
     ("NC1", Entry::Finish(Action::Command("insert.chart"))),      // Excel: Column Chart; Column chart (kind TBD)
@@ -245,7 +244,7 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("PVG", Entry::Finish(Action::Command("view.gridlines"))),  // Excel: View Gridlines
     ("PVH", Entry::Finish(Action::Command("view.headings"))),   // Excel: View Headings
     ("MA", Entry::Continue),                                    // Excel: Remove Arrows Menu; group level: containment(Remove Arrows)
-    ("MAA", Entry::Finish(Action::Pending("formulas.removeArrows"))), // pending; Excel: Remove All Arrows; Remove All Arrows; reserved until the command lands
+    ("MAA", Entry::Finish(Action::Command("formulas.removeArrows"))), // Excel: Remove All Arrows; landed in the catalog; live since T7 probe
     ("MAP", Entry::Finish(Action::Pending("formulas.removePrecedentArrows"))), // pending; Excel: Remove Precedent Arrows; Remove Precedent Arrows; reserved until the command lands
     ("MB", Entry::Finish(Action::Command("formulas.calculateNow"))),           // Excel: Calculate Now
     ("MC", Entry::Finish(Action::Command("formulas.createFromSelection"))),    // Excel: Create From Selection

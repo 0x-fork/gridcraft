@@ -381,14 +381,6 @@
       "target": "edit.copy"
     },
     {
-      "seq": "HCP",
-      "kind": "command",
-      "target": "home.copyAsPicture",
-      "pending": true,
-      "excel": "Copy as Picture",
-      "note": "reserved until the command lands"
-    },
-    {
       "seq": "HDC",
       "kind": "command",
       "target": "home.deleteColumns",
@@ -1141,9 +1133,8 @@
       "seq": "HWS",
       "kind": "command",
       "target": "home.shrinkToFit",
-      "pending": true,
       "excel": "Shrink to Fit",
-      "note": "Shrink to Fit; reserved until the command lands"
+      "note": "landed in the catalog; live since T7 probe"
     },
     {
       "seq": "HWW",
@@ -1648,9 +1639,8 @@
       "seq": "MAA",
       "kind": "command",
       "target": "formulas.removeArrows",
-      "pending": true,
       "excel": "Remove All Arrows",
-      "note": "Remove All Arrows; reserved until the command lands"
+      "note": "landed in the catalog; live since T7 probe"
     },
     {
       "seq": "MAP",
