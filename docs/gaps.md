@@ -64,11 +64,14 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 - **Impact:** wrong numbers are worse than missing features.
 - **Estimate:** 10–15 h. [function-parity.md](function-parity.md#formula-language)
 
-### 7. No legacy `.xls`; no password-protected workbooks (FF)
-- **Evidence:** #121. Since #17 (closed #11) both are recognised through a CFB sniff and refused with a clear message, but neither opens.
+### 7. Legacy `.xls` only partly read; no password-protected workbooks (FF)
+- **Evidence:** #121: Excel 97-2003 (BIFF8) `.xls` files now open (values, formulas, number
+  formats, merges, sizes, names); fonts, fills, borders, charts, pictures, comments, conditional
+  formats, validation and BIFF5 files are not read, and `.xls` is never written. Encrypted
+  workbooks (OOXML and `.xls`) are recognised and refused with a clear message since #17 (closed #11).
 - **Impact:** common in finance, government and anything older than 2007; encrypted files are
   routine in business.
-- **Estimate:** 28–42 h (`.xls` read 20–30, encryption 8–12). [file-format-parity.md](file-format-parity.md)
+- **Estimate:** 18–27 h (`.xls` styles and objects 10–15, encryption 8–12). [file-format-parity.md](file-format-parity.md)
 
 ### 8. PivotTables: no slicers, calculated fields, PivotCharts; unverified in Excel (F)
 - **Evidence:** `parity-checklist.md` missing `insert.slicer`, `insert.timeline`,
@@ -149,6 +152,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | §7: `.xls` (BIFF8) import of values, formulas and number formats (#121) |
 | 2026-10-10 | minor | Updated for the 10-10 merges (#17, #31, #38, #62, #82, #104, #116) and the new chart resize bug (#190) |
 | 2026-10-10 | minor | Noted that no gap blocks the alpha gate |
 | 2026-10-10 | major | Created: 24 ranked gaps with evidence, from the full re-measure and the 60 open issues |
