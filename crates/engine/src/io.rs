@@ -113,24 +113,26 @@ fn rename_first_sheet(wb: &mut Workbook, path: &str) {
 pub fn save_bytes(wb: &Workbook, path: &str) -> Result<Vec<u8>> {
     let sheet = wb.active_sheet;
     match FileKind::from_path(path).unwrap_or(FileKind::Xlsx) {
-        // A macro-free .xlsx can't hold a VBA project (Excel refuses such a file), so only a .xlsm
-        // keeps the macros; any other name saves without them, as Excel does.
-        FileKind::Xlsx if wb.vba_project.is_some() && !path.to_ascii_lowercase().ends_with(".xlsm") => {
-            let mut plain = wb.clone();
-            plain.vba_project = None;
-            gridcraft_xlsx::write_xlsx(&plain).map_err(|e| EngineError::Other(e.to_string()))
-        }
-        FileKind::Xlsx => gridcraft_xlsx::write_xlsx(wb).map_err(|e| EngineError::Other(e.to_string())),
+        // The extension picks the package kind; only the macro-enabled kinds (.xlsm, .xltm) carry
+        // the VBA project, so any other name saves without it, as Excel does.
+        FileKind::Xlsx => gridcraft_xlsx::write_xlsx_as(wb, gridcraft_xlsx::XlsxKind::from_path(path)).map_err(|e| EngineError::Other(e.to_string())),
         FileKind::Xls => {
             Err(EngineError::Other("Excel 97-2003 (.xls) is supported for import only. Save as .xlsx or another supported export format.".into()))
         }
         FileKind::Xlsb => Err(EngineError::Other("XLSB is supported for data import only. Save as .xlsx or another supported export format.".into())),
         FileKind::Ods => Err(EngineError::Other("ODS is supported for data import only. Save as .xlsx or another supported export format.".into())),
-        FileKind::Csv => Ok(wb.sheet(sheet).map(|sh| gridcraft_xlsx::write_csv(sh, wb, b',')).unwrap_or_default()),
-        FileKind::Tsv => Ok(wb.sheet(sheet).map(|sh| gridcraft_xlsx::write_csv(sh, wb, b'\t')).unwrap_or_default()),
+        FileKind::Csv => Ok(wb.sheet(sheet).map(|sh| csv(wb, sh, b',')).unwrap_or_default()),
+        FileKind::Tsv => Ok(wb.sheet(sheet).map(|sh| csv(wb, sh, b'\t')).unwrap_or_default()),
         FileKind::Json => serde_json::to_vec_pretty(wb).map_err(|e| EngineError::Other(e.to_string())),
         FileKind::Html => Ok(to_html(wb, sheet).into_bytes()),
     }
+}
+
+/// Save As CSV/Text writes "the text and values as they are displayed in cells" with "all
+/// characters in each cell" (Microsoft Support, *Excel formatting and features that are not
+/// transferred to other file formats*): number formats applied, never column-width `#####`.
+fn csv(wb: &Workbook, sh: &Sheet, delimiter: u8) -> Vec<u8> {
+    gridcraft_xlsx::write_csv(sh, delimiter, |c| crate::display::value_text(wb, sh, c))
 }
 
 fn esc(s: &str) -> String {
@@ -384,6 +386,8 @@ mod tests {
         assert!(has_macros("book.xlsm"));
         assert!(has_macros("BOOK.XLSM"));
         assert!(!has_macros("book.xlsx"), "an .xlsx never carries a VBA project");
+        assert!(has_macros("book.xltm"), "a macro-enabled template keeps the VBA project");
+        assert!(!has_macros("book.xltx"), "a macro-free template never carries a VBA project");
         assert!(wb.vba_project.is_some(), "the open workbook keeps its macros");
     }
 
@@ -424,5 +428,55 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("not an Excel workbook"), "got: {msg}");
         assert!(!msg.contains("password"), "got: {msg}");
+    }
+
+    /// Save As CSV/TSV writes cells as displayed: number formats applied, formula results,
+    /// whole values in narrow columns (never `#####`), quoting unchanged.
+    #[test]
+    fn csv_writes_displayed_text() {
+        use gridcraft_core::{CellError, Value};
+        use gridcraft_model::{Cell, Formula, LineInfo, NumFmt, StyleId};
+        let mut wb = Workbook::new();
+        let mut styled = |code: &str| wb.styles.derive(StyleId::DEFAULT, |s| s.num_fmt = NumFmt::new(code));
+        let (date, money, pct, frac, text, fixed, thousands) =
+            (styled("yyyy-mm-dd"), styled("$#,##0.00"), styled("0.0%"), styled("# ?/?"), styled("@"), styled("0.00"), styled("#,##0"));
+        let sh = wb.sheet_mut(0).unwrap();
+        let cells = [
+            ("A1", Cell { value: Value::Number(46023.0), formula: None, style: date }),
+            ("B1", Cell { value: Value::Number(1234.5), formula: None, style: money }),
+            ("C1", Cell { value: Value::Number(0.125), formula: None, style: pct }),
+            ("D1", Cell { value: Value::Number(1.5), formula: None, style: frac }),
+            ("E1", Cell { value: Value::text("007"), formula: None, style: text }),
+            ("F1", Cell { value: Value::Error(CellError::NA), formula: None, style: money }),
+            ("G1", Cell { value: Value::Bool(true), formula: None, style: StyleId::DEFAULT }),
+            ("A2", Cell { value: Value::Number(46024.0), style: date, ..Cell::formula(Formula::new("A1+1")) }),
+            ("B2", Cell { value: Value::Number(12345678.9), formula: None, style: fixed }),
+            ("C2", Cell { value: Value::Number(-0.25), formula: None, style: StyleId::DEFAULT }),
+            ("D2", Cell { value: Value::Number(1234567.0), formula: None, style: thousands }),
+        ];
+        for (a, c) in cells {
+            sh.set_cell(CellRef::parse(a).unwrap(), c);
+        }
+        // Column B is far too narrow for its numbers: the grid shows #####, the file must not.
+        sh.cols.insert(1, LineInfo { size: Some(1.0), ..Default::default() });
+        sh.show_formulas = true;
+        let csv = String::from_utf8(save_bytes(&wb, "out.csv").unwrap()).unwrap();
+        assert_eq!(csv, "2026-01-01,\"$1,234.50\",12.5%,1 1/2,007,#N/A,TRUE\r\n2026-01-02,12345678.90,-0.25,\"1,234,567\",,,\r\n");
+        let tsv = String::from_utf8(save_bytes(&wb, "out.tsv").unwrap()).unwrap();
+        assert!(tsv.starts_with("2026-01-01\t$1,234.50\t12.5%\t"), "{tsv}");
+    }
+
+    #[test]
+    fn template_extension_saves_template_content_type() {
+        let bytes = save_bytes(&Workbook::new(), "Budget.xltx").unwrap();
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut types = String::new();
+        std::io::Read::read_to_string(&mut zip.by_name("[Content_Types].xml").unwrap(), &mut types).unwrap();
+        assert!(
+            types.contains(
+                r#"PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml""#
+            ),
+            "{types}"
+        );
     }
 }
