@@ -323,7 +323,7 @@ fn home(app: &mut SheetApp, ui: &mut Ui) {
     }
     if paste.clicked() {
         if let Some(text) = app.grid.system_clipboard.take() {
-            act(app, "edit.paste", json!({"text": text}));
+            app.paste_external(text);
         } else {
             act(app, "edit.paste", json!({}));
         }

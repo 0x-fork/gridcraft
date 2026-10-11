@@ -17,6 +17,9 @@ mod logging;
 #[cfg(target_os = "macos")]
 mod native_menu;
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use gridcraft_engine::Session;
 use gridcraft_ui_egui::{Services, SheetApp};
 use serde_json::json;
@@ -116,13 +119,22 @@ fn save_prefs(app: &SheetApp) {
 
 fn services() -> Services {
     // Keep the owner alive: X11/Wayland serve clipboard data from this handle.
-    let mut clipboard: Option<arboard::Clipboard> = None;
+    let clipboard: Rc<RefCell<Option<arboard::Clipboard>>> = Rc::default();
+    let paste_clipboard = clipboard.clone();
     Services {
         copy_html: Some(Box::new(move |html, text| {
+            let mut clipboard = clipboard.borrow_mut();
             if clipboard.is_none() {
-                clipboard = Some(arboard::Clipboard::new().map_err(|e| e.to_string())?);
+                *clipboard = Some(arboard::Clipboard::new().map_err(|e| e.to_string())?);
             }
             clipboard.as_mut().ok_or("clipboard unavailable")?.set_html(html, Some(text)).map_err(|e| e.to_string())
+        })),
+        paste_html: Some(Box::new(move || {
+            let mut clipboard = paste_clipboard.try_borrow_mut().ok()?;
+            if clipboard.is_none() {
+                *clipboard = arboard::Clipboard::new().ok();
+            }
+            clipboard.as_mut()?.get().html().ok()
         })),
         pick_open: Some(Box::new(|| {
             rfd::FileDialog::new()
