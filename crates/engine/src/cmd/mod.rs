@@ -69,6 +69,21 @@ impl CommandSpec {
     }
 }
 
+/// Params that hold a secret: `password`, or a name ending in `Password`.
+pub fn is_secret_param(key: &str) -> bool {
+    key == "password" || key.ends_with("Password")
+}
+
+/// The params as the journal records them: secret params are left out, so a password never
+/// reaches the journal dialog, `engine.journal` or a recorded script (saved in the workbook).
+/// Replaying such an entry runs the command without that param.
+pub fn journal_params(params: &Json) -> Json {
+    match params {
+        Json::Object(o) => Json::Object(o.iter().filter(|(k, _)| !is_secret_param(k)).map(|(k, v)| (k.clone(), v.clone())).collect()),
+        other => other.clone(),
+    }
+}
+
 pub fn always(_: &Session) -> std::result::Result<(), String> {
     Ok(())
 }
