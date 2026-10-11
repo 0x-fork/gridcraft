@@ -219,6 +219,23 @@ impl Dialog {
                     json!({"action": "add", "range": sel}),
                 )
             }
+            "protectWorkbook" => Dialog::form(
+                "protectWorkbook",
+                "Protect Structure and Windows",
+                "review.protectWorkbook",
+                vec![
+                    Password { key: "password", label: "Password (optional):" },
+                    Note("Protect workbook for: Structure (sheets can't be added, moved, renamed, hidden or deleted).".into()),
+                ],
+                json!({"on": true}),
+            ),
+            "unprotectWorkbook" => Dialog::form(
+                "unprotectWorkbook",
+                "Unprotect Workbook",
+                "review.protectWorkbook",
+                vec![Password { key: "password", label: "Password:" }],
+                json!({"on": false}),
+            ),
             "unprotectSheet" => Dialog::form(
                 "unprotectSheet",
                 "Unprotect Sheet",

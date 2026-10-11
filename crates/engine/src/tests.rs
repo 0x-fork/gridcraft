@@ -816,7 +816,7 @@ fn protection_passwords_stay_out_of_the_journal_and_recorded_scripts() {
         r.execute(id, p.clone()).unwrap_or_else(|e| panic!("{id}: {e}"));
         let prot = r.doc().unwrap().wb.active().unwrap().protection.clone();
         if id == "review.protectSheet" {
-            assert!(prot.as_ref().is_some_and(|p| p.format_cells && p.password_hash.is_none()), "{prot:?}");
+            assert!(prot.as_ref().is_some_and(|p| p.format_cells && p.password.is_none()), "{prot:?}");
         }
     }
     assert!(r.doc().unwrap().wb.active().unwrap().protection.is_none());
