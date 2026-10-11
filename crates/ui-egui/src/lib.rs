@@ -632,9 +632,11 @@ impl SheetApp {
         self.after_engine();
     }
 
-    /// What follows a successful `file.open`: the Recent list (for a file on disk) and the open
-    /// warnings notice. Shared by File › Open and the password dialog.
+    /// What follows a successful `file.open`: the workbook shows (not the Backstage), the Recent
+    /// list (for a file on disk) and the open warnings notice. Shared by File › Open, the
+    /// password dialog and the control channel.
     pub fn after_open(&mut self, path: Option<&str>, r: &Json) {
+        self.backstage = None;
         if let Some(path) = path {
             self.ui.recent.retain(|p| p != path);
             self.ui.recent.insert(0, path.to_string());

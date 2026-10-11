@@ -118,3 +118,55 @@ fn a_file_picked_on_the_web_asks_for_its_password_too() {
     assert_eq!(a1(&h), Value::Number(42.0));
     assert_eq!(h.state().session.active().unwrap().path, None);
 }
+
+#[test]
+fn an_untouched_password_field_is_incorrect_not_required() {
+    let path = encrypted_file("untouched");
+    let mut h = harness(Services::default());
+    h.state_mut().open_path(&path.to_string_lossy());
+    h.run_steps(3);
+    h.get_by_label("   OK   ").click();
+    h.run_steps(3);
+    let msg = h.state().message.as_ref().map(|(_, m)| m.clone()).unwrap_or_default();
+    assert!(msg.contains(gridcraft_engine::io::WRONG_PASSWORD), "{msg}");
+    assert_eq!(dialog(&h).as_deref(), Some("openPassword"));
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn the_backstage_closes_once_the_password_opens_the_workbook() {
+    let path = encrypted_file("backstage");
+    let mut h = harness(Services::default());
+    h.state_mut().backstage = Some(gridcraft_ui_egui::backstage::Backstage::new(gridcraft_ui_egui::backstage::Page::Open));
+    h.state_mut().open_path(&path.to_string_lossy());
+    h.run_steps(3);
+    h.state_mut().dialog.as_mut().unwrap().values.insert("password".into(), json!(PW));
+    h.get_by_label("   OK   ").click();
+    h.run_steps(3);
+    assert_eq!(a1(&h), Value::Number(42.0));
+    assert!(h.state().backstage.is_none(), "the opened workbook shows, not the Backstage");
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn app_open_over_the_control_channel_never_opens_a_dialog() {
+    use gridcraft_ui_egui::control::{Outcome, handle};
+    let path = encrypted_file("control");
+    let p = path.to_string_lossy().to_string();
+    let mut h = harness(Services::default());
+    let ctx = h.ctx.clone();
+    let reply = |o: Outcome| match o {
+        Outcome::Done(v) => v,
+        Outcome::Screenshot { .. } => json!(null),
+    };
+    let r = reply(handle(h.state_mut(), &ctx, "app.open", &json!({"path": p})));
+    assert_eq!(r["ok"], json!(false), "{r}");
+    assert!(r["error"].as_str().unwrap_or_default().contains(gridcraft_engine::io::PASSWORD_REQUIRED), "{r}");
+    assert_eq!(dialog(&h), None, "programmatic calls never open dialogs");
+    let r = reply(handle(h.state_mut(), &ctx, "app.open", &json!({"path": p, "password": PW})));
+    assert_eq!(r["ok"], json!(true), "{r}");
+    assert_eq!(r["result"]["title"], json!("Secret.xlsx"));
+    assert_eq!(a1(&h), Value::Number(42.0));
+    assert_eq!(h.state().ui.recent.first(), Some(&p));
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}

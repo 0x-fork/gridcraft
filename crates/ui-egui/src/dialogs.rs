@@ -241,12 +241,16 @@ impl Dialog {
                 // on the web) and goes back to `file.open` with the password.
                 let source = p("path").as_str().or(p("name").as_str()).map(str::to_string).unwrap_or_default();
                 let file = std::path::Path::new(&source).file_name().and_then(|n| n.to_str()).unwrap_or("This workbook").to_string();
+                // An empty password from the start, so OK on the untouched field says "incorrect"
+                // rather than asking for the password again.
+                let mut values = params.clone();
+                values["password"] = json!("");
                 Dialog::form(
                     "openPassword",
                     "Password",
                     "file.open",
                     vec![Note(format!("'{file}' is protected.")), Password { key: "password", label: "Password:" }],
-                    params.clone(),
+                    values,
                 )
             }
             "unprotectSheet" => Dialog::form(
