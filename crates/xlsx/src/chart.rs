@@ -184,6 +184,7 @@ pub fn read_chart(root: &El) -> Option<Chart> {
         y_title: y_ax.and_then(|a| a.child("title")).and_then(rich_title),
         source: None,
         by_rows: false,
+        pivot: root.path(&["pivotSource", "name"]).map(|n| n.text.trim().to_string()).filter(|n| !n.is_empty()),
     })
 }
 
@@ -464,6 +465,10 @@ pub fn write_chart(wb: &Workbook, si: usize, ch: &Chart) -> String {
     );
     if (1..=48).contains(&ch.style) {
         let _ = write!(s, "<c:style val=\"{}\"/>", ch.style);
+    }
+    // A PivotChart names its PivotTable (`Sheet2!PivotTable1`).
+    if let Some(link) = ch.pivot.as_deref().map(str::trim).filter(|l| !l.is_empty()) {
+        let _ = write!(s, "<c:pivotSource><c:name>{}</c:name><c:fmtId val=\"0\"/></c:pivotSource>", esc(link));
     }
     s.push_str("<c:chart>");
     match &ch.title {

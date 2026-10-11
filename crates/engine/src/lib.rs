@@ -8,11 +8,13 @@
 
 pub mod catalog;
 pub mod cf;
+mod clip_html;
 pub mod cmd;
 pub mod display;
 pub mod fill;
 pub mod io;
 pub mod pivot;
+pub mod pivot_calc;
 pub mod sample;
 pub mod selection;
 pub mod tables;
@@ -73,6 +75,9 @@ pub struct Clipboard {
     pub doc_uid: u64,
     /// Plain text (tab-separated) for the system clipboard.
     pub text: String,
+    /// A multi-area copy: the areas as selected (for the marquee). `wb` then holds them slid
+    /// together into one block at `range`. Empty for a single-range copy.
+    pub areas: Vec<RangeRef>,
 }
 
 /// In-cell edit mode as shown in the status bar.
@@ -99,6 +104,8 @@ pub struct DocState {
     pub title: String,
     /// Per-sheet selection memory.
     pub sheet_selections: Vec<Selection>,
+    /// Allow Edit Ranges unlocked with their password in this session: (sheet name, title).
+    pub unlocked_ranges: Vec<(String, String)>,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -122,6 +129,7 @@ impl DocState {
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             title,
             sheet_selections: vec![],
+            unlocked_ranges: vec![],
         }
     }
     pub fn is_dirty(&self) -> bool {
@@ -153,6 +161,8 @@ pub struct Prefs {
     pub r1c1: bool,
     /// Words added with Add to Dictionary.
     pub user_dictionary: Vec<String>,
+    /// View › Show › Formula Bar (an application option in Excel, not saved in the file).
+    pub formula_bar: bool,
 }
 
 impl Default for Prefs {
@@ -166,6 +176,7 @@ impl Default for Prefs {
             sheets_in_new_workbook: 1,
             r1c1: false,
             user_dictionary: vec![],
+            formula_bar: true,
         }
     }
 }
@@ -187,6 +198,7 @@ pub struct Session {
     pub clipboard: Option<Clipboard>,
     pub prefs: Prefs,
     pub mode: Mode,
+    /// Commands run so far, without their passwords ([`cmd::journal_params`]).
     pub journal: Vec<(String, Json)>,
     pub ui_requests: Vec<UiRequest>,
     /// Format painter source style (sticky when double-clicked).
@@ -203,6 +215,11 @@ pub struct Session {
     pub draw_tool: String,
     pub draw_color: String,
     pub draw_width: f32,
+    /// Review › Show Comments: the Comments pane is open.
+    pub comments_pane: bool,
+    /// Review › Notes › Show All Notes: every note is displayed. An application display setting
+    /// (like Excel's comment indicator option), so it's not saved in the file.
+    pub show_all_notes: bool,
 }
 
 impl Session {
@@ -287,7 +304,7 @@ impl Session {
             }
         };
         if spec.journal && result.is_ok() {
-            self.journal.push((id.to_string(), params.clone()));
+            self.journal.push((id.to_string(), cmd::journal_params(&params)));
             if self.journal.len() > 10_000 {
                 self.journal.drain(..5_000);
             }

@@ -28,6 +28,11 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("view.showZeros", "Show Zeros", [], None, "{on?}", has_doc, |s, p| sheet_flag(s, p, "zeros")),
         cmd!("view.rightToLeft", "Sheet Right-to-Left", ["Page Layout", "Sheet Options"], None, "{on?}", has_doc, |s, p| sheet_flag(s, p, "rtl")),
         cmd!("view.zoom", "Zoom", ["View", "Zoom"], None, "{percent: 10..400}", has_doc, zoom),
+        cmd!("view.zoom100", "100%", ["View", "Zoom"], None, "{}", has_doc, |s, _| zoom(s, &json!({"percent": 100}))),
+        cmd!(query "view.formulaBar", "Formula Bar", ["View", "Show"], None, "{on?: bool}", always, |s, p| {
+            s.prefs.formula_bar = bool_param(p, "on").unwrap_or(!s.prefs.formula_bar);
+            Ok(json!({"on": s.prefs.formula_bar}))
+        }),
         cmd!("view.zoomToSelection", "Zoom to Selection", ["View", "Zoom"], None, "{viewWidth?, viewHeight?}", has_doc, zoom_selection),
         cmd!("pageLayout.orientation", "Orientation", ["Page Layout", "Page Setup"], None, "{orientation: portrait|landscape}", has_doc, orientation),
         cmd!("pageLayout.size", "Size", ["Page Layout", "Page Setup"], None, "{paper: Letter|Legal|A4|A3|A5|Tabloid|Executive}", has_doc, paper),
@@ -336,3 +341,28 @@ fn theme(s: &mut Session, p: &Json) -> Result<Json> {
 
 #[allow(dead_code)]
 fn unused(_: CellRef) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zoom_100_resets_the_active_sheet_zoom() {
+        let mut s = Session::new();
+        s.new_workbook();
+        s.execute("view.zoom", json!({"percent": 150})).unwrap();
+        assert_eq!(s.execute("view.zoom100", json!({})).unwrap()["zoom"], 100);
+        assert_eq!(s.doc().unwrap().wb.active().unwrap().zoom, 100);
+    }
+
+    #[test]
+    fn formula_bar_toggles_without_a_workbook_and_defaults_to_shown() {
+        let mut s = Session::new();
+        assert!(s.prefs.formula_bar);
+        assert_eq!(s.execute("view.formulaBar", json!({})).unwrap()["on"], false);
+        assert_eq!(s.execute("view.formulaBar", json!({"on": true})).unwrap()["on"], true);
+        // A prefs.json saved before the option existed keeps the formula bar shown.
+        let old: crate::Prefs = serde_json::from_str(r#"{"userName": "Ann"}"#).unwrap();
+        assert!(old.formula_bar);
+    }
+}
