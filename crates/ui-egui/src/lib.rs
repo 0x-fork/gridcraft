@@ -1007,17 +1007,10 @@ impl SheetApp {
             // Leave pointer cancellation to the popup so clicking a menu item still works.
             egui::Popup::close_all(ctx);
         }
-        // The legacy Edit/Format paths lead to the same existing Home menus. Switch once, when
-        // the prefix changes, not every frame (that would reset a tab the user picked meanwhile).
-        let after = self.keytips.prefix();
-        if after != before.as_deref() && matches!(after, Some("E" | "O" | "OC")) {
-            self.run_or_alert("ui.ribbonTab", json!({"tab": "Home"}));
-            self.ui.ribbon_collapsed = false;
-        }
         for action in actions {
             match action {
-                keytips::Action::Home => {
-                    self.run_or_alert("ui.ribbonTab", json!({"tab": "Home"}));
+                keytips::Action::Tab(tab) => {
+                    self.run_or_alert("ui.ribbonTab", json!({"tab": tab}));
                     self.ui.ribbon_collapsed = false;
                 }
                 keytips::Action::Command(id) => self.run_or_alert(id, json!({})),

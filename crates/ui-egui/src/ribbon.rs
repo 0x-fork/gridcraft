@@ -6,6 +6,7 @@ use serde_json::json;
 
 use crate::SheetApp;
 use crate::icons::{self, Icon};
+use crate::keytips::keytip_table;
 use crate::theme::{self, Tokens};
 use crate::widgets::{big_button, color_palette, icon_button, small_button, split_button, toggle_button};
 
@@ -203,8 +204,10 @@ pub fn show(app: &mut SheetApp, ui: &mut Ui) {
                         if resp.double_clicked() {
                             app.ui.ribbon_collapsed = !collapsed;
                         }
-                        if tab == "Home" && app.keytips.prefix() == Some("") {
-                            keytip(app, ui, "H", pos2(r.center().x, r.bottom() - 1.0));
+                        if app.keytips.prefix() == Some("")
+                            && let Some(sequence) = keytip_table::tab_sequence(tab)
+                        {
+                            keytip(app, ui, sequence, pos2(r.center().x, r.bottom() - 1.0));
                         }
                     }
                 });
@@ -328,14 +331,7 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[(&str, &str, serde_json:
         }
         let lang = app.ui.language;
         let response = ui.add(egui::Button::new(lang.tr(label)).frame(false).min_size(vec2(220.0, 22.0)));
-        let sequence = match (app.keytips.prefix(), *id) {
-            (Some("HV"), "dialog:pasteSpecial") => Some("HVS"),
-            (Some("E"), "dialog:pasteSpecial") => Some("ES"),
-            (Some("HO"), "home.autofitColumnWidth") => Some("HOI"),
-            (Some("OC"), "home.autofitColumnWidth") => Some("OCA"),
-            _ => None,
-        };
-        if let Some(sequence) = sequence {
+        if let Some(sequence) = keytip_table::item_letter(app.keytips.prefix().unwrap_or_default(), id) {
             keytip(app, ui, sequence, pos2(response.rect.right() - 10.0, response.rect.center().y));
         }
         if response.clicked() {
@@ -353,8 +349,10 @@ fn home(app: &mut SheetApp, ui: &mut Ui) {
     let st = active_style(app);
     // Clipboard
     let paste = big_button(ui, Icon::Paste, "Paste", "Paste (⌘V)", true);
-    if app.keytips.prefix() == Some("H") {
-        keytip(app, ui, "HV", paste.rect.center_bottom());
+    for sequence in
+        keytip_table::group_extension(app.keytips.prefix().unwrap_or_default(), &["edit.paste", "edit.pasteSpecial", "dialog:pasteSpecial"])
+    {
+        keytip(app, ui, sequence, paste.rect.center_bottom());
     }
     if paste.clicked() {
         if let Some(text) = app.grid.system_clipboard.take() {
@@ -576,12 +574,7 @@ fn home(app: &mut SheetApp, ui: &mut Ui) {
                 (Icon::AlignRight, HAlign::Right, "home.alignRight", "Align Right"),
             ] {
                 let response = toggle_button(ui, icon, st.align.h == h, tip);
-                if matches!(app.keytips.prefix(), Some("H" | "HA")) {
-                    let sequence = match h {
-                        HAlign::Left => "HAL",
-                        HAlign::Center => "HAC",
-                        _ => "HAR",
-                    };
+                for sequence in keytip_table::control_badges(app.keytips.prefix().unwrap_or_default(), id) {
                     keytip(app, ui, sequence, response.rect.center_bottom());
                 }
                 if response.clicked() {
@@ -700,10 +693,28 @@ fn home(app: &mut SheetApp, ui: &mut Ui) {
             );
         });
         let fmt = small_button(ui, Icon::Format, "Format", "Format", true);
-        match app.keytips.prefix() {
-            Some("H") => keytip(app, ui, "HO", fmt.rect.center_bottom()),
-            Some("O") => keytip(app, ui, "OC", fmt.rect.center_bottom()),
-            _ => {}
+        for sequence in keytip_table::group_extension(
+            app.keytips.prefix().unwrap_or_default(),
+            &[
+                "dialog:rowHeight",
+                "home.autofitRowHeight",
+                "dialog:columnWidth",
+                "home.autofitColumnWidth",
+                "dialog:defaultWidth",
+                "home.hideRows",
+                "home.hideColumns",
+                "home.unhideRows",
+                "home.unhideColumns",
+                "sheet.hide",
+                "sheet.unhide",
+                "dialog:renameSheet",
+                "dialog:moveSheet",
+                "dialog:protectSheet",
+                "home.lockCell",
+                "dialog:formatCells",
+            ],
+        ) {
+            keytip(app, ui, sequence, fmt.rect.center_bottom());
         }
         let format_keys = matches!(app.keytips.prefix(), Some("HO" | "OC"));
         let mut format_popup = egui::Popup::menu(&fmt);

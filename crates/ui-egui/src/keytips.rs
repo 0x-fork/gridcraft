@@ -1,10 +1,14 @@
 //! Sequential ribbon shortcuts. The host paints hints from `prefix` and runs returned actions.
+//!
+//! The sequence table lives in [`keytip_table`]: the match below only walks the prefix.
 
 use egui::{Context, Event, Key, Modifiers, os::OperatingSystem};
 
+pub mod keytip_table;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
-    Home,
+    Tab(&'static str),
     Command(&'static str),
     Dialog(&'static str),
 }
@@ -92,21 +96,16 @@ impl KeyTips {
                             }
                         } else if key.name().len() == 1 {
                             let next = format!("{}{key_name}", self.prefix.as_deref().unwrap_or_default(), key_name = key.name());
-                            match next.as_str() {
-                                "H" => {
+                            match keytip_table::lookup(&next) {
+                                Some(keytip_table::Entry::Tab(tab)) => {
                                     self.prefix = Some(next);
-                                    actions.push(Action::Home);
+                                    actions.push(Action::Tab(tab));
                                 }
-                                "HA" | "HV" | "HO" | "E" | "O" | "OC" => self.prefix = Some(next),
-                                "HAR" => self.finish(Action::Command("home.alignRight"), &mut actions),
-                                "HAL" => self.finish(Action::Command("home.alignLeft"), &mut actions),
-                                "HAC" => self.finish(Action::Command("home.alignCenter"), &mut actions),
-                                "HAT" => self.finish(Action::Command("home.alignTop"), &mut actions),
-                                "HAM" => self.finish(Action::Command("home.alignMiddle"), &mut actions),
-                                "HAB" => self.finish(Action::Command("home.alignBottom"), &mut actions),
-                                "HVS" | "ES" => self.finish(Action::Dialog("pasteSpecial"), &mut actions),
-                                "HOI" | "OCA" => self.finish(Action::Command("home.autofitColumnWidth"), &mut actions),
-                                _ => {}
+                                Some(keytip_table::Entry::Continue) => self.prefix = Some(next),
+                                Some(keytip_table::Entry::Finish(action)) => self.finish(action, &mut actions),
+                                // Unknown letters are consumed while a prefix is active but
+                                // leave it unchanged, as Excel does.
+                                None => {}
                             }
                         }
                     }
