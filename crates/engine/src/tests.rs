@@ -1843,3 +1843,64 @@ fn row_height_and_column_width_take_a_list_of_areas() {
     assert!(s.execute("home.columnWidth", json!({"cols": "B:B,nope", "width": 50})).is_err());
     assert_eq!(s.doc().unwrap().wb.active().unwrap().col_width(1), 120.0, "a bad list changes nothing");
 }
+
+#[test]
+fn copying_areas_that_share_rows_or_columns_pastes_them_as_one_block() {
+    // Issue #348: Excel slides lined-up areas together; formulas travel as their values.
+    let mut s = s();
+    s.execute(
+        "range.setValues",
+        json!({"range": "A1", "values": [["a1", "b1", "c1", "d1"], [1, 2, 3, 4], ["a3", "b3", "c3", "d3"], ["a4", "b4", "c4", "d4"]]}),
+    )
+    .unwrap();
+    s.execute("cell.set", json!({"cell": "C2", "input": "=A2+B2"})).unwrap();
+
+    // Same rows, selected right to left: pasted left to right, B left out.
+    s.execute("selection.set", json!({"range": "C1:C2,A1:A2"})).unwrap();
+    let copied = s.execute("edit.copy", json!({})).unwrap();
+    assert_eq!(copied["text"], "a1\tc1\n1\t3\n");
+    s.execute("edit.paste", json!({"at": "F1"})).unwrap();
+    assert_eq!(v(&s, "F1"), Value::text("a1"));
+    assert_eq!(v(&s, "G1"), Value::text("c1"));
+    assert_eq!(v(&s, "F2"), Value::Number(1.0));
+    assert_eq!(v(&s, "G2"), Value::Number(3.0));
+    assert!(s.doc().unwrap().wb.active().unwrap().cell(CellRef::parse("G2").unwrap()).unwrap().formula.is_none());
+    assert!(v(&s, "H1").is_empty());
+    assert_eq!(s.doc().unwrap().selection.current().a1(), "F1:G2");
+    // The source is untouched.
+    assert_eq!(v(&s, "B1"), Value::text("b1"));
+    assert!(s.doc().unwrap().wb.active().unwrap().cell(CellRef::parse("C2").unwrap()).unwrap().formula.is_some());
+
+    // Same columns: stacked, row 2 left out.
+    s.execute("selection.set", json!({"range": "A1:B1,A3:B4"})).unwrap();
+    assert_eq!(s.execute("edit.copy", json!({})).unwrap()["text"], "a1\tb1\na3\tb3\na4\tb4\n");
+    s.execute("edit.paste", json!({"at": "F5"})).unwrap();
+    for (cell, want) in [("F5", "a1"), ("G5", "b1"), ("F6", "a3"), ("G7", "b4")] {
+        assert_eq!(v(&s, cell), Value::text(want), "{cell}");
+    }
+    assert!(v(&s, "F8").is_empty());
+
+    // Whole columns are trimmed to the used rows like a single-area copy.
+    s.execute("edit.undo", json!({"steps": 2})).unwrap();
+    s.execute("selection.set", json!({"range": "B:B,D:D"})).unwrap();
+    assert_eq!(s.execute("edit.copy", json!({})).unwrap()["text"], "b1\td1\n2\t4\nb3\td3\nb4\td4\n");
+}
+
+#[test]
+fn copying_areas_that_do_not_line_up_is_refused_with_a_message() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [[1, 2, 3], [4, 5, 6], [7, 8, 9]]})).unwrap();
+    s.execute("selection.set", json!({"range": "A1"})).unwrap();
+    s.execute("edit.copy", json!({})).unwrap();
+    for (range, cut) in [("A1:A2,C2:C3", false), ("A1:A2,C1:D3", false), ("A1:A2,A2:A3", false), ("A1:A2,A1:A2", false), ("A1:A2,C1:C2", true)] {
+        s.execute("selection.set", json!({"range": range})).unwrap();
+        let e = s.execute(if cut { "edit.cut" } else { "edit.copy" }, json!({})).unwrap_err().to_string();
+        assert!(e.contains("This action won't work on multiple selections."), "{range}: {e}");
+        assert_eq!(s.clipboard.as_ref().map(|c| c.range.a1()), Some("A1".into()), "{range}: the earlier copy stays");
+    }
+    // Paste Link can't point at a slid-together block.
+    s.execute("selection.set", json!({"range": "A1:A2,C1:C2"})).unwrap();
+    s.execute("edit.copy", json!({})).unwrap();
+    assert!(s.execute("edit.pasteSpecial", json!({"what": "all", "link": true, "at": "E1"})).is_err());
+    assert!(v(&s, "E1").is_empty());
+}

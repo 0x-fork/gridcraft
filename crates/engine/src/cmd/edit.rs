@@ -604,31 +604,117 @@ fn redo(s: &mut Session, p: &Json) -> Result<Json> {
 // ---------------------------------------------------------------- clipboard
 
 fn copy_impl(s: &mut Session, p: &Json, cut: bool) -> Result<Json> {
+    let multiple = || EngineError::Other("This action won't work on multiple selections.".into());
     let sheet = target_sheet(s, p)?;
     let ranges = target_ranges(s, p)?;
-    if ranges.len() > 1 {
-        return Err(EngineError::Other("This action won't work on multiple selections.".into()));
+    if ranges.len() > 1 && cut {
+        return Err(multiple());
     }
-    let range = ranges.first().copied().unwrap_or_default();
     let d = s.doc()?;
     let Some(sh) = d.wb.sheet(sheet) else { return Err(EngineError::NoDocument) };
-    let range = if range.is_full_cols() || range.is_full_rows() {
-        let used = sh.used_range().unwrap_or(RangeRef::cell(range.start));
-        range.intersection(&used.union(&RangeRef::cell(range.start))).unwrap_or(range)
-    } else {
-        range
+    let trim = |range: RangeRef| {
+        if range.is_full_cols() || range.is_full_rows() {
+            let used = sh.used_range().unwrap_or(RangeRef::cell(range.start));
+            range.intersection(&used.union(&RangeRef::cell(range.start))).unwrap_or(range)
+        } else {
+            range
+        }
     };
-    let text = crate::display::range_text(&d.wb, sheet, range);
+    let (wb, range, areas) = if ranges.len() > 1 {
+        let areas: Vec<RangeRef> = ranges.iter().map(|r| trim(*r)).collect();
+        let (wb, block) = slide_together(&d.wb, sheet, &areas).ok_or_else(multiple)?;
+        (std::sync::Arc::new(wb), block, areas)
+    } else {
+        (d.wb.clone(), trim(ranges.first().copied().unwrap_or_default()), Vec::new())
+    };
+    let text = crate::display::range_text(&wb, sheet, range);
     // The HTML rendering is for the host clipboard (UI); it can reach 4 MB, so agents and
     // scripts get it only when they ask for it.
-    let html = if p.get("html").and_then(Json::as_bool) == Some(true) { crate::io::range_html(&d.wb, sheet, range, &text) } else { None };
-    let clip = Clipboard { wb: d.wb.clone(), sheet, range, cut, doc_uid: d.uid, text: text.clone() };
+    let html = if p.get("html").and_then(Json::as_bool) == Some(true) { crate::io::range_html(&wb, sheet, range, &text) } else { None };
+    let clip = Clipboard { wb, sheet, range, cut, doc_uid: d.uid, text: text.clone(), areas };
     s.clipboard = Some(clip);
     let mut result = json!({"range": range.a1(), "text": text});
     if let Some(html) = html {
         result["html"] = Json::String(html);
     }
     Ok(result)
+}
+
+/// Excel copies a multi-area selection only when the areas line up: all cover the same rows (they
+/// slide together side by side, left to right) or all cover the same columns (stacked, top to
+/// bottom), without overlapping. Returns a copy of the workbook whose sheet holds the areas packed
+/// into one block at the first area's place, and that block. Formulas travel as their values, as
+/// in Excel. `None` when the areas don't line up.
+fn slide_together(wb: &gridcraft_model::Workbook, sheet: usize, areas: &[RangeRef]) -> Option<(gridcraft_model::Workbook, RangeRef)> {
+    let first = *areas.first()?;
+    let across = areas.iter().all(|a| a.start.row == first.start.row && a.end.row == first.end.row);
+    let down = areas.iter().all(|a| a.start.col == first.start.col && a.end.col == first.end.col);
+    let mut sorted = areas.to_vec();
+    if across {
+        sorted.sort_by_key(|a| a.start.col);
+    } else if down {
+        sorted.sort_by_key(|a| a.start.row);
+    } else {
+        return None;
+    }
+    if sorted.windows(2).any(|w| matches!(w, [a, b] if a.intersects(b))) {
+        return None;
+    }
+    let anchor = sorted.first()?.start;
+    let (h, w) = if across {
+        (first.height(), sorted.iter().map(RangeRef::width).fold(0u32, u32::saturating_add))
+    } else {
+        (sorted.iter().map(RangeRef::height).fold(0u32, u32::saturating_add), first.width())
+    };
+    let block = RangeRef::new(anchor, anchor.offset(i64::from(h) - 1, i64::from(w) - 1)?);
+    let src = wb.sheet(sheet)?;
+    let mut out = wb.clone();
+    let dst = out.sheet_mut(sheet)?;
+    dst.take_cells(block);
+    dst.spill.retain(|c, _| !block.contains(*c));
+    dst.spill_ranges.retain(|c, _| !block.contains(*c));
+    dst.comments.retain(|c, _| !block.contains(*c));
+    dst.merges.retain(|m| !m.intersects(&block));
+    if across {
+        dst.cols.retain(|c, _| !(block.start.col..=block.end.col).contains(c));
+    } else {
+        dst.rows.retain(|r, _| !(block.start.row..=block.end.row).contains(r));
+    }
+    let mut next = if across { anchor.col } else { anchor.row };
+    for a in &sorted {
+        let (dr, dc) = if across { (0, i64::from(next) - i64::from(a.start.col)) } else { (i64::from(next) - i64::from(a.start.row), 0) };
+        let cells = src.cells.iter_range(*a).map(|(c, _)| c).chain(src.spill.keys().copied().filter(|c| a.contains(*c)));
+        for c in cells {
+            let Some(to) = c.offset(dr, dc) else { continue };
+            let style = src.cell(c).map(|x| x.style).unwrap_or_default();
+            dst.set_cell(to, Cell { value: src.value(c), formula: None, style });
+            if let Some(picture) = src.cell_pictures.get(&c) {
+                dst.cell_pictures.insert(to, picture.clone());
+            }
+        }
+        for (c, comment) in src.comments.iter().filter(|(c, _)| a.contains(**c)) {
+            if let Some(to) = c.offset(dr, dc) {
+                dst.comments.insert(to, comment.clone());
+            }
+        }
+        for m in src.merges.iter().filter(|m| a.contains_range(m)) {
+            if let (Some(s), Some(e)) = (m.start.offset(dr, dc), m.end.offset(dr, dc)) {
+                dst.merges.push(RangeRef::new(s, e));
+            }
+        }
+        // Column widths (side by side) or row heights and hidden rows (stacked) follow their cells.
+        if across {
+            for (c, info) in src.cols.range(a.start.col..=a.end.col) {
+                dst.cols.insert(next.saturating_add(c.saturating_sub(a.start.col)), *info);
+            }
+        } else {
+            for (r, info) in src.rows.range(a.start.row..=a.end.row) {
+                dst.rows.insert(next.saturating_add(r.saturating_sub(a.start.row)), *info);
+            }
+        }
+        next = next.saturating_add(if across { a.width() } else { a.height() });
+    }
+    Some((out, block))
 }
 
 fn copy(s: &mut Session, p: &Json) -> Result<Json> {
@@ -795,6 +881,9 @@ fn paste_special(s: &mut Session, p: &Json) -> Result<Json> {
     let skip_blanks = bool_param(p, "skipBlanks").unwrap_or(false);
     let transpose = bool_param(p, "transpose").unwrap_or(false);
     let link = bool_param(p, "link").unwrap_or(false);
+    if link && !clip.areas.is_empty() {
+        return Err(EngineError::Other("This action won't work on multiple selections.".into()));
+    }
     let dest_sheet = target_sheet(s, p)?;
     let sel = s.doc()?.selection.current();
     let at = cell_param(p, "at").unwrap_or(sel.start);

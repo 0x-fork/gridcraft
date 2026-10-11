@@ -1022,10 +1022,14 @@ fn paint_selection(
         && app.session.active().is_some_and(|d| d.uid == clip.doc_uid && d.wb.active_sheet == clip.sheet)
         && range_in_pane(clip.range, rows, cols)
     {
-        let rr = geo.range_rect(sh, clip.range).expand(0.5);
-        let phase = app.grid.marching_phase;
-        let pts = [rr.left_top(), rr.right_top(), rr.right_bottom(), rr.left_bottom(), rr.left_top()];
-        p.extend(egui::Shape::dashed_line_with_offset(&pts, Stroke::new(2.0, t.sel_border), &[4.0], &[4.0], phase));
+        // A multi-area copy marks each area as selected.
+        let areas = if clip.areas.is_empty() { std::slice::from_ref(&clip.range) } else { clip.areas.as_slice() };
+        for area in areas {
+            let rr = geo.range_rect(sh, *area).expand(0.5);
+            let phase = app.grid.marching_phase;
+            let pts = [rr.left_top(), rr.right_top(), rr.right_bottom(), rr.left_bottom(), rr.left_top()];
+            p.extend(egui::Shape::dashed_line_with_offset(&pts, Stroke::new(2.0, t.sel_border), &[4.0], &[4.0], phase));
+        }
     }
 }
 
