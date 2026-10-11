@@ -1534,10 +1534,10 @@ fn keytip_pbr_() {
 }
 
 #[test]
-fn keytip_pg_() {
+fn keytip_pgb_() {
     let mut h = harness(blank());
-    sequence(&mut h, "PG", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "pageLayout.background"), "PG must journal pageLayout.background");
+    sequence(&mut h, "PGB", false);
+    assert!(h.state().session.journal.iter().any(|(id, _)| id == "pageLayout.background"), "PGB must journal pageLayout.background");
 }
 
 #[test]

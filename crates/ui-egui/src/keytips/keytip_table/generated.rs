@@ -208,7 +208,7 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("PB", Entry::Continue),                                    // Excel: Breaks; group level:
     ("PBI", Entry::Finish(Action::Command("pageLayout.breaks"))), // Excel: Insert Page Break; Insert Page Break
     ("PBR", Entry::Finish(Action::Command("pageLayout.breaks"))), // Excel: Remove Page Break; Remove Page Break
-    ("PG", Entry::Finish(Action::Command("pageLayout.background"))), // Excel: Background
+    ("PGB", Entry::Finish(Action::Command("pageLayout.background"))), // Excel: Background; Excel badge GB (Background in the Page Setup group)
     ("PI", Entry::Finish(Action::Command("pageLayout.printTitles"))), // Excel: Print Titles
     ("PM", Entry::Continue),                                    // Excel: Margins; group level:
     ("PMA", Entry::Finish(Action::Command("pageLayout.margins"))), // Excel: Custom Margins; containment(Margins)

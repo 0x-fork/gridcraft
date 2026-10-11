@@ -495,6 +495,29 @@ fn editable_combos_filter_by_typing_and_move_by_arrows() {
     h.run_steps(3);
     assert!(h.state().message.is_none() && h.state().toast.is_none(), "custom sizes must apply");
     assert_eq!(h.query_all_by_label("13.5").count(), 1, "the button must show the custom size");
+
+    // Closing without applying (Escape) and reopening must reset the filter to the full list.
+    let mut h = harness(blank());
+    sequence(&mut h, &[Key::H, Key::F, Key::F], false);
+    h.run_steps(3);
+    events(&mut h, [Event::Text("arial".into())]);
+    h.run_steps(3);
+    key(&mut h, Key::Escape);
+    h.run_steps(3);
+    sequence(&mut h, &[Key::H, Key::F, Key::F], false);
+    h.run_steps(4);
+    assert!(h.query_all_by_label("Georgia").count() >= 1, "reopening must show the full, unfiltered list");
+    // Arrows after typing move the highlight, not the text cursor: type a filter,
+    // then Down twice and Enter must apply the second match's neighbour logic.
+    key(&mut h, Key::Escape);
+    h.run_steps(3);
+    sequence(&mut h, &[Key::H, Key::F, Key::F], false);
+    h.run_steps(3);
+    events(&mut h, [Event::Text("candara".into())]);
+    h.run_steps(3);
+    key(&mut h, Key::Enter);
+    h.run_steps(3);
+    assert_eq!(h.query_all_by_label("Candara").count(), 1, "filtered Enter must apply the filtered row");
 }
 
 #[test]

@@ -393,10 +393,28 @@ fn editable_combo(
     if open_now && !st.was_open {
         st.text = String::new();
         st.sel = items.iter().position(|(v, _)| *v == current_value).map(|i| i as i32).unwrap_or(0);
+        // The reset lands on the frame AFTER the popup opens, which usually has no input of
+        // its own — without a repaint request the stale filtered list stays on screen.
+        ui.ctx().request_repaint();
     }
     st.was_open = open_now;
     let mut result = ComboResult::None;
     egui::Popup::menu(anchor).open_memory(popup_command(forced, anchor.clicked())).show(|ui| {
+        // Arrows and Enter navigate the list, not the filter field's cursor. Capture them and
+        // strip them from the input so the TextEdit never sees them.
+        let (mut down, mut up, mut enter) = (false, false, false);
+        ui.input(|i| {
+            down = i.key_pressed(egui::Key::ArrowDown);
+            up = i.key_pressed(egui::Key::ArrowUp);
+            enter = i.key_pressed(egui::Key::Enter);
+        });
+        if down || up || enter {
+            ui.ctx().input_mut(|i| {
+                i.events.retain(|e| {
+                    !matches!(e, egui::Event::Key { key: egui::Key::ArrowDown | egui::Key::ArrowUp | egui::Key::Enter, pressed: true, .. })
+                });
+            });
+        }
         let text_id = anchor.id.with(salt).with("__combo_text");
         let te = ui.add(egui::TextEdit::singleline(&mut st.text).id(text_id).desired_width(220.0).hint_text("Type to filter…"));
         if open_now && !te.has_focus() {
@@ -410,28 +428,26 @@ fn editable_combo(
         }
         let lower = st.text.to_lowercase();
         let filtered: Vec<usize> = items.iter().enumerate().filter(|(_, (_, d))| d.to_lowercase().contains(&lower)).map(|(i, _)| i).collect();
-        ui.input(|i| {
-            if !filtered.is_empty() {
-                let n = filtered.len() as i32;
-                if i.key_pressed(egui::Key::ArrowDown) {
-                    st.sel = (st.sel + 1).rem_euclid(n);
-                }
-                if i.key_pressed(egui::Key::ArrowUp) {
-                    st.sel = (st.sel - 1).rem_euclid(n);
-                }
+        if !filtered.is_empty() {
+            let n = filtered.len() as i32;
+            if down {
+                st.sel = (st.sel + 1).rem_euclid(n);
             }
-            if i.key_pressed(egui::Key::Enter) {
-                if filtered.is_empty() {
-                    let t = st.text.trim().to_string();
-                    if !t.is_empty() {
-                        result = ComboResult::Entered(t);
-                    }
-                } else {
-                    let idx = filtered[st.sel.clamp(0, filtered.len() as i32 - 1) as usize];
-                    result = ComboResult::Picked(items[idx].0.to_string());
-                }
+            if up {
+                st.sel = (st.sel - 1).rem_euclid(n);
             }
-        });
+        }
+        if enter {
+            if filtered.is_empty() {
+                let t = st.text.trim().to_string();
+                if !t.is_empty() {
+                    result = ComboResult::Entered(t);
+                }
+            } else {
+                let idx = filtered[st.sel.clamp(0, filtered.len() as i32 - 1) as usize];
+                result = ComboResult::Picked(items[idx].0.to_string());
+            }
+        }
         ui.separator();
         egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
             for i in &filtered {
@@ -1679,23 +1695,31 @@ fn page_layout(app: &mut SheetApp, ui: &mut Ui) {
     ui.vertical(|ui| {
         ui.label(egui::RichText::new(app.ui.language.tr("Gridlines")).strong().small());
         let mut v = sh.0;
-        if ui.checkbox(&mut v, screen).changed() {
-            act(app, "view.gridlines", json!({"on": v}));
+        let resp = ui.checkbox(&mut v, screen);
+        control_keytip(app, ui, &resp, "view.gridlines");
+        if resp.changed() || invoke(app, "view.gridlines") {
+            act(app, "view.gridlines", json!({"on": !v}));
         }
         let mut p = sh.2;
-        if ui.checkbox(&mut p, print).changed() {
-            act(app, "pageLayout.printGridlines", json!({"on": p}));
+        let resp = ui.checkbox(&mut p, print);
+        control_keytip(app, ui, &resp, "pageLayout.printGridlines");
+        if resp.changed() || invoke(app, "pageLayout.printGridlines") {
+            act(app, "pageLayout.printGridlines", json!({"on": !p}));
         }
     });
     ui.vertical(|ui| {
         ui.label(egui::RichText::new(app.ui.language.tr("Headings")).strong().small());
         let mut v = sh.1;
-        if ui.checkbox(&mut v, screen).changed() {
-            act(app, "view.headings", json!({"on": v}));
+        let resp = ui.checkbox(&mut v, screen);
+        control_keytip(app, ui, &resp, "view.headings");
+        if resp.changed() || invoke(app, "view.headings") {
+            act(app, "view.headings", json!({"on": !v}));
         }
         let mut p = sh.3;
-        if ui.checkbox(&mut p, print).changed() {
-            act(app, "pageLayout.printHeadings", json!({"on": p}));
+        let resp = ui.checkbox(&mut p, print);
+        control_keytip(app, ui, &resp, "pageLayout.printHeadings");
+        if resp.changed() || invoke(app, "pageLayout.printHeadings") {
+            act(app, "pageLayout.printHeadings", json!({"on": !p}));
         }
     });
     let rtl = app.session.active().and_then(|d| d.wb.active()).is_some_and(|s| s.right_to_left);
