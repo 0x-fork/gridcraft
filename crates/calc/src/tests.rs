@@ -118,6 +118,13 @@ fn xlookup_returns_a_reference() {
     assert_eq!(t.get("D6"), Value::Bool(true));
     t.set("D7", "=\"x\"&XLOOKUP(\"e\",A1:A5,B1:B5)&\"y\"");
     assert_eq!(t.get("D7"), Value::from("xy"));
+    // An empty match_mode keeps the search_mode after it: search last to first.
+    t.set("A6", "b");
+    t.set("B6", "20");
+    t.set("D8", "=XLOOKUP(\"b\",A1:A6,B1:B6,,,-1)");
+    assert_eq!(t.num("D8"), 20.0);
+    t.set("D9", "=XLOOKUP(\"b\",A1:A6,B1:B6)");
+    assert_eq!(t.num("D9"), 2.0);
 }
 
 #[test]
