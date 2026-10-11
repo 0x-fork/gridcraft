@@ -189,7 +189,7 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("NHI", Entry::Finish(Action::Command("insert.chart"))),      // Excel: Hierarchy Chart; Hierarchy (kind TBD)
     ("NI1", Entry::Finish(Action::Command("insert.chart"))),      // Excel: Waterfall Chart; Waterfall (kind TBD)
     ("NI2", Entry::Finish(Action::Command("insert.link"))),       // Excel: Link
-    ("NJ", Entry::Finish(Action::Pending("`insert.object`"))),    // pending; Excel: Object; insert.object missing; reserved until the command lands
+    ("NJ", Entry::Finish(Action::Pending("insert.object"))),      // pending; Excel: Object; insert.object missing; reserved until the command lands
     ("NM1T", Entry::Finish(Action::Command("insert.picture"))),   // Excel: SmartArt Picture; containment(Picture)
     ("NM2", Entry::Finish(Action::Command("insert.chart"))),      // Excel: Map Chart; Map (kind TBD)
     ("NN1", Entry::Finish(Action::Command("insert.chart"))),      // Excel: Line Chart; Line chart (kind TBD)
@@ -204,47 +204,47 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("NSA", Entry::Finish(Action::Command("insert.chart"))),      // Excel: Statistical Chart; Statistical chart (kind TBD)
     ("NSC", Entry::Finish(Action::Pending("insert.screenshot"))), // pending; Excel: Screenshot Menu; Screenshot; reserved until the command lands
     ("NSD", Entry::Finish(Action::Command("insert.chart"))),      // Excel: Combo Chart; Combo (kind TBD)
-    ("NSF", Entry::Finish(Action::Pending("`insert.slicer`"))), // pending; Excel: Slicer; insert.slicer missing (gap #8); reserved until the command lands
-    ("NSH", Entry::Finish(Action::Command("insert.shape"))),    // Excel: Shapes
+    ("NSF", Entry::Finish(Action::Pending("insert.slicer"))), // pending; Excel: Slicer; insert.slicer missing (gap #8); reserved until the command lands
+    ("NSH", Entry::Finish(Action::Command("insert.shape"))),  // Excel: Shapes
     ("NSP", Entry::Finish(Action::Command("insert.recommendedPivotTables"))), // Excel: Recommended PivotTables
-    ("NST", Entry::Finish(Action::Pending("`insert.timeline`"))), // pending; Excel: Timeline; insert.timeline missing (gap #8); reserved until the command lands
+    ("NST", Entry::Finish(Action::Pending("insert.timeline"))), // pending; Excel: Timeline; insert.timeline missing (gap #8); reserved until the command lands
     ("NSZ", Entry::Finish(Action::Pending("insert.pivotChart"))), // pending; Excel: PivotChart; PivotChart; reserved until the command lands
-    ("NT", Entry::Finish(Action::Command("insert.table"))),       // Excel: Table
-    ("NU", Entry::Finish(Action::Command("insert.symbol"))),      // Excel: Symbols; containment(Symbol)
-    ("NZS", Entry::Finish(Action::Command("insert.symbol"))),     // Excel: Excel: Symbol (modern)
-    ("NV", Entry::Finish(Action::Command("insert.pivotTable"))),  // Excel: PivotTable
-    ("NW", Entry::Finish(Action::Pending("insert.wordArt"))),     // pending; Excel: WordArt; WordArt; reserved until the command lands
-    ("NX", Entry::Finish(Action::Command("insert.textBox"))),     // Excel: Text Box
-    ("NZK", Entry::Continue),                                     // Excel: Sparklines Menu; group level:
+    ("NT", Entry::Finish(Action::Command("insert.table"))),     // Excel: Table
+    ("NU", Entry::Finish(Action::Command("insert.symbol"))),    // Excel: Symbols; containment(Symbol)
+    ("NZS", Entry::Finish(Action::Command("insert.symbol"))),   // Excel: Excel: Symbol (modern)
+    ("NV", Entry::Finish(Action::Command("insert.pivotTable"))), // Excel: PivotTable
+    ("NW", Entry::Finish(Action::Pending("insert.wordArt"))),   // pending; Excel: WordArt; WordArt; reserved until the command lands
+    ("NX", Entry::Finish(Action::Command("insert.textBox"))),   // Excel: Text Box
+    ("NZK", Entry::Continue),                                   // Excel: Sparklines Menu; group level:
     ("NZKSL", Entry::Finish(Action::Command("insert.sparkline"))), // Excel: Line Sparkline
     ("NZKSO", Entry::Finish(Action::Command("insert.sparkline"))), // Excel: Column Sparkline
     ("NZKSW", Entry::Finish(Action::Command("insert.sparkline"))), // Excel: Win/Loss Sparkline
-    ("NZTX", Entry::Finish(Action::Command("insert.textBox"))),   // Excel: Text Box
-    ("NZT", Entry::Finish(Action::Command("insert.textBox"))),    // Excel: Excel: Text Box (modern)
+    ("NZTX", Entry::Finish(Action::Command("insert.textBox"))), // Excel: Text Box
+    ("NZT", Entry::Finish(Action::Command("insert.textBox"))),  // Excel: Excel: Text Box (modern)
     ("PAE", Entry::Finish(Action::Command("arrange.sendBackward"))), // Excel: Send Backward
     ("PAF", Entry::Finish(Action::Command("arrange.bringForward"))), // Excel: Bring Forward
-    ("PB", Entry::Continue),                                      // Excel: Breaks; group level:
+    ("PB", Entry::Continue),                                    // Excel: Breaks; group level:
     ("PBI", Entry::Finish(Action::Command("pageLayout.breaks"))), // Excel: Insert Page Break; Insert Page Break
     ("PBR", Entry::Finish(Action::Command("pageLayout.breaks"))), // Excel: Remove Page Break; Remove Page Break
     ("PG", Entry::Finish(Action::Command("pageLayout.background"))), // Excel: Background
     ("PI", Entry::Finish(Action::Command("pageLayout.printTitles"))), // Excel: Print Titles
-    ("PM", Entry::Continue),                                      // Excel: Margins; group level:
+    ("PM", Entry::Continue),                                    // Excel: Margins; group level:
     ("PMA", Entry::Finish(Action::Command("pageLayout.margins"))), // Excel: Custom Margins; containment(Margins)
     ("PO", Entry::Finish(Action::Command("pageLayout.orientation"))), // Excel: Orientation
     ("PPG", Entry::Finish(Action::Command("pageLayout.printGridlines"))), // Excel: Print Gridlines
     ("PPH", Entry::Finish(Action::Command("pageLayout.printHeadings"))), // Excel: Print Headings
-    ("PR", Entry::Continue),                                      // Excel: Print Area; group level:
+    ("PR", Entry::Continue),                                    // Excel: Print Area; group level:
     ("PRS", Entry::Finish(Action::Command("pageLayout.printArea"))), // Excel: Set Print Area
     ("PSP", Entry::Finish(Action::Command("pageLayout.pageSetup"))), // Excel: Page Setup
-    ("PSZ", Entry::Finish(Action::Command("pageLayout.size"))),   // Excel: Size
+    ("PSZ", Entry::Finish(Action::Command("pageLayout.size"))), // Excel: Size
     ("PTC", Entry::Finish(Action::Command("pageLayout.themeColors"))), // Excel: Theme Colors; containment(Colors)
     ("PTE", Entry::Finish(Action::Command("pageLayout.themeEffects"))), // Excel: Theme Effects; containment(Effects)
     ("PTF", Entry::Finish(Action::Command("pageLayout.themeFonts"))), // Excel: Theme Fonts; containment(Fonts)
-    ("PTH", Entry::Continue),                                     // Excel: Themes; group level:
+    ("PTH", Entry::Continue),                                   // Excel: Themes; group level:
     ("PTHB", Entry::Finish(Action::Command("pageLayout.theme"))), // Excel: Browse Themes; containment(Themes)
-    ("PVG", Entry::Finish(Action::Command("view.gridlines"))),    // Excel: View Gridlines
-    ("PVH", Entry::Finish(Action::Command("view.headings"))),     // Excel: View Headings
-    ("MA", Entry::Continue),                                      // Excel: Remove Arrows Menu; group level: containment(Remove Arrows)
+    ("PVG", Entry::Finish(Action::Command("view.gridlines"))),  // Excel: View Gridlines
+    ("PVH", Entry::Finish(Action::Command("view.headings"))),   // Excel: View Headings
+    ("MA", Entry::Continue),                                    // Excel: Remove Arrows Menu; group level: containment(Remove Arrows)
     ("MAA", Entry::Finish(Action::Pending("formulas.removeArrows"))), // pending; Excel: Remove All Arrows; Remove All Arrows; reserved until the command lands
     ("MAP", Entry::Finish(Action::Pending("formulas.removePrecedentArrows"))), // pending; Excel: Remove Precedent Arrows; Remove Precedent Arrows; reserved until the command lands
     ("MB", Entry::Finish(Action::Command("formulas.calculateNow"))),           // Excel: Calculate Now
@@ -303,9 +303,9 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("AF1C", Entry::Finish(Action::Command("insert.picture"))), // Excel: Picture from Clipboard (source TBD)
     ("AF1P", Entry::Finish(Action::Command("insert.picture"))), // Excel: Picture from File (source TBD)
     ("AFA", Entry::Finish(Action::Pending("data.fromAccess"))), // pending; Excel: Get External Data: From Access; gap #12 Get & Transform; reserved until the command lands
-    ("AFC", Entry::Finish(Action::Pending("`data.forecastSheet`"))), // pending; Excel: Forecast Sheet; IN FLIGHT: vangel76 PR #325; reserved until the command lands
-    ("AFE", Entry::Finish(Action::Pending("`data.analyzeData`"))),   // pending; Excel: Analyze Data; AI feature GAP; reserved until the command lands
-    ("AFF", Entry::Finish(Action::Command("edit.flashFill"))),       // Excel: Flash Fill
+    ("AFC", Entry::Finish(Action::Pending("data.forecastSheet"))), // pending; Excel: Forecast Sheet; IN FLIGHT: vangel76 PR #325; reserved until the command lands
+    ("AFE", Entry::Finish(Action::Pending("data.analyzeData"))),   // pending; Excel: Analyze Data; AI feature GAP; reserved until the command lands
+    ("AFF", Entry::Finish(Action::Command("edit.flashFill"))),     // Excel: Flash Fill
     ("AFO", Entry::Finish(Action::Pending("data.fromOtherSources"))), // pending; Excel: Get External Data: From Other Sources; gap #12; reserved until the command lands
     ("AFT", Entry::Finish(Action::Pending("data.fromText"))), // pending; Excel: Get External Data: From Text; gap #12; reserved until the command lands
     ("AFW", Entry::Finish(Action::Pending("data.fromWeb"))),  // pending; Excel: Get External Data: From Web; reserved until the command lands
@@ -358,12 +358,12 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("RC", Entry::Finish(Action::Command("review.newComment"))),    // Excel: New Comment
     ("RD", Entry::Finish(Action::Command("review.deleteComment"))), // Excel: Delete Comment
     ("RG", Entry::Finish(Action::Pending("review.showChanges"))),   // pending; Excel: Track Changes; reserved until the command lands
-    ("RL", Entry::Finish(Action::Pending("`review.translate`"))),   // pending; Excel: Translate; feature gap; reserved until the command lands
+    ("RL", Entry::Finish(Action::Pending("review.translate"))),     // pending; Excel: Translate; feature gap; reserved until the command lands
     ("RN", Entry::Finish(Action::Pending("review.nextComment"))),   // pending; Excel: Next Comment; Next Comment; reserved until the command lands
     ("RO", Entry::Finish(Action::Command("review.protectWorkbook"))), // Excel: Protect and Share Workbook
     ("RPS", Entry::Finish(Action::Command("review.protectSheet"))), // Excel: Protect Sheet
     ("RPW", Entry::Finish(Action::Command("review.protectWorkbook"))), // Excel: Protect Workbook
-    ("RRS", Entry::Finish(Action::Pending("`review.smartLookup`"))), // pending; Excel: Smart Lookup; feature gap; reserved until the command lands
+    ("RRS", Entry::Finish(Action::Pending("review.smartLookup"))),  // pending; Excel: Smart Lookup; feature gap; reserved until the command lands
     ("RS", Entry::Finish(Action::Command("review.spelling"))),      // Excel: Spelling
     ("RTN", Entry::Finish(Action::Command("review.newNote"))),      // Excel: New Note
     ("RV", Entry::Finish(Action::Pending("review.previousComment"))), // pending; Excel: Previous Comment; Previous Comment; reserved until the command lands

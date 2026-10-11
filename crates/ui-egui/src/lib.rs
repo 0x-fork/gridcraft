@@ -1015,9 +1015,13 @@ impl SheetApp {
                 }
                 keytips::Action::Command(id) => self.run_or_alert(id, json!({})),
                 keytips::Action::Dialog(name) => self.open_dialog(name, json!({})),
-                // Reserved sequence: the command does not exist yet. Badge shows, invocation
-                // is silent (see keytips.json `pending`).
-                keytips::Action::Pending(_) => {}
+                // Reserved sequence: fires silently while its command is missing. When the
+                // command lands in the catalog it goes live with no table edit.
+                keytips::Action::Pending(id) => {
+                    if gridcraft_engine::find_command(id).is_some() {
+                        self.run_or_alert(id, json!({}));
+                    }
+                }
             }
         }
     }

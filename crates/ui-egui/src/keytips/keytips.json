@@ -1258,7 +1258,7 @@
     {
       "seq": "NJ",
       "kind": "command",
-      "target": "`insert.object`",
+      "target": "insert.object",
       "pending": true,
       "excel": "Object",
       "note": "insert.object missing; reserved until the command lands"
@@ -1364,7 +1364,7 @@
     {
       "seq": "NSF",
       "kind": "command",
-      "target": "`insert.slicer`",
+      "target": "insert.slicer",
       "pending": true,
       "excel": "Slicer",
       "note": "insert.slicer missing (gap #8); reserved until the command lands"
@@ -1386,7 +1386,7 @@
     {
       "seq": "NST",
       "kind": "command",
-      "target": "`insert.timeline`",
+      "target": "insert.timeline",
       "pending": true,
       "excel": "Timeline",
       "note": "insert.timeline missing (gap #8); reserved until the command lands"
@@ -2040,7 +2040,7 @@
     {
       "seq": "AFC",
       "kind": "command",
-      "target": "`data.forecastSheet`",
+      "target": "data.forecastSheet",
       "pending": true,
       "excel": "Forecast Sheet",
       "note": "IN FLIGHT: vangel76 PR #325; reserved until the command lands"
@@ -2048,7 +2048,7 @@
     {
       "seq": "AFE",
       "kind": "command",
-      "target": "`data.analyzeData`",
+      "target": "data.analyzeData",
       "pending": true,
       "excel": "Analyze Data",
       "note": "AI feature GAP; reserved until the command lands"
@@ -2439,7 +2439,7 @@
     {
       "seq": "RL",
       "kind": "command",
-      "target": "`review.translate`",
+      "target": "review.translate",
       "pending": true,
       "excel": "Translate",
       "note": "feature gap; reserved until the command lands"
@@ -2475,7 +2475,7 @@
     {
       "seq": "RRS",
       "kind": "command",
-      "target": "`review.smartLookup`",
+      "target": "review.smartLookup",
       "pending": true,
       "excel": "Smart Lookup",
       "note": "feature gap; reserved until the command lands"

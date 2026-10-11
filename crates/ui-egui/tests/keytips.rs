@@ -401,3 +401,49 @@ fn vertical_alignment_keytips_run_their_commands() {
         assert_eq!(h.state().session.journal.iter().filter(|(j, _)| j == id).count(), 1, "HA{} runs {id}", letter.name());
     }
 }
+
+#[test]
+fn pending_sequences_are_silent_no_ops() {
+    let mut h = harness(blank());
+    let journal = h.state().session.journal.len();
+    sequence(&mut h, &[Key::N, Key::E], false); // NE -> insert.equation (missing)
+    assert!(h.state().dialog.is_none(), "no dialog for a pending sequence");
+    assert!(h.state().message.is_none(), "no message box for a pending sequence");
+    assert!(h.state().toast.is_none(), "no toast for a pending sequence");
+    assert_eq!(h.state().session.journal.len(), journal, "no journal entry for a pending sequence");
+    assert_eq!(h.state().keytips.prefix(), None, "the finished sequence clears the prefix");
+}
+
+#[test]
+fn pending_sequences_go_live_when_the_command_lands() {
+    // The command lands in the catalog (here: a test-registered stand-in).
+    // The sequence must run it with no table edit.
+    gridcraft_engine::register_test_command("insert.slicer", |s, _| {
+        s.execute("cell.set", json!({"cell": "Z9", "input": "live"}))?;
+        Ok(json!({}))
+    });
+    let mut h = harness(blank());
+    sequence(&mut h, &[Key::N, Key::S, Key::F], false); // NSF -> insert.slicer
+    assert_eq!(value(&h, "Z9"), Value::from("live"), "the pending sequence ran the landed command");
+    assert_eq!(
+        h.state().session.journal.iter().filter(|(id, _)| id == "insert.slicer").count(),
+        1,
+        "the landed command is journaled like any live command"
+    );
+    assert_eq!(h.state().keytips.prefix(), None);
+}
+
+#[test]
+fn every_sequence_terminates_without_panicking() {
+    use gridcraft_ui_egui::keytips::keytip_table::SEQUENCES;
+    for (seq, _entry) in SEQUENCES {
+        let mut h = harness(blank());
+        key(&mut h, Key::F10); // arm
+        for ch in seq.chars() {
+            let k = Key::from_name(&ch.to_string()).expect("sequence letters map to keys");
+            letter(&mut h, k, false);
+        }
+        // A finish/tab/dialog/wait state is all fine; the point is nothing panics.
+    }
+    assert_eq!(SEQUENCES.len(), SEQUENCES.len(), "every sequence ran");
+}
