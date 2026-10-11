@@ -332,6 +332,9 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
         if !p.select_unlocked {
             s.push_str(" selectUnlockedCells=\"1\"");
         }
+        if let Some(h) = &p.password {
+            s.push_str(&password_attrs(h, ""));
+        }
         s.push_str("/>");
     }
     s.push_str(&protected_ranges_xml(sheet));

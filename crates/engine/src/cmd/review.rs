@@ -134,7 +134,8 @@ fn protect_sheet(s: &mut Session, p: &Json) -> Result<Json> {
     let sheet = target_sheet(s, p)?;
     let b = |k: &str| bool_param(p, k).unwrap_or(false);
     let prot = SheetProtection {
-        password_hash: str_param(p, "password").filter(|x| !x.is_empty()).map(password_hash),
+        password: None,
+        legacy_password_hash: None,
         select_locked: true,
         select_unlocked: true,
         format_cells: b("formatCells"),
@@ -147,6 +148,9 @@ fn protect_sheet(s: &mut Session, p: &Json) -> Result<Json> {
         sort: b("sort"),
         autofilter: b("autofilter"),
     };
+    let d = s.doc()?;
+    let what = d.wb.sheet(sheet).map(|sh| sh.name.clone()).unwrap_or_default();
+    let prot = SheetProtection { password: str_param(p, "password").filter(|x| !x.is_empty()).map(|pw| new_password_hash(d, &what, pw)), ..prot };
     edit(s, |cx| {
         cx.sheet_mut(sheet)?.protection = Some(prot.clone());
         Ok(Json::Null)
@@ -155,11 +159,16 @@ fn protect_sheet(s: &mut Session, p: &Json) -> Result<Json> {
 
 fn unprotect_sheet(s: &mut Session, p: &Json) -> Result<Json> {
     let sheet = target_sheet(s, p)?;
-    let ph = s.doc()?.wb.sheet(sheet).and_then(|sh| sh.protection.as_ref()).and_then(|pr| pr.password_hash);
-    if let Some(h) = ph
-        && str_param(p, "password").map(password_hash) != Some(h)
-    {
-        return Err(EngineError::Other("The password you supplied is not correct.".into()));
+    if let Some(pr) = s.doc()?.wb.sheet(sheet).and_then(|sh| sh.protection.as_ref()) {
+        let pw = str_param(p, "password").unwrap_or("");
+        let ok = match (&pr.password, pr.legacy_password_hash) {
+            (Some(h), _) => h.verify(pw).map_err(EngineError::Other)?,
+            (None, Some(h)) => password_hash(pw) == h,
+            (None, None) => true,
+        };
+        if !ok {
+            return Err(EngineError::Other("The password you supplied is not correct.".into()));
+        }
     }
     edit(s, |cx| {
         cx.sheet_mut(sheet)?.protection = None;
@@ -382,6 +391,30 @@ mod tests {
         assert!(s.execute("review.nextComment", json!({})).is_err());
         assert!(s.execute("review.previousComment", json!({})).is_err());
         assert_eq!(at(&s), (0, "A1".to_string()));
+    }
+
+    #[test]
+    fn sheet_passwords_use_excel_hashes_and_old_json_hashes_still_verify() {
+        let mut s = book();
+        s.execute("review.protectSheet", json!({"password": "pa55"})).unwrap();
+        let prot = s.doc().unwrap().wb.active().unwrap().protection.clone().unwrap();
+        assert!(matches!(&prot.password, Some(PasswordHash::Iterated { algorithm, .. }) if algorithm == "SHA-512"));
+        assert!(s.execute("review.unprotectSheet", json!({})).is_err());
+        assert!(s.execute("review.unprotectSheet", json!({"password": "pass"})).is_err());
+        s.execute("review.unprotectSheet", json!({"password": "pa55"})).unwrap();
+        assert!(!s.doc().unwrap().wb.active().unwrap().is_protected());
+        // A GridCraft JSON workbook saved before carried the internal hash under `password_hash`.
+        let old = format!(
+            r#"{{"password_hash": {}, "select_locked": true, "select_unlocked": true, "format_cells": false, "format_columns": false, "format_rows": false, "insert_columns": false, "insert_rows": false, "delete_columns": false, "delete_rows": false, "sort": false, "autofilter": false}}"#,
+            password_hash("old")
+        );
+        let prot: SheetProtection = serde_json::from_str(&old).unwrap();
+        assert_eq!((prot.legacy_password_hash, prot.password.is_none()), (Some(password_hash("old")), true));
+        let i = s.doc().unwrap().wb.active_sheet;
+        let wb = std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb);
+        std::sync::Arc::make_mut(&mut wb.sheets[i]).protection = Some(prot);
+        assert!(s.execute("review.unprotectSheet", json!({"password": "new"})).is_err());
+        s.execute("review.unprotectSheet", json!({"password": "old"})).unwrap();
     }
 
     #[test]

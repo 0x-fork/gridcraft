@@ -223,7 +223,7 @@ fn hyperlinks_comments_tables_validation_filters() {
       <printOptions gridLines="1" horizontalCentered="1"/><pageMargins left="0.5" right="0.5" top="1" bottom="1" header="0.4" footer="0.4"/>
       <headerFooter><oddHeader>&amp;CTitle</oddHeader><oddFooter>Page &amp;P</oddFooter></headerFooter>
       <rowBreaks count="1"><brk id="10" max="16383" man="1"/></rowBreaks>
-      <sheetProtection sheet="1" formatCells="0" sort="0" password="CC1A"/>
+      <sheetProtection sheet="1" formatCells="0" sort="0" password="CBEB"/>
       <tableParts count="1"><tablePart r:id="rId2"/></tableParts>
       <extLst><ext uri="{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}"><x14:dataValidations xmlns:x14="x" xmlns:xm="m" count="1"><x14:dataValidation type="list"><x14:formula1><xm:f>Other!$A$1:$A$3</xm:f></x14:formula1><xm:sqref>G1:G4</xm:sqref></x14:dataValidation></x14:dataValidations></ext>
         <ext uri="{05C60535-1F16-4fd2-B633-F4F36F0B64E0}"><x14:sparklineGroups xmlns:x14="x" xmlns:xm="m"><x14:sparklineGroup type="column" markers="1"><x14:colorSeries rgb="FF376092"/><x14:sparklines><x14:sparkline><xm:f>Data!A1:E1</xm:f><xm:sqref>F1</xm:sqref></x14:sparkline></x14:sparklines></x14:sparklineGroup></x14:sparklineGroups></ext></extLst>"#;
@@ -270,7 +270,10 @@ Check this</t></r></text></comment></commentList></comments>"#;
     assert_eq!(s.print.row_breaks, vec![10]);
     let p = s.protection.as_ref().unwrap();
     assert!(p.format_cells && p.sort && !p.insert_rows && p.select_locked);
-    assert!(rep.warnings.iter().any(|w| w.contains("password")));
+    // The legacy sheet password is imported (CBEB is the hash of "test") and verifies.
+    let pw = p.password.as_ref().unwrap();
+    assert!(pw.verify("test").unwrap() && !pw.verify("Test").unwrap());
+    assert!(!rep.warnings.iter().any(|w| w.contains("password")), "{:?}", rep.warnings);
     assert_eq!(s.sparklines.len(), 1);
     assert_eq!(s.sparklines[0].kind, gridcraft_model::SparklineKind::Column);
 }

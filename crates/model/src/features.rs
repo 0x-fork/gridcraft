@@ -554,8 +554,14 @@ impl Default for PrintSettings {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SheetProtection {
-    /// Hash of the password (our own salted FNV; never the password itself).
-    pub password_hash: Option<u64>,
+    /// Hash of the password (Excel-compatible, written to XLSX `sheetProtection`; never the
+    /// password itself).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<crate::PasswordHash>,
+    /// The internal hash older GridCraft JSON workbooks stored ([`password_hash`]); still
+    /// verified when unprotecting, never written for new passwords.
+    #[serde(rename = "password_hash", default, skip_serializing_if = "Option::is_none")]
+    pub legacy_password_hash: Option<u64>,
     pub select_locked: bool,
     pub select_unlocked: bool,
     pub format_cells: bool,
@@ -587,8 +593,8 @@ impl EditRange {
     }
 }
 
-/// Simple non-cryptographic password hash for sheet protection (like Excel's, protection is a
-/// convenience, not security).
+/// The non-cryptographic password hash older GridCraft versions stored for sheet protection
+/// (only verified now, see [`SheetProtection::legacy_password_hash`]).
 pub fn password_hash(pw: &str) -> u64 {
     let mut h: u64 = 0xcbf29ce484222325 ^ 0x5348_4545_5443;
     for b in pw.bytes() {

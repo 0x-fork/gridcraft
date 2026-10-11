@@ -248,7 +248,14 @@ fn sample() -> Workbook {
             (3, FilterCriterion::FillColor(Color::Rgb(0xFF0000))),
         ],
     });
-    s.protection = Some(SheetProtection { format_cells: true, sort: true, select_locked: true, select_unlocked: true, ..Default::default() });
+    s.protection = Some(SheetProtection {
+        format_cells: true,
+        sort: true,
+        select_locked: true,
+        select_unlocked: true,
+        password: Some(gridcraft_model::PasswordHash::new_sha512("sheet pw", b"fedcba9876543210")),
+        ..Default::default()
+    });
     s.print = PrintSettings {
         orientation: Orientation::Landscape,
         paper: "A4".into(),
