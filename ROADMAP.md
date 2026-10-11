@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~25 points of "ready for real work" and ~160–240 h away
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (worksheet functions 505 / 523) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (worksheet functions 505 / 523; catalog 259 / 290) · **Target:** Microsoft Excel (Microsoft 365)
 
 GridCraft aims at full Microsoft Excel parity, and at being better in places: faster, open (XLSX
 is the native format), fully scriptable by agents (MCP, control channel, CLI), and on the web.
@@ -21,7 +21,7 @@ This page is the summary. The detail is in:
 
 | Number | Value | Kind |
 |---|---|---|
-| **Feature breadth** (weighted) | **~75%** | estimated, anchored on two measurements: ribbon catalog 258 / 290 (89.0%), worksheet functions 505 / 523 (96.6%; 496 working, 94.8%) |
+| **Feature breadth** (weighted) | **~75%** | estimated, anchored on two measurements: ribbon catalog 259 / 290 (89.3%), worksheet functions 505 / 523 (96.6%; 496 working, 94.8%) |
 | **Ready for real work** | **~50%** | estimated from written weights (51.6); [target-app-parity.md](docs/target-app-parity.md) |
 | **Mainstream practitioner** | **~50%** | estimated: typical analyst/finance user, weekly features, × 0.90 interaction × 0.92 stability × 0.88 file exchange; [method](docs/target-app-parity.md#mainstream-practitioner) |
 | **Essentials user** | **~63%** | estimated: core features only, × 0.92 launch/stability × 0.95 clarity × 0.90 opening sent files; [method](docs/target-app-parity.md#essentials-user) |
@@ -131,6 +131,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-10-11 | Data › Forecast › Forecast Sheet: a new sheet with the history, FORECAST.ETS forecast, confidence bounds, statistics and a chart (#322) |
 | 2026-10-11 | FORECAST.ETS, FORECAST.ETS.CONFINT, FORECAST.ETS.SEASONALITY, FORECAST.ETS.STAT: AAA exponential smoothing forecasts (#314) |
 | 2026-10-10 | Ribbon translated into Japanese, Chinese, Korean, Brazilian Portuguese and Russian with system-language default (#31, #104, #82); CJK/Thai/Hebrew font fallback (#38); clear messages for encrypted and `.xls` files (#17); smooth line charts (#62). Progress docs restructured to the craftrules standard; full re-measure (this page). Initial ribbon key tips (#43), in-place text box editing (#84), copy as HTML table (#36). ODS and XLSB data import (#100, #101); recalc linear in the number of range formulas (#66); RISC-V Linux build; Flatpak repository on Pages; web cell-commit trap fixed |
 | 2026-10-09 | Community fixes: spill range operator `A1#`, sheet-scoped names, protection refuses locked-cell edits, Insert/Delete Cells adjust references, `DATE(1900,2,29)`, SUMIF sizing, `ROUND` at 15 digits, `_xlpm.` LAMBDA parameters in XLSX, vertical scrollbar, system appearance, border previews; v0.4.0 |
@@ -143,6 +144,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Catalog 259 / 290 (Forecast Sheet); progress log row |
 | 2026-10-11 | minor | Worksheet functions 505 / 523 (FORECAST.ETS family); progress log row |
 | 2026-10-10 | minor | Readiness-by-audience table with hours to ~95% per audience; full number unchanged (additive weighted sum) |
 | 2026-10-10 | minor | Added Mainstream practitioner (~50%) and Essentials user (~63%); languages updated for the 10-10 merges (ribbon in ja, zh, ko, pt-BR, ru); localization 5%→10%; full number re-checked (51.6, unchanged) |

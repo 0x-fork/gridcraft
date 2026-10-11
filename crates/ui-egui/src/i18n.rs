@@ -317,6 +317,7 @@ const JAPANESE: &[(&str, &str)] = &[
     ("Data Table…", "データ テーブル…"),
     ("Scenario Manager…", "シナリオ マネージャー…"),
     ("Goal Seek…", "ゴール シーク…"),
+    ("Forecast\nSheet", "予測シート"),
     ("Spelling", "スペルチェック"),
     ("Check\nAccessibility", "アクセシビリティ チェック"),
     ("Threaded Comments", "スレッド化されたコメント"),

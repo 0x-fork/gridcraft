@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (§13, §15: FORECAST.ETS family landed) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (§13: FORECAST.ETS family and Forecast Sheet landed; §15) · **Target:** Microsoft Excel (Microsoft 365)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -98,8 +98,8 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   data model (`data.fromWeb`, `data.relationships` missing). **Estimate:** 60–100 h.
 
 ### 13. Analysis tools: Solver, Analysis ToolPak, Forecast Sheet (F)
-- `data.solver`, `data.analysisToolPak`, `data.forecastSheet` missing (the FORECAST.ETS family the
-  Forecast Sheet builds on is in). **Estimate:** 18–30 h.
+- `data.solver`, `data.analysisToolPak` missing. Forecast Sheet (`data.forecastSheet`) and the
+  FORECAST.ETS family are in; the sheet has no Forecast Start (hindcast) option yet. **Estimate:** 15–25 h.
 
 ### 14. Page Layout view and print polish (U, F)
 - No paper view with rulers and in-place header/footer editing; web print exports only (#141, PR
@@ -149,6 +149,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | §13: Forecast Sheet landed (#322) |
 | 2026-10-11 | minor | §13, §15: FORECAST.ETS family landed (#314) |
 | 2026-10-10 | minor | Updated for the 10-10 merges (#17, #31, #38, #62, #82, #104, #116) and the new chart resize bug (#190) |
 | 2026-10-10 | minor | Noted that no gap blocks the alpha gate |

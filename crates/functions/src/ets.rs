@@ -25,7 +25,7 @@
 //! Prediction intervals use the model's h-step forecast variance (the book's Table 6.1, class 1):
 //! `σ²·(1 + Σ_{j=1}^{h−1} (α + αβ·j + γ·[j mod m = 0])²)`, σ² = SSE / n, with the normal quantile.
 
-use gridcraft_core::date::{datetime_from_serial, days_in_month_in};
+use gridcraft_core::date::{datetime_from_serial, days_in_month_in, serial_from_ymd};
 use gridcraft_core::{CellError, DateSystem, Value};
 
 use crate::special::norm_inv;
@@ -389,6 +389,62 @@ fn interpolate(slots: &[Option<f64>]) -> Vec<f64> {
         });
     }
     out
+}
+
+/// A timeline's step, for continuing it past its last point (the Forecast Sheet's future rows).
+#[derive(Clone, Copy, Debug)]
+pub struct Timeline {
+    axis: Axis,
+    /// Position of the last time stamp.
+    last: i64,
+}
+
+impl Timeline {
+    /// The step of a set of time stamps (any order, duplicates allowed): a constant numeric step
+    /// (missing points allowed) or, for whole-day dates on one day of the month, calendar months.
+    /// `None` without at least two distinct, finite time stamps or without a constant step.
+    pub fn detect(times: &[f64], sys: DateSystem) -> Option<Timeline> {
+        if times.iter().any(|t| !t.is_finite()) {
+            return None;
+        }
+        let mut sorted = times.to_vec();
+        sorted.sort_by(|a, b| a.total_cmp(b));
+        sorted.dedup();
+        let axis = detect_axis(&sorted, sys).ok()?;
+        let last = axis.position(*sorted.last()?)?.round();
+        // Like the functions, at most 30% of the points may be missing.
+        if !(0.0..MAX_POINTS as f64).contains(&last) || (last + 1.0 - sorted.len() as f64) > MAX_MISSING * (last + 1.0) {
+            return None;
+        }
+        Some(Timeline { axis, last: last as i64 })
+    }
+
+    /// Steps from the last time stamp to `t` (fractional between steps, negative before it).
+    pub fn steps_after_last(&self, t: f64) -> Option<f64> {
+        let p = self.axis.position(t)? - self.last as f64;
+        p.is_finite().then_some(p)
+    }
+
+    /// The time stamp `k` steps after the last one.
+    pub fn after_last(&self, k: u32) -> Option<f64> {
+        let pos = self.last.checked_add(i64::from(k))?;
+        match self.axis {
+            Axis::Linear { t0, step } => {
+                let t = t0 + pos as f64 * step;
+                t.is_finite().then_some(t)
+            }
+            Axis::Months { sys, month0, step, day } => {
+                let month = month0.checked_add(pos.checked_mul(step)?)?;
+                let (y, m) = (month.div_euclid(12), month.rem_euclid(12) + 1);
+                let dim = i64::from(days_in_month_in(sys, i32::try_from(y).ok()?, u32::try_from(m).ok()?));
+                let d = day.map_or(dim, |d| i64::from(d).min(dim));
+                if y < 1900 {
+                    return None;
+                }
+                serial_from_ymd(sys, y, m, d)
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1001,5 +1057,20 @@ mod tests {
         // Hostile spans: a huge gap is rejected before anything is allocated.
         is_err(ets(vec![n(1e15), range(&[1.0, 2.0, 3.0]), range(&[0.0, 1.0, 1e12])]), CellError::Num);
         is_err(ets(vec![n(1e308), range(&ys), range(&ts)]), CellError::Num);
+    }
+
+    #[test]
+    fn timelines_continue_past_their_last_point() {
+        let tl = Timeline::detect(&[3.0, 1.0, 2.0, 2.0, 5.0], DateSystem::D1900).expect("numeric step");
+        assert_eq!(tl.after_last(1), Some(6.0));
+        assert_eq!(tl.steps_after_last(8.5), Some(3.5));
+        // Month ends: 2024-01-31 (45322), 2024-02-29 (45351), 2024-03-31 (45382).
+        let tl = Timeline::detect(&[45322.0, 45351.0, 45382.0], DateSystem::D1900).expect("months");
+        assert_eq!(tl.after_last(1), Some(45412.0)); // 2024-04-30
+        assert_eq!(tl.steps_after_last(45412.0), Some(1.0));
+        assert!(Timeline::detect(&[1.0, 2.0, 4.5], DateSystem::D1900).is_none());
+        assert!(Timeline::detect(&[1.0, 2.0, 9.0], DateSystem::D1900).is_none(), "too many missing points");
+        assert!(Timeline::detect(&[1.0], DateSystem::D1900).is_none());
+        assert!(Timeline::detect(&[1.0, f64::NAN], DateSystem::D1900).is_none());
     }
 }

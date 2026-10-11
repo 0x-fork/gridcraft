@@ -168,6 +168,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Data Table…" => "数据表…",
         "Scenario Manager…" => "方案管理器…",
         "Goal Seek…" => "单变量求解…",
+        "Forecast\nSheet" => "预测工作表",
         "Spelling" => "拼写检查",
         "Check\nAccessibility" => "检查\n辅助功能",
         "Threaded Comments" => "线程式批注",

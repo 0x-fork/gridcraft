@@ -1,10 +1,10 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (created from a source audit and the issue tracker) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (Forecast Sheet dialog) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Interaction, controls and feel, against Excel. Part of [target-app-parity.md](target-app-parity.md).
 **UI/UX fidelity: ~55% ready, 50–80 h** (estimated). Ribbon command coverage is measured
-separately in [parity-checklist.md](parity-checklist.md) (258 / 290).
+separately in [parity-checklist.md](parity-checklist.md) (259 / 290).
 
 Sources: `crates/ui-egui/src` (ribbon, grid, editor, formula bar, dialogs, panes),
 `crates/engine/src/cmd` (shortcuts in command specs), the owner's black-box notes
@@ -65,8 +65,8 @@ shortcut lists for Windows and Mac, then fill the gaps: 6–10 h.
 
 Format Cells, Insert Function/Formula Builder, Find and Replace, Go To and Go To Special, Sort,
 Name Manager, Data Validation, Paste Special, Conditional Formatting manager, Page Setup, Goal
-Seek, Scenario Manager and others exist. Missing or partial: Options, Solver, Data Analysis,
-Forecast Sheet, Power Query editor, Insert Object, Equation editor, Protect/Allow Edit Ranges,
+Seek, Scenario Manager, Forecast Sheet and others exist. Missing or partial: Options, Solver, Data Analysis,
+Power Query editor, Insert Object, Equation editor, Protect/Allow Edit Ranges,
 Workbook Links, Accessibility checker.
 
 ## Accessibility
@@ -91,5 +91,6 @@ scrollbar bugs 2–4 · pixel/feel pass against observed Excel 7–12.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Forecast Sheet dialog (#322); catalog 259 / 290 |
 | 2026-10-10 | minor | Chart resize bug (#190) |
 | 2026-10-10 | major | Created: chrome, grid, keyboard, dialogs, accessibility; key tips, Page Layout view and accessibility tree flagged |
