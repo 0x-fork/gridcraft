@@ -610,6 +610,7 @@ fn copy_impl(s: &mut Session, p: &Json, cut: bool) -> Result<Json> {
         return Err(EngineError::Other("This action won't work on multiple selections.".into()));
     }
     let range = ranges.first().copied().unwrap_or_default();
+    let selected = range;
     let d = s.doc()?;
     let Some(sh) = d.wb.sheet(sheet) else { return Err(EngineError::NoDocument) };
     let range = if range.is_full_cols() || range.is_full_rows() {
@@ -622,7 +623,7 @@ fn copy_impl(s: &mut Session, p: &Json, cut: bool) -> Result<Json> {
     // The HTML rendering is for the host clipboard (UI); it can reach 4 MB, so agents and
     // scripts get it only when they ask for it.
     let html = if p.get("html").and_then(Json::as_bool) == Some(true) { crate::io::range_html(&d.wb, sheet, range, &text) } else { None };
-    let clip = Clipboard { wb: d.wb.clone(), sheet, range, cut, doc_uid: d.uid, text: text.clone() };
+    let clip = Clipboard { wb: d.wb.clone(), sheet, range, selected, cut, doc_uid: d.uid, text: text.clone() };
     s.clipboard = Some(clip);
     let mut result = json!({"range": range.a1(), "text": text});
     if let Some(html) = html {
