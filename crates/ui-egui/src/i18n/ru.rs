@@ -263,6 +263,10 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "More\nFunctions" => "Другие\nфункции",
         "Page Layout|Orientation" => "Ориентация",
         "Display theme" => "Тема оформления",
+        "Animations" => "Анимация",
+        "Glide the selection outline to the cell you move to instead of jumping there" => {
+            "Рамка выделения плавно скользит к новой ячейке, а не перескакивает"
+        }
         "System" => "Системная",
         "Light" => "Светлая",
         "Dark" => "Тёмная",

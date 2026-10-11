@@ -263,6 +263,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "More\nFunctions" => "更多\n函数",
         "Page Layout|Orientation" => "纸张方向",
         "Display theme" => "显示主题",
+        "Animations" => "动画",
+        "Glide the selection outline to the cell you move to instead of jumping there" => "选择框平滑滑动到新的单元格，而不是直接跳过去",
         "System" => "系统",
         "Light" => "浅色",
         "Dark" => "深色",

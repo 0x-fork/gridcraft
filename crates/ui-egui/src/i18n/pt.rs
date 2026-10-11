@@ -264,6 +264,10 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "More\nFunctions" => "Mais\nFunções",
         "Page Layout|Orientation" => "Orientação",
         "Display theme" => "Tema de exibição",
+        "Animations" => "Animações",
+        "Glide the selection outline to the cell you move to instead of jumping there" => {
+            "Desliza o contorno da seleção até a nova célula em vez de saltar"
+        }
         "System" => "Sistema",
         "Light" => "Claro",
         "Dark" => "Escuro",

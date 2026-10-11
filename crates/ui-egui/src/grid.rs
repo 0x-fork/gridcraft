@@ -65,6 +65,8 @@ pub struct GridState {
     pub filter_menu: Option<(u32, Pos2)>,
     pub context_menu: Option<Pos2>,
     pub marching_phase: f32,
+    /// The selection outline on its way to a new selection.
+    pub glide: crate::selection_glide::SelectionGlide,
     pub last_click: Option<(CellRef, f64)>,
     pub hover_cell: Option<CellRef>,
     pub autosave: bool,
@@ -321,9 +323,10 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     let si = wb.active_sheet;
     let Some(sh) = wb.sheet(si) else { return };
     let sel = d.selection.clone();
+    let place = (d.uid, si);
     let mut view = app.view();
     // Scrolling.
-    let (scroll_delta, zoom_delta, modifiers) = ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.modifiers));
+    let (scroll_delta, zoom_delta, modifiers, now) = ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.modifiers, i.time));
     if (resp.hovered() || resp.contains_pointer()) && !crate::text_box::contains_pointer(app, ui.ctx()) {
         if zoom_delta != 1.0 {
             let z = (sh.zoom as f32 * zoom_delta).clamp(10.0, 400.0).round();
@@ -371,6 +374,20 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
         *v = view;
     }
     app.grid.cells_rect = Some(geo.cells);
+    // The selection outline glides to a new selection. It stays on its cells when Animations is
+    // off, when egui's animations are (the headless harness), and while a screenshot is on its way.
+    let outline = app.grid.glide.frame(crate::selection_glide::Frame {
+        place,
+        range: sel.current(),
+        target: geo.range_rect(sh, sel.current()),
+        view: geo.cells,
+        now,
+        frame_nr: ui.ctx().cumulative_frame_nr(),
+        animate: app.ui.animations && ui.ctx().global_style().animation_time > 0.0 && !app.shots.in_flight(),
+    });
+    if app.grid.glide.is_gliding() {
+        ui.ctx().request_repaint();
+    }
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, t.grid_bg);
     let mut cf = CfCache::new();
@@ -396,7 +413,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
         }
         let p = painter.with_clip_rect(*clip);
         paint_quadrant(&p, &geo, &wb, si, sh, *rows, *cols, &mut cf, &t);
-        paint_selection(&p, &geo, sh, &sel, &t, app);
+        paint_selection(&p, &geo, sh, &sel, outline, &t, app);
     }
     // Freeze lines.
     if geo.fr > 0 {
@@ -428,7 +445,8 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     context_menu(app, ui);
     vertical_scrollbar(app, ui, sh, &geo, available.right(), max_y, &t);
     if app.session.clipboard.is_some() {
-        app.grid.marching_phase = (app.grid.marching_phase + 0.5) % 8.0;
+        // By the clock, not per frame: a gliding outline repaints more often than the ants step.
+        app.grid.marching_phase = crate::selection_glide::ants_phase(now);
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(60));
     }
 }
@@ -910,13 +928,15 @@ fn active_rect(geo: &Geo, sh: &Sheet, sel: &gridcraft_engine::Selection) -> Rect
 }
 
 /// The rectangles shaded for a selection: every area except the active cell, which stays clear so
-/// it is plain where typing goes. A single selected cell has no fill.
-pub fn selection_fill(geo: &Geo, sh: &Sheet, sel: &gridcraft_engine::Selection) -> Vec<Rect> {
+/// it is plain where typing goes. A single selected cell has no fill. `outline` is where the
+/// current area is drawn this frame: it glides to a new selection, and its fill with it.
+pub fn selection_fill(geo: &Geo, sh: &Sheet, sel: &gridcraft_engine::Selection, outline: Rect) -> Vec<Rect> {
     if sel.is_single_cell() {
         return vec![];
     }
     let active = active_rect(geo, sh, sel);
-    sel.ranges.iter().flat_map(|r| rect_around(geo.range_rect(sh, *r), active)).collect()
+    let area = |r: &RangeRef| if *r == sel.current() { outline } else { geo.range_rect(sh, *r) };
+    sel.ranges.iter().flat_map(|r| rect_around(area(r), active)).collect()
 }
 
 /// `area` without `hole`: the strips above and below the hole, then what is left beside it. The
@@ -939,13 +959,13 @@ fn rect_around(area: Rect, hole: Rect) -> impl Iterator<Item = Rect> {
     parts.into_iter().filter(|r| r.is_positive() && r.is_finite())
 }
 
-fn paint_selection(p: &Painter, geo: &Geo, sh: &Sheet, sel: &gridcraft_engine::Selection, t: &Tokens, app: &SheetApp) {
+/// `outline` is where the current area's border is drawn this frame (see `selection_glide`).
+fn paint_selection(p: &Painter, geo: &Geo, sh: &Sheet, sel: &gridcraft_engine::Selection, outline: Rect, t: &Tokens, app: &SheetApp) {
     // Fill all areas except the active cell.
-    for rect in selection_fill(geo, sh, sel) {
+    for rect in selection_fill(geo, sh, sel, outline) {
         p.rect_filled(rect, 0.0, t.sel_fill);
     }
     let active = active_rect(geo, sh, sel);
-    let cur = geo.range_rect(sh, sel.current());
     // Editing a formula: outline its references instead of the selection.
     if let Some(ed) = &app.editor
         && ed.is_formula()
@@ -963,13 +983,13 @@ fn paint_selection(p: &Painter, geo: &Geo, sh: &Sheet, sel: &gridcraft_engine::S
             }
         }
     }
-    p.rect_stroke(cur.expand(0.5), 0.0, Stroke::new(2.0, t.sel_border), StrokeKind::Middle);
+    p.rect_stroke(outline.expand(0.5), 0.0, Stroke::new(2.0, t.sel_border), StrokeKind::Middle);
     if sel.ranges.len() > 1 {
         p.rect_stroke(active, 0.0, Stroke::new(1.0, t.sel_border), StrokeKind::Inside);
     }
     // Fill handle (bottom-right of the current area).
     if app.editor.is_none() {
-        let h = Rect::from_center_size(cur.right_bottom(), vec2(6.0, 6.0));
+        let h = Rect::from_center_size(outline.right_bottom(), vec2(6.0, 6.0));
         p.rect_filled(h.expand(1.0), 0.0, Color32::WHITE);
         p.rect_filled(h, 0.0, t.sel_border);
     }

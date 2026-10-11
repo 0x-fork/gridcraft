@@ -22,6 +22,7 @@ pub mod keytips;
 pub mod panes;
 pub mod pivot_pane;
 pub mod ribbon;
+pub mod selection_glide;
 pub mod tabs;
 pub mod text_box;
 pub mod theme;
@@ -48,6 +49,8 @@ pub struct UiState {
     pub formula_bar: bool,
     pub formula_bar_expanded: bool,
     pub status_bar: bool,
+    /// Motion in the UI: the selection outline glides to a new selection (View ▸ Animations).
+    pub animations: bool,
     pub recent: Vec<String>,
     /// Interface language. English by default (so tests and headless renders never depend on the
     /// host's locale); the desktop app starts from [`i18n::Language::system`] when `ui.json` has
@@ -67,6 +70,7 @@ impl Default for UiState {
             formula_bar: true,
             formula_bar_expanded: false,
             status_bar: true,
+            animations: true,
             recent: vec![],
             language: i18n::Language::En,
         }
@@ -318,6 +322,10 @@ impl SheetApp {
                     _ => return Some(Err("theme mode must be system, light, or dark".into())),
                 }
                 Ok(json!({"mode": self.ui.theme_mode()}))
+            }
+            "view.animations" => {
+                self.ui.animations = p.get("on").and_then(Json::as_bool).unwrap_or(!self.ui.animations);
+                Ok(json!({"on": self.ui.animations}))
             }
             "view.zoom100" => return Some(self.session.run("view.zoom", json!({"percent": 100})).inspect(|_| self.after_engine())),
             "app.language.set" => {

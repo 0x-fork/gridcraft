@@ -32,8 +32,8 @@ Errors come back as `{"id": …, "ok": false, "error": "…"}`.
 | `ui.edit.begin` / `ui.edit.text` / `ui.edit.commit` / `ui.edit.cancel` | `{text?}` / `{move?: down\|right\|up\|left\|none}` | Drive the cell editor |
 | `ui.ribbon` | `{tab}` | Switch ribbon tab |
 | `ui.dialog` / `ui.dialog.set` / `ui.dialog.confirm` / `ui.dialog.cancel` | `{name}` / `{field, value}` | Open, fill in and confirm dialogs |
-| `ui.screenshot` | `{path?}` | PNG of the window (base64 when no path) |
-| `ui.set` | `{dark?, formulaBar?, ribbonCollapsed?}` | UI preferences |
+| `ui.screenshot` | `{path?}` | PNG of the window (base64 when no path). Animations are settled first: the picture shows the final state |
+| `ui.set` | `{dark?, formulaBar?, ribbonCollapsed?, animations?}` | UI preferences |
 | `ui.resize` / `ui.focus` | `{width, height}` | Window control |
 | `app.open` / `app.save` / `app.quit` | `{path}` / `{path?}` | Files and lifetime |
 
@@ -44,6 +44,10 @@ to choose the display theme; `mode` accepts `"system"`, `"light"`, or `"dark"`.
 System follows live OS appearance changes and falls back to Light when the platform supplies no preference.
 The saved choice remains System; new users still start in Light. The legacy
 `view.darkMode` command and `ui.set {dark}` select a fixed Light or Dark theme.
+
+`{command: "view.animations", params: {on: false}}` turns motion in the UI off (the selection
+outline then jumps to a new selection instead of gliding there); without `on` it toggles. It is
+the View ▸ Animations checkbox, saved with the other UI preferences and on by default.
 
 `{command: "app.language.set", params: {language: "ja"}}` switches the interface language
 (`code` is accepted as an alias for `language`); `app.language.english` and
