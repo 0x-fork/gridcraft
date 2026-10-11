@@ -250,7 +250,10 @@ impl SheetApp {
     /// their existing internal clipboard behavior and do not write to the host clipboard.
     pub fn copy_to_clipboard(&mut self, ctx: &egui::Context, command: &str) {
         // Only ask the engine for HTML when the host can publish it.
-        let Ok(result) = self.run(command, json!({"html": self.services.copy_html.is_some()})) else { return };
+        let result = match self.run(command, json!({"html": self.services.copy_html.is_some()})) {
+            Ok(result) => result,
+            Err(e) => return self.alert(e),
+        };
         let Some(text) = result.get("text").and_then(Json::as_str) else { return };
         if let Some(html) = result.get("html").and_then(Json::as_str)
             && let Some(copy_html) = &mut self.services.copy_html
@@ -279,11 +282,16 @@ impl SheetApp {
     /// Runs a command and shows its error in a message box (for menu/ribbon clicks).
     pub fn run_or_alert(&mut self, id: &str, params: Json) {
         if let Err(e) = self.run(id, params) {
-            if e.contains("is not available right now") {
-                self.toast = Some((e, now_ms()));
-            } else {
-                self.message = Some(("GridCraft".into(), clean_error(&e)));
-            }
+            self.alert(e);
+        }
+    }
+
+    /// Shows a command error: a toast for an unavailable command, else a message box.
+    fn alert(&mut self, e: String) {
+        if e.contains("is not available right now") {
+            self.toast = Some((e, now_ms()));
+        } else {
+            self.message = Some(("GridCraft".into(), clean_error(&e)));
         }
     }
 

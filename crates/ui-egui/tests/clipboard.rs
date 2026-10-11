@@ -83,3 +83,22 @@ fn programmatic_copy_does_not_write_to_the_system_clipboard() {
     assert_eq!(*calls.borrow(), 0);
     assert!(!h.output().platform_output.commands.iter().any(|c| matches!(c, OutputCommand::CopyText(_))));
 }
+
+#[test]
+fn copying_multiple_areas_copies_lined_up_areas_and_explains_the_rest() {
+    // Issue #348: lined-up areas copy as one block; others get Excel's message instead of nothing.
+    let mut h = harness(Services::default());
+    h.state_mut().session.execute("selection.set", json!({"range": "B1:B2,A1:A2"})).unwrap();
+    h.input_mut().events.push(Event::Copy);
+    h.step();
+    assert!(h.output().platform_output.commands.iter().any(|c| matches!(c, OutputCommand::CopyText(text) if text == "Name\tScore\nAda\t42\n")));
+    assert!(h.state().message.is_none());
+    assert_eq!(h.state().session.clipboard.as_ref().map(|c| c.areas.len()), Some(2));
+
+    h.state_mut().session.execute("selection.set", json!({"range": "A1,B2"})).unwrap();
+    h.input_mut().events.push(Event::Copy);
+    h.step();
+    assert!(!h.output().platform_output.commands.iter().any(|c| matches!(c, OutputCommand::CopyText(_))));
+    assert_eq!(h.state().message.as_ref().map(|(_, text)| text.as_str()), Some("This action won't work on multiple selections."));
+    assert_eq!(h.state().session.clipboard.as_ref().map(|c| c.areas.len()), Some(2), "the earlier copy stays");
+}

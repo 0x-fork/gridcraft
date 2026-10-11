@@ -70,6 +70,9 @@ pub struct Clipboard {
     pub doc_uid: u64,
     /// Plain text (tab-separated) for the system clipboard.
     pub text: String,
+    /// A multi-area copy: the areas as selected (for the marquee). `wb` then holds them slid
+    /// together into one block at `range`. Empty for a single-range copy.
+    pub areas: Vec<RangeRef>,
 }
 
 /// In-cell edit mode as shown in the status bar.
