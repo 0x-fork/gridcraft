@@ -184,7 +184,7 @@ pub(crate) fn dispatch(app: &mut SheetApp, ctx: &egui::Context, key: Key, physic
         Shortcut::FormulaAbove | Shortcut::ValueAbove => {
             let Some(above) = active.row.checked_sub(1).map(|r| CellRef::new(r, active.col)) else { return true };
             let text = if shortcut == Shortcut::FormulaAbove {
-                sh.cell(above).map(|c| c.input_text()).unwrap_or_default()
+                app.session.active().map(|d| gridcraft_engine::display::edit_text(&d.wb, sh, above)).unwrap_or_default()
             } else {
                 app.session
                     .active()
