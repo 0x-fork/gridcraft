@@ -39,5 +39,9 @@ sync_github_name = true
 [people.alexanderalber]
 real_name = "Alexander Alber"
 
+[people.webdevtodayjason]
+display_name = "Jason Brashear"
+sync_github_name = false
+
 [people.Losminek]
 sync_github_name = true

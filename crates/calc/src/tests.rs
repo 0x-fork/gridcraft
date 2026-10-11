@@ -486,3 +486,41 @@ fn sumif_resized_sum_range_on_another_sheet_and_through_a_name() {
     assert_eq!(t.num("C1"), 10.0);
     assert_eq!(t.num("C2"), 5.0);
 }
+
+#[test]
+fn trimrange() {
+    let mut t = T::new();
+    t.set("C3", "1");
+    t.set("D5", "2");
+    let cases = [
+        ("J1", "=ROWS(TRIMRANGE(A1:F10))", 3.0),
+        ("J2", "=COLUMNS(TRIMRANGE(A1:F10))", 2.0),
+        ("J3", "=ROWS(TRIMRANGE(A1:F10,2))", 5.0),
+        ("J4", "=ROWS(TRIMRANGE(A1:F10,1,0))", 8.0),
+        ("J5", "=COLUMNS(TRIMRANGE(A1:F10,1,0))", 6.0),
+        ("J6", "=ROWS(TRIMRANGE(A1:F10,0,0))", 10.0),
+        ("J7", "=SUM(TRIMRANGE(C:C))", 1.0),
+        ("J8", "=ROWS(TRIMRANGE(C:C))", 1.0),
+        ("J9", "=ROWS(TRIMRANGE(C:C,2))", 3.0),
+        ("J10", "=MIN(ROW(TRIMRANGE(A1:F10)))", 3.0),
+        ("J11", "=COLUMNS(TRIMRANGE({1,2;3,4}))", 2.0),
+    ];
+    for (at, f, _) in cases {
+        t.set(at, f);
+    }
+    for (at, f, want) in cases {
+        assert_eq!(t.num(at), want, "{f}");
+    }
+    // The result spills as the trimmed block and follows edits.
+    t.set("L1", "=TRIMRANGE(A1:F10)");
+    assert_eq!((t.num("L1"), t.num("M3")), (1.0, 2.0));
+    t.set("E6", "3");
+    assert_eq!((t.num("J1"), t.num("J2")), (4.0, 3.0));
+    // Errors: a bad trim code, nothing but blanks, several areas.
+    t.set("K1", "=TRIMRANGE(A1:F10,4)");
+    assert_eq!(t.get("K1"), Value::Error(CellError::Value));
+    t.set("K2", "=TRIMRANGE(Q1:Q9)");
+    assert_eq!(t.get("K2"), Value::Error(CellError::Calc));
+    t.set("K3", "=TRIMRANGE((A1:B2,C3:D4))");
+    assert_eq!(t.get("K3"), Value::Error(CellError::Value));
+}

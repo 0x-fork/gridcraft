@@ -1,6 +1,6 @@
 # Localization parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (Czech ribbon table added) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (German and Czech ribbon tables added) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Per-language status against Excel, which ships its UI in dozens of languages (Windows language
 packs cover 100+), with localized function names, argument separators, number and date formats,
@@ -10,9 +10,10 @@ right-to-left sheets and full complex-script support. Part of
 ## Where we are (measured from source on `main`, after the 2026-10-10 merges)
 
 - **A first catalog exists, for the ribbon only.** `crates/ui-egui/src/i18n.rs` (merged 10-10 in
-  #31, #104, #82) adds an interface-language preference that defaults to the system language
-  (closes #20) and a View-tab switcher, with English-keyed lookup tables: Japanese 268 labels,
-  Simplified Chinese, Korean, Russian, Brazilian Portuguese and Czech 266 each. The tables are used by
+  #31, #104, #82; German added 10-11, Czech 10-11) adds an interface-language preference that defaults to the
+  system language (closes #20) and a View-tab switcher, with English-keyed lookup tables:
+  Japanese 268 labels, Simplified Chinese, Korean, Russian, Brazilian Portuguese, German and Czech 266
+  each. The tables are used by
   the ribbon, sheet tabs and widgets (`ribbon.rs`, `tabs.rs`, `widgets.rs`); dialogs, menus,
   context menus, task panes, status messages, command labels and function descriptions are still
   English literals. Untranslated labels fall back to English.
@@ -47,11 +48,11 @@ separators, number/date formats, machine translation with agent review, and scri
 | Portuguese | pt-BR | 266 (~12%) | no | Latin: yes | no | menus only | 4–8 h |
 | Indonesian | id | 0 (0%) | no | Latin: yes | no | none | 5–8 h |
 | Japanese | ja | 268 (~12%) | no | CJK system-font fallback; IME unverified; no furigana display | no | menus only | 8–12 h |
-| German | de | 0 (0%; PR #163 open) | no | Latin: yes | no | none | 6–10 h |
+| German | de | 266 (~12%) | no | Latin: yes | no | menus only | 4–8 h |
 | Korean | ko | 266 (~12%) | no | Hangul via the CJK fallback; IME unverified | no | menus only | 6–10 h |
 | Vietnamese | vi | 0 (0%) | no | Latin with stacked diacritics: unverified | no | none | 6–10 h |
 
-Other shipped languages: Russian (ru) and Czech (cs), 266 labels each (~12%), menus only. Czech
+Other shipped languages: Russian (ru), German (de) and Czech (cs), 266 labels each (~12%), menus only. Czech
 formulas stay en-US (no Czech function names, `;` separator or decimal comma yet).
 
 **Total:** catalog work 10–20 h + languages 92–144 h ≈ **100–165 h**. Parallelizes almost fully
@@ -74,6 +75,7 @@ language (none so far) and of localized function names.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | German ribbon catalog (`i18n/de.rs`, 266 labels, ~12%); `de` locale tags (de-DE, de-AT, de-CH…) resolve to German. PR #163 (localized German formulas/numbers) still open |
 | 2026-10-11 | minor | Czech (cs) ribbon table: 266 labels (~12%), menus only |
 | 2026-10-10 | minor | Re-measured after #31, #104, #82, #38 merged: ribbon translated into ja, zh, ko, pt-BR and ru (266–268 labels, ~12%), system-language default, CJK/Thai/Hebrew font fallback; ~10% ready, 100–165 h |
 | 2026-10-10 | major | Created: English only, no catalog, ~2,200 strings, script-support gaps, open language PRs |

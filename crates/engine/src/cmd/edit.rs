@@ -47,7 +47,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Paste",
             ["Home", "Clipboard"],
             Some("Cmd+V"),
-            "{at?: \"C3\", text?: \"tab-separated text from the system clipboard\"}",
+            "{at?: \"C3\", text?: \"tab-separated text from the system clipboard\", html?: \"the clipboard's HTML flavour; cells the source recorded as numbers (x:num, sdval) stay numbers\"}",
             has_doc,
             paste
         ),
@@ -79,7 +79,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "AutoFill",
             [],
             None,
-            "{source: \"A1:A2\", target: \"A1:A10\", mode?: series|copy|formats|values}: the fill-handle drag",
+            "{source: \"A1:A2\", target: \"A1:A10\", mode?: series|alternate|copy|formats|values}: the fill-handle drag (alternate = Ctrl+drag: a lone number counts up, any other series copies)",
             has_doc,
             auto_fill
         ),
@@ -674,13 +674,18 @@ fn paste_text(s: &mut Session, p: &Json, text: &str) -> Result<Json> {
     let sheet = target_sheet(s, p)?;
     let at = cell_param(p, "at").unwrap_or(s.doc()?.selection.current().start);
     let rows: Vec<Vec<String>> = parse_tsv(text);
+    // The HTML flavour, when the host passed it: the number behind each cell's shown text.
+    let html = str_param(p, "html").map(crate::clip_html::table_cells).unwrap_or_default();
     let h = rows.len();
     let w = rows.iter().map(Vec::len).max().unwrap_or(0);
     edit(s, |cx| {
         for (ri, row) in rows.iter().enumerate() {
             for (ci, v) in row.iter().enumerate() {
                 let Some(c) = at.offset(ri as i64, ci as i64) else { continue };
-                let cell = input_to_cell(v, sheet, c, &mut cx.wb).unwrap_or_else(|_| Some(Cell::value(Value::text(v.as_str()))));
+                let mut cell = input_to_cell(v, sheet, c, &mut cx.wb).unwrap_or_else(|_| Some(Cell::value(Value::text(v.as_str()))));
+                if let Some(cl) = cell.as_mut() {
+                    numeric_from_html(cl, v, html.get(ri).and_then(|r| r.get(ci)), &mut cx.wb);
+                }
                 let sh = cx.sheet_mut(sheet)?;
                 match cell {
                     Some(cell) => sh.set_cell(c, cell),
@@ -698,6 +703,27 @@ fn paste_text(s: &mut Session, p: &Json, text: &str) -> Result<Json> {
         Ok(())
     })?;
     Ok(json!({"rows": h, "cols": w}))
+}
+
+/// A pasted cell that came out as text ("Rp10,000.00" isn't en-US input) becomes the number the
+/// source recorded for it in its HTML, with a format that shows the same text when one can be
+/// inferred and the cell has none. The HTML cell must show the same text as the tab-separated
+/// field, so HTML that belongs to another copy (or a table laid out differently) changes nothing.
+fn numeric_from_html(cell: &mut Cell, field: &str, html: Option<&crate::clip_html::HtmlCell>, wb: &mut gridcraft_model::Workbook) {
+    let Some(hc) = html else { return };
+    let Some(n) = hc.num else { return };
+    if cell.formula.is_some() || !matches!(cell.value, Value::Text(_)) || wb.styles.get(cell.style).num_fmt.as_str() == "@" {
+        return;
+    }
+    if crate::clip_html::normalized(&hc.text) != crate::clip_html::normalized(field) {
+        return;
+    }
+    cell.value = Value::number(n);
+    if wb.styles.get(cell.style).num_fmt.as_str() == "General"
+        && let Some(code) = crate::clip_html::format_for(field, n)
+    {
+        cell.style = wb.styles.derive(cell.style, |s| s.num_fmt = gridcraft_model::NumFmt::new(&code));
+    }
 }
 
 /// Tab-separated text with Excel-style quoting.
@@ -1139,6 +1165,7 @@ fn auto_fill(s: &mut Session, p: &Json) -> Result<Json> {
     let Some(target) = str_param(p, "target").and_then(RangeRef::parse) else { return Err(bad("edit.autoFill", "missing `target`")) };
     let mode = match str_param(p, "mode").unwrap_or("series") {
         "copy" => crate::fill::FillMode::Copy,
+        "alternate" => crate::fill::FillMode::Alternate,
         "formats" => crate::fill::FillMode::Formats,
         "values" => crate::fill::FillMode::ValuesOnly,
         _ => crate::fill::FillMode::Series,

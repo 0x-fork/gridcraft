@@ -326,7 +326,7 @@ fn home(app: &mut SheetApp, ui: &mut Ui) {
     }
     if paste.clicked() {
         if let Some(text) = app.grid.system_clipboard.take() {
-            act(app, "edit.paste", json!({"text": text}));
+            app.paste_external(text);
         } else {
             act(app, "edit.paste", json!({}));
         }
@@ -1642,9 +1642,9 @@ fn view(app: &mut SheetApp, ui: &mut Ui) {
     let s = app.session.active().and_then(|d| d.wb.active().map(|s| (s.show_gridlines, s.show_headings))).unwrap_or((true, true));
     let lang = app.ui.language;
     ui.vertical(|ui| {
-        let mut fb = app.ui.formula_bar;
+        let mut fb = app.session.prefs.formula_bar;
         if ui.checkbox(&mut fb, lang.tr("Formula Bar")).changed() {
-            app.ui.formula_bar = fb;
+            act(app, "view.formulaBar", json!({"on": fb}));
         }
         let mut g = s.0;
         if ui.checkbox(&mut g, lang.tr("Gridlines")).changed() {
@@ -1660,7 +1660,7 @@ fn view(app: &mut SheetApp, ui: &mut Ui) {
         app.open_dialog("zoom", json!({}));
     }
     if big_button(ui, Icon::Search, "100%", "Zoom to 100%", false).clicked() {
-        act(app, "view.zoom", json!({"percent": 100}));
+        act(app, "view.zoom100", json!({}));
     }
     if big_button(ui, Icon::Zoom, "Zoom to\nSelection", "Zoom to Selection", false).clicked() {
         let r = app.grid.cells_rect.unwrap_or(Rect::from_min_size(pos2(0.0, 0.0), vec2(1200.0, 700.0)));
@@ -1697,6 +1697,22 @@ fn view(app: &mut SheetApp, ui: &mut Ui) {
         });
     });
     sep(ui);
+    // Interface size (issue #230): scales the whole window on top of the desktop's scale.
+    ui.vertical(|ui| {
+        ui.label(egui::RichText::new(lang.tr("Interface size")).font(theme::ui_font(11.5)).color(t.text_dim));
+        let current = app.ui.interface_scale;
+        let text = |v: u16| if v == 100 { lang.tr("Auto").to_string() } else { format!("{v}%") };
+        egui::ComboBox::from_id_salt("ui_interface_size")
+            .width(120.0)
+            .selected_text(egui::RichText::new(text(current)).font(theme::ui_font(12.5)))
+            .show_ui(ui, |ui| {
+                for v in [100, 75, 90, 110, 125, 150, 175, 200] {
+                    if ui.selectable_label(v == current, text(v)).clicked() {
+                        act(app, "view.interfaceScale", json!({"percent": v}));
+                    }
+                }
+            });
+    });
     // Interface language: settings live in the View tab, like Excel's Options. The label follows
     // the current language so it stays readable; the choices are always shown in their own script.
     ui.vertical(|ui| {
@@ -1739,9 +1755,10 @@ fn table_design(app: &mut SheetApp, ui: &mut Ui) {
     };
     ui.vertical(|ui| {
         ui.label(egui::RichText::new("Table Name:").small());
-        let mut name = tname.clone();
-        let r = ui.add(egui::TextEdit::singleline(&mut name).desired_width(120.0));
-        if r.lost_focus() && name != tname {
+        let field = egui::Id::new(("gridcraft.table_name", &tname));
+        if let Some(name) = crate::widgets::committed_text(ui, field, &tname, Some(120.0))
+            && name != tname
+        {
             act(app, "table.rename", json!({"table": tname, "name": name}));
         }
     });
