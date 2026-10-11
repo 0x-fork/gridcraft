@@ -102,8 +102,9 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   Forecast Sheet builds on is in). **Estimate:** 18–30 h.
 
 ### 14. Page Layout view and print polish (U, F)
-- No paper view with rulers and in-place header/footer editing; web print exports only (#141, PR
-  #143). **Estimate:** 12–20 h.
+- Page Layout view landed (#329): paper view with rulers and in-place header/footer editing.
+  Remaining: pictures in headers/footers, Different First Page / Odd & Even pages, dragging
+  margins on the ruler; web print exports only (#141, PR #143). **Estimate:** 5–10 h.
 
 ### 15. Remaining functions and an oracle suite (F)
 - 18 missing, 9 stubs; no Excel-computed oracle corpus; #137, #138. **Estimate:** 16–26 h.

@@ -278,7 +278,7 @@ pub fn status_bar(app: &mut SheetApp, ui: &mut Ui) {
                         (Icon::Normal, "Normal", "normal", "view.normal"),
                     ] {
                         let (r, resp) = ui.allocate_exact_size(vec2(26.0, 20.0), Sense::click());
-                        let cur = if app.session.view_mode.is_empty() { "normal" } else { app.session.view_mode.as_str() };
+                        let cur = app.session.active().and_then(|d| d.wb.active().map(|s| s.view.as_str())).unwrap_or("normal");
                         if cur == mode {
                             ui.painter().rect_filled(r, 3.0, t.pressed);
                         } else if resp.hovered() {

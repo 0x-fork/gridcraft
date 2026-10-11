@@ -19,6 +19,36 @@ pub enum Visibility {
     VeryHidden,
 }
 
+/// How a sheet is displayed (View › Workbook Views; `<sheetView view="…">` in XLSX).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SheetViewMode {
+    #[default]
+    Normal,
+    /// Pages on paper with rulers, margins and in-place headers and footers.
+    PageLayout,
+    PageBreakPreview,
+}
+
+impl SheetViewMode {
+    /// The XLSX / command spelling: `normal`, `pageLayout` or `pageBreakPreview`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SheetViewMode::Normal => "normal",
+            SheetViewMode::PageLayout => "pageLayout",
+            SheetViewMode::PageBreakPreview => "pageBreakPreview",
+        }
+    }
+    pub fn parse(s: &str) -> Option<SheetViewMode> {
+        match s {
+            "normal" => Some(SheetViewMode::Normal),
+            "pageLayout" => Some(SheetViewMode::PageLayout),
+            "pageBreakPreview" => Some(SheetViewMode::PageBreakPreview),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sheet {
     pub name: String,
@@ -71,6 +101,9 @@ pub struct Sheet {
     /// Last selection and scroll position, saved with the file.
     pub view_active: CellRef,
     pub view_top_left: CellRef,
+    /// Normal, Page Layout or Page Break Preview.
+    #[serde(default)]
+    pub view: SheetViewMode,
 }
 
 /// Default width of a column (points) and height of a row (points) for the default font.
@@ -115,6 +148,7 @@ impl Sheet {
             print: PrintSettings::default(),
             view_active: CellRef::default(),
             view_top_left: CellRef::default(),
+            view: SheetViewMode::Normal,
         }
     }
 

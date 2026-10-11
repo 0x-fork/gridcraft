@@ -22,6 +22,7 @@ pub mod icons;
 pub mod keymap;
 pub mod keytips;
 pub mod panes;
+pub mod paper_view;
 pub mod pivot_pane;
 pub mod ribbon;
 pub mod selection_glide;

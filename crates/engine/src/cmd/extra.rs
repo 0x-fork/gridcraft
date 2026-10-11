@@ -116,9 +116,29 @@ pub fn specs() -> Vec<CommandSpec> {
             rotate
         ),
         // Views
-        cmd!(noundo "view.normal", "Normal", ["View", "Workbook Views"], None, "{}", has_doc, |s, _| set_view(s, "normal")),
-        cmd!(noundo "view.pageLayout", "Page Layout", ["View", "Workbook Views"], None, "{}", has_doc, |s, _| set_view(s, "pageLayout")),
-        cmd!(noundo "view.pageBreakPreview", "Page Break Preview", ["View", "Workbook Views"], None, "{}", has_doc, |s, _| set_view(s, "pageBreakPreview")),
+        cmd!(noundo "view.normal", "Normal", ["View", "Workbook Views"], None, "{sheet?} → {view} (per sheet, saved with the file)", has_doc, |s, p| set_view(
+            s,
+            p,
+            SheetViewMode::Normal
+        )),
+        cmd!(
+            noundo "view.pageLayout",
+            "Page Layout",
+            ["View", "Workbook Views"],
+            None,
+            "{sheet?} → {view}: pages on paper with rulers; headers and footers are edited in place (per sheet, saved with the file)",
+            has_doc,
+            |s, p| set_view(s, p, SheetViewMode::PageLayout)
+        ),
+        cmd!(
+            noundo "view.pageBreakPreview",
+            "Page Break Preview",
+            ["View", "Workbook Views"],
+            None,
+            "{sheet?} → {view} (per sheet, saved with the file)",
+            has_doc,
+            |s, p| set_view(s, p, SheetViewMode::PageBreakPreview)
+        ),
         cmd!(noundo "view.customViews", "Custom Views…", ["View", "Workbook Views"], None, "{save?: name, show?: name, delete?: name} → list", has_doc, custom_views),
         cmd!(noundo "view.split", "Split", ["View", "Window"], None, "{} (toggles a split at the active cell; shown as frozen panes in this version)", has_doc, split),
         cmd!(noundo "view.newWindow", "New Window", ["View", "Window"], None, "{} opens a second window on the same workbook (a linked copy)", has_doc, new_window),
@@ -126,7 +146,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "view.hideWindow", "Hide", ["View", "Window"], None, "{}", has_doc, hide_window),
         cmd!(noundo "view.unhideWindow", "Unhide…", ["View", "Window"], None, "{index?}", has_doc, unhide_window),
         cmd!(query "view.switchWindows", "Switch Windows", ["View", "Window"], None, "{} → open windows", always, switch_windows),
-        cmd!(noundo "view.ruler", "Ruler", ["View", "Show"], None, "{on?}", has_doc, |_, _| ok()),
+        cmd!(noundo "view.ruler", "Ruler", ["View", "Show"], None, "{on?} → {on}: rulers in Page Layout view (an application option)", has_doc, ruler),
         cmd!(query "view.macros", "Macros", ["View", "Macros"], None, "{} → scripts", has_doc, all_scripts),
         // Table tools
         cmd!("table.resize", "Resize Table", ["Table Design", "Properties"], None, "{table?, range: \"A1:F20\"}", has_doc, table_resize),
@@ -588,9 +608,26 @@ fn rotate(s: &mut Session, p: &Json) -> Result<Json> {
     with_shape(s, p, |sh| std::mem::swap(&mut sh.anchor.width, &mut sh.anchor.height))
 }
 
-fn set_view(s: &mut Session, mode: &str) -> Result<Json> {
-    s.view_mode = mode.to_string();
-    Ok(json!({"view": mode}))
+/// Switches a sheet's view. Like zoom, the view is saved with the file but is not an edit: it
+/// neither records an undo step nor marks a clean workbook as changed.
+fn set_view(s: &mut Session, p: &Json, mode: SheetViewMode) -> Result<Json> {
+    let si = target_sheet(s, p)?;
+    let d = s.doc_mut()?;
+    let dirty = d.is_dirty();
+    let wb = std::sync::Arc::make_mut(&mut d.wb);
+    if let Some(sh) = wb.sheet_mut(si) {
+        sh.view = mode;
+    }
+    if !dirty {
+        d.saved = d.wb.clone();
+    }
+    Ok(json!({"view": mode.as_str()}))
+}
+
+fn ruler(s: &mut Session, p: &Json) -> Result<Json> {
+    let on = bool_param(p, "on").unwrap_or(s.hide_ruler);
+    s.hide_ruler = !on;
+    Ok(json!({"on": on}))
 }
 
 const VIEWS_NAME: &str = "_sc_custom_views";

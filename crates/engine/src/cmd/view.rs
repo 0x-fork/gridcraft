@@ -96,7 +96,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Header & Footer",
             ["Insert", "Text"],
             None,
-            "{header?: \"&C&P\", footer?: \"&CPage &P of &N\"}",
+            "{sheet?, header?: \"&C&P\", footer?: \"&CPage &P of &N\"} or one section: {sheet?, part: header|footer, section: left|center|right, text: \"Page &[Page] of &[Pages]\"} (field names or codes) → {header, footer}",
             has_doc,
             header_footer
         ),
@@ -286,17 +286,48 @@ fn breaks(s: &mut Session, p: &Json) -> Result<Json> {
     })
 }
 
+/// Excel keeps at most 255 characters per header or footer.
+const MAX_HEADER_FOOTER: usize = 255;
+
 fn header_footer(s: &mut Session, p: &Json) -> Result<Json> {
+    const CMD: &str = "pageLayout.headerFooter";
+    let si = target_sheet(s, p)?;
+    let cap = |t: &str| t.chars().take(MAX_HEADER_FOOTER).collect::<String>();
+    // One section edited in place (Page Layout view).
+    let section = match (str_param(p, "part"), str_param(p, "section")) {
+        (None, None) => None,
+        (part, sec) => {
+            let footer = match part.unwrap_or("header") {
+                "header" => false,
+                "footer" => true,
+                other => return Err(bad(CMD, format!("`part` must be header or footer, not `{other}`"))),
+            };
+            let idx = match sec.unwrap_or("center") {
+                "left" => 0usize,
+                "center" | "centre" => 1,
+                "right" => 2,
+                other => return Err(bad(CMD, format!("`section` must be left, center or right, not `{other}`"))),
+            };
+            Some((footer, idx, super::print::fields_to_codes(str_param(p, "text").unwrap_or(""))))
+        }
+    };
     edit(s, |cx| {
-        let si = cx.sheet_index();
         let pr = &mut cx.sheet_mut(si)?.print;
         if let Some(h) = str_param(p, "header") {
-            pr.header = h.to_string();
+            pr.header = cap(h);
         }
         if let Some(f) = str_param(p, "footer") {
-            pr.footer = f.to_string();
+            pr.footer = cap(f);
         }
-        Ok(Json::Null)
+        if let Some((footer, idx, text)) = &section {
+            let spec = if *footer { &mut pr.footer } else { &mut pr.header };
+            let mut parts = super::print::split_header_footer(spec);
+            if let Some(slot) = parts.get_mut(*idx) {
+                *slot = text.clone();
+            }
+            *spec = cap(&super::print::join_header_footer(&parts));
+        }
+        Ok(json!({"header": pr.header, "footer": pr.footer}))
     })
 }
 

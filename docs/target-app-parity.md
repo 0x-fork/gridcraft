@@ -133,7 +133,7 @@ functions, co-authoring and admin, specialist hardware, and languages beyond the
 | Sort, filter, tables, validation | 10 | 70 | Feature-area table |
 | PivotTables (core: fields, layouts, grouping, refresh) | 8 | 60 | Slicers and calculated fields excluded as less frequent |
 | Charts (column, bar, line, pie, scatter, combo) | 9 | 45 | Common kinds work and survive save; no axis options or trendlines; resize broken (#190) |
-| Page layout, print, PDF | 5 | 60 | Latin text exports; no Page Layout view |
+| Page layout, print, PDF | 5 | 60 | Latin text exports |
 | Comments, notes, protection | 3 | 55 | Feature-area table |
 | Pictures and shapes | 2 | 45 | Feature-area table |
 | **Average depth** | 100 | **69.5** | |
