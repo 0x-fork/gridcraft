@@ -36,7 +36,7 @@ Errors come back as `{"id": …, "ok": false, "error": "…"}`.
 | `ui.screenshot` | `{path?}` | PNG of the window (base64 when no path). Animations are settled first: the picture shows the final state |
 | `ui.set` | `{dark?, formulaBar?, ribbonCollapsed?, animations?}` | UI preferences (`formulaBar` runs `view.formulaBar`) |
 | `ui.resize` / `ui.focus` | `{width, height}` | Window control |
-| `app.open` / `app.save` / `app.quit` | `{path}` / `{path?}` | Files and lifetime |
+| `app.open` / `app.save` / `app.quit` | `{path, password?}` / `{path?}` | Files and lifetime. `password` opens a password-protected workbook; without it, such a workbook returns an error (never a dialog) |
 
 Any other method name that is a command id (e.g. `home.bold`) runs that command.
 
@@ -55,6 +55,13 @@ the View ▸ Animations checkbox, saved with the other UI preferences and on by 
 `app.language.japanese` are shortcuts. Only interface chrome is translated, never command ids or
 document text. The choice is saved in `ui.json`; with nothing saved the desktop app follows the
 system language.
+
+`{command: "file.open", params: {path: "Secret.xlsx", password: "…"}}` opens a password-protected
+workbook (Agile or Standard encryption). Without `password` it returns an error containing
+"is password-protected. Enter its password to open it." and never opens a dialog; a wrong
+password returns "The password is incorrect." The password is left out of the journal and never
+quoted in an error. The opened workbook has no save path, so Save asks where to save it, without
+the password, and never replaces the encrypted original.
 
 For a headless equivalent (no window), use `gridcraft-cli mcp` or `gridcraft-cli run`;
 see [`mcp.md`](mcp.md) and [`cli.md`](cli.md).

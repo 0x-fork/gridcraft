@@ -304,19 +304,20 @@ fn main() -> eframe::Result<()> {
     {
         log::warn!("sample {s}: {e}");
     }
-    for f in &files {
-        if let Err(e) = session.execute("file.open", json!({"path": f})) {
-            log::warn!("{f}: {e}");
-        }
-    }
     if session.documents().is_empty() {
         session.new_workbook();
     }
     let mut app = SheetApp::new(session, services());
     app.watch_desktop_theme();
-    app.after_engine(); // Show warnings from files opened on the command line.
+    app.after_engine(); // Show warnings from the sample.
     let control_port = control_port;
     load_prefs(&mut app);
+    // Files named on the command line (a double-click on Windows and Linux) open as File › Open
+    // opens them: a password-protected one asks for its password, and errors are shown, not
+    // only logged. Each replaces the untouched blank Book1, as a file opened from Finder does.
+    for f in &files {
+        app.open_path(f);
+    }
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("GridCraft")
         .with_inner_size([1440.0, 900.0])

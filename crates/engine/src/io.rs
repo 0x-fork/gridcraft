@@ -38,16 +38,56 @@ impl FileKind {
     }
 }
 
+/// The error for an encrypted workbook opened without a password contains this. The interface
+/// asks for the password when it sees it; programmatic callers pass `password` instead.
+pub const PASSWORD_REQUIRED: &str = "is password-protected. Enter its password to open it.";
+/// The error for a wrong password contains this.
+pub const WRONG_PASSWORD: &str = "The password is incorrect.";
+/// The first open warning of a workbook decrypted with its password.
+pub const DECRYPTED_NOTICE: &str = "This workbook was password-protected. GridCraft saves it without the password.";
+
 /// Parses a file's bytes into a workbook. `name` picks the format by extension when the bytes
-/// don't say.
+/// don't say. An encrypted workbook needs [`open_bytes_with_password`].
 pub fn open_bytes(name: &str, bytes: &[u8]) -> Result<(Workbook, Vec<String>)> {
+    open_bytes_with_password(name, bytes, None)
+}
+
+/// [`open_bytes`], first decrypting a password-protected workbook with `password`. Errors never
+/// quote the password.
+pub fn open_bytes_with_password(name: &str, bytes: &[u8], password: Option<&str>) -> Result<(Workbook, Vec<String>)> {
+    if gridcraft_xlsx::sniff(bytes) != gridcraft_xlsx::Format::Encrypted {
+        return open_plain(name, bytes);
+    }
+    // A scheme no password opens is said straight away, rather than after asking for one.
+    let decrypt_error = |e: gridcraft_xlsx::DecryptError| EngineError::Other(decrypt_message(name, e));
+    let Some(password) = password else {
+        gridcraft_xlsx::check_encryption(bytes).map_err(decrypt_error)?;
+        return Err(EngineError::Other(format!("'{name}' {PASSWORD_REQUIRED}")));
+    };
+    let plain = gridcraft_xlsx::decrypt(bytes, password).map_err(decrypt_error)?;
+    if gridcraft_xlsx::sniff(&plain) == gridcraft_xlsx::Format::Encrypted {
+        return Err(EngineError::Other(format!("We can't open '{name}': the encrypted file is damaged (it holds another encrypted file).")));
+    }
+    let (wb, mut warnings) = open_plain(name, &plain)?;
+    warnings.insert(0, DECRYPTED_NOTICE.into());
+    Ok((wb, warnings))
+}
+
+/// What to tell the user when an encrypted workbook can't be decrypted. Never quotes the password.
+fn decrypt_message(name: &str, e: gridcraft_xlsx::DecryptError) -> String {
+    match e {
+        gridcraft_xlsx::DecryptError::WrongPassword => format!("{WRONG_PASSWORD} Check that Caps Lock is off and try again."),
+        gridcraft_xlsx::DecryptError::Unsupported(scheme) => {
+            format!("'{name}' uses {scheme} encryption, which GridCraft can't open yet. Remove the password in Excel and try again.")
+        }
+        gridcraft_xlsx::DecryptError::Malformed(detail) => format!("We can't open '{name}': the encrypted file is damaged ({detail})."),
+    }
+}
+
+/// Parses bytes that aren't encrypted.
+fn open_plain(name: &str, bytes: &[u8]) -> Result<(Workbook, Vec<String>)> {
     let kind = FileKind::from_path(name);
     let sniffed = gridcraft_xlsx::sniff(bytes);
-    if sniffed == gridcraft_xlsx::Format::Encrypted {
-        return Err(EngineError::Other(format!(
-            "'{name}' is password-protected. GridCraft can't open encrypted workbooks yet; remove the password in Excel and try again."
-        )));
-    }
     if sniffed == gridcraft_xlsx::Format::Xls {
         let (wb, report) = gridcraft_xlsx::read_xls(bytes).map_err(|e| EngineError::Other(format!("We can't open '{name}': {e}")))?;
         return Ok((wb, report.warnings));
@@ -460,10 +500,28 @@ mod tests {
 
     #[test]
     fn encrypted_workbook_is_reported_not_misread() {
-        let err = open_bytes("secret.xlsx", &cfb(&["EncryptionInfo", "EncryptedPackage"])).unwrap_err();
-        let msg = err.to_string();
-        assert!(msg.contains("password-protected"), "got: {msg}");
+        let file = gridcraft_xlsx::testing::encrypt_workbook(b"package", "pw");
+        let msg = open_bytes("secret.xlsx", &file).unwrap_err().to_string();
+        assert!(msg.contains(PASSWORD_REQUIRED), "got: {msg}");
         assert!(!msg.contains("zip"), "must not surface the zip error: {msg}");
+        // A compound file naming the streams but unreadable is damage: no password is asked for,
+        // and none helps.
+        let file = cfb(&["EncryptionInfo", "EncryptedPackage"]);
+        for password in [None, Some("pw")] {
+            let msg = open_bytes_with_password("secret.xlsx", &file, password).unwrap_err().to_string();
+            assert!(msg.contains("damaged") && !msg.contains(PASSWORD_REQUIRED), "got: {msg}");
+        }
+    }
+
+    #[test]
+    fn encryption_no_password_opens_is_reported_without_asking_for_one() {
+        let info: &[u8] = &[3, 0, 2, 0, 4, 0, 0, 0]; // Standard header flags: RC4, not AES
+        let file = gridcraft_xlsx::testing::compound_file(&[("EncryptionInfo", info), ("EncryptedPackage", &[0; 8])]);
+        let msg = open_bytes("rc4.xlsx", &file).unwrap_err().to_string();
+        assert!(msg.contains("RC4") && !msg.contains(PASSWORD_REQUIRED), "got: {msg}");
+        let irm = gridcraft_xlsx::testing::compound_file(&[("EncryptedPackage", &[0; 8])]);
+        let msg = open_bytes("irm.xlsx", &irm).unwrap_err().to_string();
+        assert!(msg.contains("rights-management") && !msg.contains("damaged"), "got: {msg}");
     }
 
     #[test]

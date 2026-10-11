@@ -236,6 +236,23 @@ impl Dialog {
                 vec![Password { key: "password", label: "Password:" }],
                 json!({"on": false}),
             ),
+            "openPassword" => {
+                // The file rides along in the values (`path` on the desktop, `name` and `base64`
+                // on the web) and goes back to `file.open` with the password.
+                let source = p("path").as_str().or(p("name").as_str()).map(str::to_string).unwrap_or_default();
+                let file = std::path::Path::new(&source).file_name().and_then(|n| n.to_str()).unwrap_or("This workbook").to_string();
+                // An empty password from the start, so OK on the untouched field says "incorrect"
+                // rather than asking for the password again.
+                let mut values = params.clone();
+                values["password"] = json!("");
+                Dialog::form(
+                    "openPassword",
+                    "Password",
+                    "file.open",
+                    vec![Note(format!("'{file}' is protected.")), Password { key: "password", label: "Password:" }],
+                    values,
+                )
+            }
             "unprotectSheet" => Dialog::form(
                 "unprotectSheet",
                 "Unprotect Sheet",
@@ -1101,11 +1118,19 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
                 open = false;
                 if d.name == "solver" {
                     app.open_dialog("solverResults", r);
+                } else if d.name == "openPassword" {
+                    let path = d.values.get("path").and_then(Json::as_str).map(str::to_string);
+                    app.after_open(path.as_deref(), &r);
                 }
             }
             // Data Analysis asks before replacing data in its output range.
             Err(e) if d.name == "analysisToolPak" && e.contains(gridcraft_engine::cmd::analysis::OVERWRITE_ERROR) => {
                 d.values.insert("askOverwrite".into(), json!(true));
+            }
+            // A wrong password: say so, clear the field and stay open for another try.
+            Err(e) if d.name == "openPassword" => {
+                d.values.insert("password".into(), json!(""));
+                app.message = Some((d.title.clone(), crate::clean_error(&e)));
             }
             Err(e) => app.message = Some((d.title.clone(), crate::clean_error(&e))),
         }
