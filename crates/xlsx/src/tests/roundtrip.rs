@@ -22,6 +22,7 @@ fn sample() -> Workbook {
     wb.date_system = DateSystem::D1904;
     wb.calc = CalcSettings { mode: CalcMode::Manual, iterative: true, max_iterations: 42, max_change: 0.5, precision_as_displayed: true };
     wb.protected_structure = true;
+    wb.structure_password = Some(gridcraft_model::PasswordHash::new_sha512("s3cret", b"0123456789abcdef"));
     wb.props = DocProps {
         title: "T & <x>".into(),
         subject: "S".into(),
@@ -118,6 +119,7 @@ fn sample() -> Workbook {
     s.show_zeros = false;
     s.right_to_left = true;
     s.zoom = 125;
+    s.view = gridcraft_model::SheetViewMode::PageLayout;
     s.view_active = at("C7");
 
     let red_b = Box::new(red.clone());
@@ -246,7 +248,14 @@ fn sample() -> Workbook {
             (3, FilterCriterion::FillColor(Color::Rgb(0xFF0000))),
         ],
     });
-    s.protection = Some(SheetProtection { format_cells: true, sort: true, select_locked: true, select_unlocked: true, ..Default::default() });
+    s.protection = Some(SheetProtection {
+        format_cells: true,
+        sort: true,
+        select_locked: true,
+        select_unlocked: true,
+        password: Some(gridcraft_model::PasswordHash::new_sha512("sheet pw", b"fedcba9876543210")),
+        ..Default::default()
+    });
     s.print = PrintSettings {
         orientation: Orientation::Landscape,
         paper: "A4".into(),
@@ -411,6 +420,8 @@ fn full_roundtrip() {
     assert_eq!(back.date_system, wb.date_system);
     assert_eq!(back.calc, wb.calc);
     assert!(back.protected_structure);
+    assert_eq!(back.structure_password, wb.structure_password);
+    assert!(back.structure_password.as_ref().unwrap().verify("s3cret").unwrap());
     assert_eq!(back.props, wb.props);
     assert_eq!(back.theme, wb.theme);
     assert_eq!(back.names, wb.names);
@@ -445,6 +456,7 @@ fn full_roundtrip() {
     assert_eq!(b.tab_color, a.tab_color);
     assert_eq!((b.show_gridlines, b.show_headings, b.show_zeros, b.right_to_left, b.zoom), (false, false, false, true, 125));
     assert_eq!(b.view_active, a.view_active);
+    assert_eq!(b.view, gridcraft_model::SheetViewMode::PageLayout, "sheetView view=\"pageLayout\" round-trips");
     assert_eq!(b.cond_formats, a.cond_formats);
     assert_eq!(b.validations, a.validations);
     assert_eq!(b.hyperlinks, a.hyperlinks);
@@ -619,6 +631,56 @@ fn writing_repairs_invalid_models() {
     assert_eq!(s.cell(at("B2")).unwrap().style, StyleId::DEFAULT);
 }
 
+#[test]
+fn vba_project_roundtrip() {
+    // A VBA project blob is preserved byte-identically through write and read, and the package
+    // carries the macro-enabled content type plus the vbaProject relationship.
+    let vba = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1 fake OLE2 vbaProject".to_vec();
+    let mut wb = Workbook::new();
+    wb.vba_project = Some(vba.clone());
+    let bytes = write_xlsx(&wb).unwrap();
+    assert_eq!(write_xlsx(&wb).unwrap(), bytes, "output is deterministic");
+
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes.clone())).unwrap();
+    let names: Vec<String> = (0..z.len()).map(|i| z.name_for_index(i).unwrap().to_string()).collect();
+    assert!(names.iter().any(|x| x == "xl/vbaProject.bin"), "missing vbaProject.bin");
+    let mut bin = vec![];
+    z.by_name("xl/vbaProject.bin").unwrap().read_to_end(&mut bin).unwrap();
+    assert_eq!(bin, vba, "vbaProject.bin written byte-identically");
+    let mut ct = String::new();
+    z.by_name("[Content_Types].xml").unwrap().read_to_string(&mut ct).unwrap();
+    assert!(ct.contains("macroEnabled.main+xml"), "macro-enabled main content type: {ct}");
+    assert!(ct.contains("/xl/vbaProject.bin"), "vbaProject content type override: {ct}");
+    let mut rels = String::new();
+    z.by_name("xl/_rels/workbook.xml.rels").unwrap().read_to_string(&mut rels).unwrap();
+    assert!(rels.contains("relationships/vbaProject"), "vbaProject relationship: {rels}");
+
+    let (back, rep) = read_xlsx(&bytes).unwrap();
+    assert_eq!(back.vba_project.as_deref(), Some(vba.as_slice()), "vbaProject survives the read");
+    assert!(rep.warnings.iter().any(|w| w.contains("not executed")), "{:?}", rep.warnings);
+
+    // A workbook without macros stays macro-free and free of VBA warnings.
+    let (plain, rp) = read_xlsx(&write_xlsx(&Workbook::new()).unwrap()).unwrap();
+    assert_eq!(plain.vba_project, None);
+    assert!(rp.warnings.iter().all(|w| !w.contains("VBA")), "{:?}", rp.warnings);
+}
+
+#[test]
+fn vba_project_read_from_foreign_file() {
+    // An .xlsm built by another producer is captured on read (not dropped with a plain warning).
+    let vba: &[u8] = b"PK\x03\x04-not-really-but-opaque-bytes";
+    let bytes = super::minimal(
+        "<sheetData/>",
+        &[("xl/vbaProject.bin", "ignored-as-text")],
+        r#"<Relationship Id="rId9" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProject" Target="vbaProject.bin"/>"#,
+        "",
+    );
+    let (wb, rep) = read_xlsx(&bytes).unwrap();
+    assert!(wb.vba_project.is_some(), "VBA blob captured");
+    assert!(rep.warnings.iter().any(|w| w.contains("not executed")), "{:?}", rep.warnings);
+    let _ = vba;
+}
+
 fn sheet1_xml(bytes: &[u8]) -> (String, bool) {
     let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
     let mut s = String::new();
@@ -760,4 +822,29 @@ fn bad_comment_dates_are_left_out() {
     let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
     let c = &back.sheets[0].comments[&at("A1")];
     assert!(c.threaded && c.dates.is_empty());
+}
+
+/// #378: the saved scroll position survives a round trip, with and without frozen panes (where it
+/// is the scrolling pane's `topLeftCell`).
+#[test]
+fn scroll_position_round_trips_with_and_without_frozen_panes() {
+    let mut wb = Workbook::new();
+    wb.sheet_mut(0).unwrap().view_top_left = at("A31");
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    assert_eq!(back.sheet(0).unwrap().view_top_left, at("A31"));
+
+    let s = wb.sheet_mut(0).unwrap();
+    s.freeze = Some((1, 0));
+    s.view_top_left = at("C40");
+    let bytes = write_xlsx(&wb).unwrap();
+    let (xml, _) = sheet1_xml(&bytes);
+    assert!(xml.contains(r#"<pane ySplit="1" topLeftCell="C40""#), "{xml}");
+    let (back, _) = read_xlsx(&bytes).unwrap();
+    assert_eq!(back.sheet(0).unwrap().view_top_left, at("C40"));
+    assert_eq!(back.sheet(0).unwrap().freeze, Some((1, 0)));
+
+    // A scroll position inside the frozen rows is written as the first scrolling row.
+    wb.sheet_mut(0).unwrap().view_top_left = at("A1");
+    let (xml, _) = sheet1_xml(&write_xlsx(&wb).unwrap());
+    assert!(xml.contains(r#"topLeftCell="A2""#), "{xml}");
 }

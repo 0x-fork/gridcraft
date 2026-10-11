@@ -106,3 +106,39 @@ fn windows_and_mac_variants() {
     assert_eq!(lookup(Key::A, Some(Key::A), Modifiers::NONE, false), None);
     assert_eq!(lookup(Key::F2, Some(Key::F2), Modifiers::NONE, false), None);
 }
+
+#[test]
+fn space_selection_shortcuts_do_not_start_an_edit() {
+    let mut h = harness(book("B2"));
+    // Shift+Space: the key press, then the space the OS types with it.
+    let shift = Modifiers::SHIFT;
+    h.input_mut().events.push(Event::Key { key: Key::Space, physical_key: Some(Key::Space), pressed: true, repeat: false, modifiers: shift });
+    h.input_mut().events.push(Event::Text(" ".into()));
+    h.run_steps(2);
+    assert!(h.state().editor.is_none(), "Shift+Space started an edit");
+    assert_eq!(h.state().session.active().unwrap().selection.ranges[0].a1(), "2:2");
+    h.state_mut().session.run("selection.set", json!({"range": "B2"})).unwrap();
+    // Ctrl+Space selects the column, also without starting an edit.
+    h.input_mut().events.push(Event::Key { key: Key::Space, physical_key: Some(Key::Space), pressed: true, repeat: false, modifiers: CTRL });
+    h.input_mut().events.push(Event::Text(" ".into()));
+    h.run_steps(2);
+    assert!(h.state().editor.is_none());
+    assert_eq!(h.state().session.active().unwrap().selection.ranges[0].a1(), "B:B");
+    // Plain typing still edits.
+    h.input_mut().events.push(Event::Text("x".into()));
+    h.run_steps(2);
+    assert!(h.state().editor.is_some());
+}
+
+#[test]
+fn space_shortcuts_per_platform() {
+    let run = |id: &'static str| Some(Shortcut::Run(id, json!({})));
+    let mac_cmd = Modifiers { mac_cmd: true, command: true, ..Modifiers::NONE };
+    let space = |m, mac| lookup(Key::Space, Some(Key::Space), m, mac);
+    assert_eq!(space(Modifiers::SHIFT, false), run("selection.row"));
+    assert_eq!(space(Modifiers::SHIFT, true), run("selection.row"));
+    assert_eq!(space(CTRL, false), run("selection.column"));
+    assert_eq!(space(Modifiers::CTRL, true), run("selection.column"));
+    // Cmd+Space is Spotlight on macOS.
+    assert_eq!(space(mac_cmd, true), None);
+}

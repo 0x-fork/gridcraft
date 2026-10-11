@@ -76,6 +76,7 @@ pub(crate) mod stat;
 pub(crate) mod text;
 pub(crate) mod util;
 
+pub use ets::Timeline;
 pub use stat::{aggregate_values, aggregate_values_k};
 
 /// An evaluated argument. Ranges arrive as `Value::Array` (blank cells = `Value::Empty`) with

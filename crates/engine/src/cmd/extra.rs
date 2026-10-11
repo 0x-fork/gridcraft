@@ -116,9 +116,29 @@ pub fn specs() -> Vec<CommandSpec> {
             rotate
         ),
         // Views
-        cmd!(noundo "view.normal", "Normal", ["View", "Workbook Views"], None, "{}", has_doc, |s, _| set_view(s, "normal")),
-        cmd!(noundo "view.pageLayout", "Page Layout", ["View", "Workbook Views"], None, "{}", has_doc, |s, _| set_view(s, "pageLayout")),
-        cmd!(noundo "view.pageBreakPreview", "Page Break Preview", ["View", "Workbook Views"], None, "{}", has_doc, |s, _| set_view(s, "pageBreakPreview")),
+        cmd!(noundo "view.normal", "Normal", ["View", "Workbook Views"], None, "{sheet?} → {view} (per sheet, saved with the file)", has_doc, |s, p| set_view(
+            s,
+            p,
+            SheetViewMode::Normal
+        )),
+        cmd!(
+            noundo "view.pageLayout",
+            "Page Layout",
+            ["View", "Workbook Views"],
+            None,
+            "{sheet?} → {view}: pages on paper with rulers; headers and footers are edited in place (per sheet, saved with the file)",
+            has_doc,
+            |s, p| set_view(s, p, SheetViewMode::PageLayout)
+        ),
+        cmd!(
+            noundo "view.pageBreakPreview",
+            "Page Break Preview",
+            ["View", "Workbook Views"],
+            None,
+            "{sheet?} → {view} (per sheet, saved with the file)",
+            has_doc,
+            |s, p| set_view(s, p, SheetViewMode::PageBreakPreview)
+        ),
         cmd!(noundo "view.customViews", "Custom Views…", ["View", "Workbook Views"], None, "{save?: name, show?: name, delete?: name} → list", has_doc, custom_views),
         cmd!(noundo "view.split", "Split", ["View", "Window"], None, "{} (toggles a split at the active cell; shown as frozen panes in this version)", has_doc, split),
         cmd!(noundo "view.newWindow", "New Window", ["View", "Window"], None, "{} opens a second window on the same workbook (a linked copy)", has_doc, new_window),
@@ -126,7 +146,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "view.hideWindow", "Hide", ["View", "Window"], None, "{}", has_doc, hide_window),
         cmd!(noundo "view.unhideWindow", "Unhide…", ["View", "Window"], None, "{index?}", has_doc, unhide_window),
         cmd!(query "view.switchWindows", "Switch Windows", ["View", "Window"], None, "{} → open windows", always, switch_windows),
-        cmd!(noundo "view.ruler", "Ruler", ["View", "Show"], None, "{on?}", has_doc, |_, _| ok()),
+        cmd!(noundo "view.ruler", "Ruler", ["View", "Show"], None, "{on?} → {on}: rulers in Page Layout view (an application option)", has_doc, ruler),
         cmd!(query "view.macros", "Macros", ["View", "Macros"], None, "{} → scripts", has_doc, all_scripts),
         // Table tools
         cmd!("table.resize", "Resize Table", ["Table Design", "Properties"], None, "{table?, range: \"A1:F20\"}", has_doc, table_resize),
@@ -424,7 +444,7 @@ fn move_chart(s: &mut Session, p: &Json) -> Result<Json> {
         Some(n) => Some(s.doc()?.wb.sheet_index(n).ok_or_else(|| bad("chart.move", "no such sheet"))?),
         None => None,
     };
-    let at = cell_param(p, "at");
+    let at = cell_param_on(s, p, "at", target.unwrap_or(si))?;
     edit(s, |cx| {
         let mut chart = cx.sheet_mut(si)?.charts.remove(ci);
         if let Some(a) = at {
@@ -588,9 +608,26 @@ fn rotate(s: &mut Session, p: &Json) -> Result<Json> {
     with_shape(s, p, |sh| std::mem::swap(&mut sh.anchor.width, &mut sh.anchor.height))
 }
 
-fn set_view(s: &mut Session, mode: &str) -> Result<Json> {
-    s.view_mode = mode.to_string();
-    Ok(json!({"view": mode}))
+/// Switches a sheet's view. Like zoom, the view is saved with the file but is not an edit: it
+/// neither records an undo step nor marks a clean workbook as changed.
+fn set_view(s: &mut Session, p: &Json, mode: SheetViewMode) -> Result<Json> {
+    let si = target_sheet(s, p)?;
+    let d = s.doc_mut()?;
+    let dirty = d.is_dirty();
+    let wb = std::sync::Arc::make_mut(&mut d.wb);
+    if let Some(sh) = wb.sheet_mut(si) {
+        sh.view = mode;
+    }
+    if !dirty {
+        d.saved = d.wb.clone();
+    }
+    Ok(json!({"view": mode.as_str()}))
+}
+
+fn ruler(s: &mut Session, p: &Json) -> Result<Json> {
+    let on = bool_param(p, "on").unwrap_or(s.hide_ruler);
+    s.hide_ruler = !on;
+    Ok(json!({"on": on}))
 }
 
 const VIEWS_NAME: &str = "_sc_custom_views";
@@ -839,10 +876,16 @@ fn new_script(s: &mut Session, p: &Json) -> Result<Json> {
 }
 
 fn all_scripts(s: &mut Session, _: &Json) -> Result<Json> {
-    let all = stash_get(&s.doc()?.wb, SCRIPTS_NAME);
-    Ok(Json::Array(
-        all.as_object().map(|o| o.iter().map(|(k, v)| json!({"name": k, "steps": v.as_array().map_or(0, Vec::len)})).collect()).unwrap_or_default(),
-    ))
+    let wb = &s.doc()?.wb;
+    let all = stash_get(wb, SCRIPTS_NAME);
+    let mut list: Vec<Json> =
+        all.as_object().map(|o| o.iter().map(|(k, v)| json!({"name": k, "steps": v.as_array().map_or(0, Vec::len)})).collect()).unwrap_or_default();
+    // A preserved VBA project is reported alongside GridCraft's own scripts; it is carried on
+    // save but never executed here, so it has no step count.
+    if let Some(bytes) = &wb.vba_project {
+        list.push(json!({"name": "(VBA)", "steps": 0, "kind": "vba", "size": bytes.len(), "executed": false}));
+    }
+    Ok(Json::Array(list))
 }
 
 fn run_script(s: &mut Session, p: &Json) -> Result<Json> {
@@ -914,7 +957,7 @@ fn checkbox(s: &mut Session, p: &Json) -> Result<Json> {
 fn toggle_checkbox(s: &mut Session, p: &Json) -> Result<Json> {
     let si = target_sheet(s, p)?;
     let d = s.doc()?;
-    let cells: Vec<CellRef> = match cell_param(p, "cell") {
+    let cells: Vec<CellRef> = match cell_param_on(s, p, "cell", si)? {
         Some(c) => vec![c],
         None => d.selection.ranges.iter().flat_map(|r| r.iter().take(100_000).collect::<Vec<_>>()).collect(),
     };
@@ -986,7 +1029,7 @@ fn new_cell_style(s: &mut Session, p: &Json) -> Result<Json> {
     let name = str_param(p, "name").ok_or_else(|| bad("home.newCellStyle", "missing `name`"))?.to_string();
     let d = s.doc()?;
     let sh = d.wb.active().ok_or(EngineError::NoDocument)?;
-    let c = cell_param(p, "fromCell").unwrap_or(d.selection.active);
+    let c = cell_param(s, p, "fromCell")?.unwrap_or(d.selection.active);
     let style = d.wb.styles.get(sh.style_id(c)).clone();
     edit(s, |cx| {
         cx.wb.cell_styles.retain(|(n, _)| !n.eq_ignore_ascii_case(&name));

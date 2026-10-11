@@ -1,6 +1,6 @@
 # Target-app parity: GridCraft vs Microsoft Excel
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (community merges: worksheet functions 513 / 523, catalog 266 / 290) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (community merges: worksheet functions 513 / 523, catalog 274 / 290) · **Target:** Microsoft Excel (Microsoft 365)
 
 This is the authoritative parity assessment. [`ROADMAP.md`](../ROADMAP.md) summarizes it,
 [`gaps.md`](gaps.md) lists every shortfall, and the area checklists hold the detail:
@@ -13,7 +13,7 @@ generated ribbon checklist is [`parity-checklist.md`](parity-checklist.md).
 | Number | Value | Kind |
 |---|---|---|
 | Feature breadth (weighted by use) | **~75%** | estimated from the area table below; anchored on two measurements |
-| Ribbon and menu catalog | **266 / 290 (91.7%)** | measured: `cargo xtask parity` (`crates/engine/src/catalog.rs` ∩ registered command ids) |
+| Ribbon and menu catalog | **274 / 290 (94.5%)** | measured: `cargo xtask parity` (`crates/engine/src/catalog.rs` ∩ registered command ids) |
 | Worksheet functions, by name | **513 / 523 (98.1%)** | measured: registered functions vs Microsoft's published function list (method below) |
 | Worksheet functions that do real work | **504 / 523 (96.4%)** | measured: excludes 9 stubs (7 CUBE functions, WEBSERVICE, FILTERXML) |
 | **Ready for real work** | **~50%** | estimated; written weights below (51.6 computed) |
@@ -133,7 +133,7 @@ functions, co-authoring and admin, specialist hardware, and languages beyond the
 | Sort, filter, tables, validation | 10 | 70 | Feature-area table |
 | PivotTables (core: fields, layouts, grouping, refresh) | 8 | 60 | Slicers and calculated fields excluded as less frequent |
 | Charts (column, bar, line, pie, scatter, combo) | 9 | 45 | Common kinds work and survive save; no axis options or trendlines; resize broken (#190) |
-| Page layout, print, PDF | 5 | 60 | Latin text exports; no Page Layout view |
+| Page layout, print, PDF | 5 | 60 | Latin text exports |
 | Comments, notes, protection | 3 | 55 | Feature-area table |
 | Pictures and shapes | 2 | 45 | Feature-area table |
 | **Average depth** | 100 | **69.5** | |

@@ -98,13 +98,15 @@ pub fn title_bar(app: &mut SheetApp, ui: &mut Ui) {
                     ("New Workbook", "file.new"),
                     ("Open…", "file.open"),
                     ("Save As…", "file.saveAs"),
-                    ("Print…", "file.print"),
                     ("Sort A to Z", "data.sortAscending"),
                     ("Calculate Now", "formulas.calculateNow"),
                 ] {
                     if ui.button(label).clicked() {
                         app.run_or_alert(id, json!({}));
                     }
+                }
+                if ui.button("Print…").clicked() {
+                    app.print_now(json!({}));
                 }
             });
             // Centered title.
@@ -231,6 +233,7 @@ pub fn show(app: &mut SheetApp, ui: &mut Ui) {
                             "Automate" => automate(app, ui),
                             "Table Design" => table_design(app, ui),
                             "Chart Design" => chart_design(app, ui),
+                            crate::paper_view::TAB => crate::paper_view::ribbon_tab(app, ui),
                             _ => home(app, ui),
                         }
                     });
@@ -272,6 +275,9 @@ fn contextual_tabs(app: &SheetApp) -> Vec<&'static str> {
         }
         if app.selected_chart.is_some_and(|id| sh.charts.iter().any(|c| c.id == id)) {
             v.push("Chart Design");
+        }
+        if app.grid.hf_edit.is_some() {
+            v.push(crate::paper_view::TAB);
         }
     }
     v
@@ -527,7 +533,16 @@ fn home(app: &mut SheetApp, ui: &mut Ui) {
                 (Icon::AlignMiddle, VAlign::Center, "home.alignMiddle", "Middle Align"),
                 (Icon::AlignBottom, VAlign::Bottom, "home.alignBottom", "Bottom Align"),
             ] {
-                if toggle_button(ui, icon, st.align.v == v, tip).clicked() {
+                let response = toggle_button(ui, icon, st.align.v == v, tip);
+                if matches!(app.keytips.prefix(), Some("H" | "HA")) {
+                    let sequence = match v {
+                        VAlign::Top => "HAT",
+                        VAlign::Center => "HAM",
+                        _ => "HAB",
+                    };
+                    keytip(app, ui, sequence, response.rect.center_bottom());
+                }
+                if response.clicked() {
                     act(app, id, json!({}));
                 }
             }
@@ -814,9 +829,9 @@ fn font_combo(app: &mut SheetApp, ui: &mut Ui, st: &Style) {
     let mut name = st.font.name.clone();
     let before = name.clone();
     egui::ComboBox::from_id_salt("font_name").width(150.0).selected_text(egui::RichText::new(&name).font(theme::ui_font(12.5))).show_ui(ui, |ui| {
-        for f in FONTS {
-            let fam = theme::cell_family(f, false, false);
-            ui.selectable_value(&mut name, f.to_string(), egui::RichText::new(*f).font(egui::FontId::new(14.0, fam)));
+        for f in crate::fonts::families() {
+            let fam = theme::cell_family(&f, false, false);
+            ui.selectable_value(&mut name, f.clone(), egui::RichText::new(&f).font(egui::FontId::new(14.0, fam)));
         }
     });
     if name != before {
@@ -1251,6 +1266,10 @@ fn insert(app: &mut SheetApp, ui: &mut Ui) {
         });
     });
     sep(ui);
+    if big_button(ui, Icon::Filter, "Slicer", "Insert a slicer to filter a table", false).clicked() {
+        act(app, "insert.slicer", json!({}));
+    }
+    sep(ui);
     let sp = big_button(ui, Icon::Sparkline, "Sparklines", "Sparklines", true);
     egui::Popup::menu(&sp).show(|ui| {
         for (label, kind) in [("Line", "line"), ("Column", "column"), ("Win/Loss", "winLoss")] {
@@ -1524,10 +1543,10 @@ fn formulas(app: &mut SheetApp, ui: &mut Ui) {
         if small_button(ui, Icon::Calc, "Evaluate Formula", "Evaluate Formula", false).clicked() {
             app.open_dialog("evaluateFormula", json!({}));
         }
-        if small_button(ui, Icon::Search, "Watch Window", "Watch Window", false).clicked() {
-            app.grid.pane = Some("watch".into());
-        }
     });
+    if big_button(ui, Icon::Search, "Watch\nWindow", "Watch Window", false).clicked() {
+        app.grid.pane = Some("watch".into());
+    }
     sep(ui);
     let co = big_button(ui, Icon::Calc, "Calculation\nOptions", "Calculation Options", true);
     egui::Popup::menu(&co).show(|ui| {
@@ -1614,6 +1633,9 @@ fn data(app: &mut SheetApp, ui: &mut Ui) {
             ],
         );
     });
+    if big_button(ui, Icon::ChartLine, "Forecast\nSheet", "Forecast Sheet", false).clicked() {
+        app.open_dialog("forecastSheet", json!({}));
+    }
     sep(ui);
     ui.vertical(|ui| {
         if small_button(ui, Icon::Group, "Group", "Group", false).clicked() {
@@ -1650,15 +1672,43 @@ fn review(app: &mut SheetApp, ui: &mut Ui) {
     if big_button(ui, Icon::Comment, "New\nComment", "New Comment", false).clicked() {
         app.open_dialog("comment", json!({"threaded": true}));
     }
-    if big_button(ui, Icon::Comment, "Show\nComments", "Comments pane", false).clicked() {
-        app.grid.pane = Some("comments".into());
-    }
     if big_button(ui, Icon::Delete, "Delete", "Delete Comment", false).clicked() {
         act(app, "review.deleteComment", json!({}));
     }
+    ui.vertical(|ui| {
+        for (icon, label, tip, id) in
+            [(Icon::Left, "Previous", "Previous Comment", "review.previousComment"), (Icon::Right, "Next", "Next Comment", "review.nextComment")]
+        {
+            if small_button(ui, icon, label, tip, false).clicked() {
+                act(app, id, json!({}));
+                app.grid.ensure_visible = true;
+            }
+        }
+    });
+    let shown = app.session.comments_pane;
+    let r = big_button(ui, Icon::Comment, "Show\nComments", "Comments pane", false);
+    if shown {
+        ui.painter().rect_stroke(r.rect, 5.0, Stroke::new(2.0, Tokens::get(ui.ctx()).accent), StrokeKind::Inside);
+    }
+    if r.clicked() {
+        act(app, "review.showComments", json!({"on": !shown}));
+        if app.session.comments_pane {
+            app.grid.pane = None;
+        }
+    }
     let notes = big_button(ui, Icon::Note, "Notes", "Notes", true);
     egui::Popup::menu(&notes).show(|ui| {
-        menu_items(app, ui, &[("New Note", "dialog:comment", json!({"threaded": false})), ("Show/Hide Note", "review.showNote", json!({}))]);
+        menu_items(
+            app,
+            ui,
+            &[
+                ("New Note", "dialog:comment", json!({"threaded": false})),
+                ("Show/Hide Note", "review.showNote", json!({})),
+                ("Show All Notes", "review.showAllNotes", json!({})),
+                ("-", "", json!({})),
+                ("Convert to Comments", "review.convertToComments", json!({})),
+            ],
+        );
     });
     sep(ui);
     let protected = app.session.active().and_then(|d| d.wb.active().map(|s| s.is_protected())).unwrap_or(false);
@@ -1670,7 +1720,7 @@ fn review(app: &mut SheetApp, ui: &mut Ui) {
         }
     }
     if big_button(ui, Icon::Book, "Protect\nWorkbook", "Protect Workbook structure", false).clicked() {
-        act(app, "review.protectWorkbook", json!({}));
+        crate::backstage::protect_workbook(app);
     }
     if big_button(ui, Icon::Validation, "Allow Edit\nRanges", "Allow Edit Ranges", false).clicked() {
         app.open_dialog("allowEditRanges", json!({}));
@@ -1692,7 +1742,14 @@ fn view(app: &mut SheetApp, ui: &mut Ui) {
     sep(ui);
     let s = app.session.active().and_then(|d| d.wb.active().map(|s| (s.show_gridlines, s.show_headings))).unwrap_or((true, true));
     let lang = app.ui.language;
+    let page_layout =
+        app.session.active().and_then(|d| d.wb.active().map(|s| s.view == gridcraft_engine::model::SheetViewMode::PageLayout)).unwrap_or(false);
     ui.vertical(|ui| {
+        // Rulers exist only in Page Layout view.
+        let mut ruler = !app.session.hide_ruler;
+        if ui.add_enabled(page_layout, egui::Checkbox::new(&mut ruler, lang.tr("Ruler"))).changed() {
+            act(app, "view.ruler", json!({"on": ruler}));
+        }
         let mut fb = app.session.prefs.formula_bar;
         if ui.checkbox(&mut fb, lang.tr("Formula Bar")).changed() {
             act(app, "view.formulaBar", json!({"on": fb}));
@@ -1746,6 +1803,11 @@ fn view(app: &mut SheetApp, ui: &mut Ui) {
                 }
             }
         });
+        let mut animations = app.ui.animations;
+        let hint = lang.tr("Glide the selection outline to the cell you move to instead of jumping there");
+        if ui.checkbox(&mut animations, lang.tr("Animations")).on_hover_text(hint).changed() {
+            act(app, "view.animations", json!({"on": animations}));
+        }
     });
     sep(ui);
     // Interface size (issue #230): scales the whole window on top of the desktop's scale.
@@ -1782,6 +1844,9 @@ fn view(app: &mut SheetApp, ui: &mut Ui) {
 }
 
 fn automate(app: &mut SheetApp, ui: &mut Ui) {
+    if big_button(ui, Icon::Script, "Macros", "Macros and scripts in this workbook (Alt+F8)", false).clicked() {
+        app.open_dialog("macros", json!({}));
+    }
     if big_button(ui, Icon::Script, "Command\nPalette", "Search and run any command", false).clicked() {
         app.open_dialog("commandSearch", json!({}));
     }
@@ -1819,6 +1884,10 @@ fn table_design(app: &mut SheetApp, ui: &mut Ui) {
     }
     if big_button(ui, Icon::Table, "Convert\nto Range", "Convert to Range", false).clicked() {
         act(app, "table.convertToRange", json!({"table": tname}));
+    }
+    sep(ui);
+    if big_button(ui, Icon::Filter, "Insert\nSlicer", "Insert Slicer", false).clicked() {
+        act(app, "table.insertSlicer", json!({"table": tname}));
     }
     sep(ui);
     ui.vertical(|ui| {
@@ -1927,6 +1996,10 @@ pub fn shortcut(app: &mut SheetApp, key: Key, m: Modifiers) {
         Key::O => Some(("file.open", json!({}))),
         Key::N => Some(("file.new", json!({}))),
         Key::W => Some(("file.close", json!({}))),
+        Key::P => {
+            app.print_now(json!({}));
+            None
+        }
         Key::K => {
             app.open_dialog("insertLink", json!({}));
             None

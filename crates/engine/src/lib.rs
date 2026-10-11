@@ -13,6 +13,7 @@ pub mod cmd;
 pub mod display;
 pub mod fill;
 pub mod io;
+pub mod paper;
 pub mod pivot;
 pub mod pivot_calc;
 pub mod sample;
@@ -67,6 +68,9 @@ pub struct Clipboard {
     pub wb: Arc<Workbook>,
     pub sheet: usize,
     pub range: RangeRef,
+    /// The range as copied, before whole rows/columns were trimmed to the used range
+    /// (Insert Copied Cells inserts whole lines for a row or column copy).
+    pub selected: RangeRef,
     pub cut: bool,
     /// Document uid of the source (a cut only moves within the same workbook).
     pub doc_uid: u64,
@@ -135,6 +139,35 @@ impl DocState {
     pub fn sheet_index(&self) -> usize {
         self.wb.active_sheet
     }
+    /// Records the view state that is saved with the file (`sheetView topLeftCell`, the active
+    /// cell): the first visible cell of the scrolling area per sheet index in `tops`, and the
+    /// active sheet's active cell. View state never makes the workbook dirty.
+    pub fn store_view(&mut self, tops: &[(usize, CellRef)]) {
+        let active = self.selection.active;
+        let si = self.wb.active_sheet;
+        let changed = tops.iter().any(|(i, c)| self.wb.sheets.get(*i).is_some_and(|sh| sh.view_top_left != *c))
+            || self.wb.sheets.get(si).is_some_and(|sh| sh.view_active != active);
+        if !changed {
+            return;
+        }
+        let dirty = self.is_dirty();
+        let wb = Arc::make_mut(&mut self.wb);
+        for (i, c) in tops {
+            if let Some(sh) = wb.sheets.get_mut(*i)
+                && sh.view_top_left != *c
+            {
+                Arc::make_mut(sh).view_top_left = *c;
+            }
+        }
+        if let Some(sh) = wb.sheets.get_mut(si)
+            && sh.view_active != active
+        {
+            Arc::make_mut(sh).view_active = active;
+        }
+        if !dirty {
+            self.saved = self.wb.clone();
+        }
+    }
     pub fn display_title(&self) -> String {
         self.path
             .as_deref()
@@ -202,8 +235,8 @@ pub struct Session {
     pub format_painter: Option<(Arc<Workbook>, usize, RangeRef, bool)>,
     /// Find state (last search).
     pub last_find: Option<Json>,
-    /// Workbook view: normal, pageLayout or pageBreakPreview.
-    pub view_mode: String,
+    /// View › Show › Ruler is off (rulers in Page Layout view; an application option).
+    pub hide_ruler: bool,
     /// Journal position where action recording started.
     pub recording: Option<usize>,
     /// Windows hidden with View › Hide.
@@ -212,6 +245,11 @@ pub struct Session {
     pub draw_tool: String,
     pub draw_color: String,
     pub draw_width: f32,
+    /// Review › Show Comments: the Comments pane is open.
+    pub comments_pane: bool,
+    /// Review › Notes › Show All Notes: every note is displayed. An application display setting
+    /// (like Excel's comment indicator option), so it's not saved in the file.
+    pub show_all_notes: bool,
 }
 
 impl Session {

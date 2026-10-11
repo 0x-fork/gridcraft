@@ -108,6 +108,11 @@ pub fn lookup(key: Key, physical: Option<Key>, m: Modifiers, mac: bool) -> Optio
         Period if cmd && s => run("home.increaseFontSize"),
         Comma if cmd && s => run("home.decreaseFontSize"),
         Space if cmd && s => run("edit.selectAll"),
+        // Shift+Space selects the row; Ctrl+Space (Windows) / Control+Space (Excel for Mac) the
+        // column. Cmd+Space stays free: it is the macOS Spotlight shortcut.
+        Space if plain && s => run("selection.row"),
+        Space if !mac && cmd && !s => run("selection.column"),
+        Space if mac && ctrl && !m.command && !s => run("selection.column"),
         Home if cmd && s => Shortcut::ExtendToStart,
         End if cmd && s => Shortcut::ExtendToEnd,
         Home if plain && s => Shortcut::ExtendToRowStart,
@@ -184,7 +189,7 @@ pub(crate) fn dispatch(app: &mut SheetApp, ctx: &egui::Context, key: Key, physic
         Shortcut::FormulaAbove | Shortcut::ValueAbove => {
             let Some(above) = active.row.checked_sub(1).map(|r| CellRef::new(r, active.col)) else { return true };
             let text = if shortcut == Shortcut::FormulaAbove {
-                sh.cell(above).map(|c| c.input_text()).unwrap_or_default()
+                app.session.active().map(|d| gridcraft_engine::display::edit_text(&d.wb, sh, above)).unwrap_or_default()
             } else {
                 app.session
                     .active()

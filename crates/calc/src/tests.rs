@@ -95,6 +95,39 @@ fn chains_out_of_order() {
 }
 
 #[test]
+fn xlookup_returns_a_reference() {
+    let mut t = T::new();
+    for (i, (k, v)) in [("a", 1), ("b", 2), ("c", 3), ("d", 4)].iter().enumerate() {
+        t.set(&format!("A{}", i + 1), k);
+        t.set(&format!("B{}", i + 1), &v.to_string());
+    }
+    t.set("D1", "=SUM(XLOOKUP(\"b\",A1:A4,B1:B4):XLOOKUP(\"d\",A1:A4,B1:B4))");
+    assert_eq!(t.num("D1"), 9.0);
+    t.set("D2", "=SUM(B1:XLOOKUP(\"c\",A1:A4,B1:B4))");
+    assert_eq!(t.num("D2"), 6.0);
+    t.set("D3", "=CELL(\"address\",XLOOKUP(\"c\",A1:A4,B1:B4))");
+    assert_eq!(t.get("D3"), Value::from("$B$3"));
+    // Not found: if_not_found, else #N/A, as before.
+    t.set("D4", "=XLOOKUP(\"z\",A1:A4,B1:B4,\"none\")");
+    assert_eq!(t.get("D4"), Value::from("none"));
+    t.set("D5", "=XLOOKUP(\"z\",A1:A4,B1:B4)");
+    assert_eq!(t.get("D5"), Value::Error(CellError::NA));
+    // A match on an empty cell is a blank reference: ISBLANK is TRUE and & adds nothing (#374).
+    t.set("A5", "e");
+    t.set("D6", "=ISBLANK(XLOOKUP(\"e\",A1:A5,B1:B5))");
+    assert_eq!(t.get("D6"), Value::Bool(true));
+    t.set("D7", "=\"x\"&XLOOKUP(\"e\",A1:A5,B1:B5)&\"y\"");
+    assert_eq!(t.get("D7"), Value::from("xy"));
+    // An empty match_mode keeps the search_mode after it: search last to first.
+    t.set("A6", "b");
+    t.set("B6", "20");
+    t.set("D8", "=XLOOKUP(\"b\",A1:A6,B1:B6,,,-1)");
+    assert_eq!(t.num("D8"), 20.0);
+    t.set("D9", "=XLOOKUP(\"b\",A1:A6,B1:B6)");
+    assert_eq!(t.num("D9"), 2.0);
+}
+
+#[test]
 fn long_chain() {
     let mut t = T::new();
     t.set("A1", "1");
@@ -104,6 +137,24 @@ fn long_chain() {
     assert_eq!(t.num("A3000"), 3000.0);
     t.set("A1", "10");
     assert_eq!(t.num("A3000"), 3009.0);
+}
+
+#[test]
+fn index_with_arrays_of_positions() {
+    let mut t = T::new();
+    for (i, row) in [[1, 2, 3], [4, 5, 6], [7, 8, 9]].iter().enumerate() {
+        for (j, v) in row.iter().enumerate() {
+            t.set(&format!("{}{}", ["A", "B", "C"][j], i + 1), &v.to_string());
+        }
+    }
+    t.set("E1", "=INDEX(A1:C3,{1;3},{1,3})");
+    assert_eq!([t.num("E1"), t.num("F1"), t.num("E2"), t.num("F2")], [1.0, 3.0, 7.0, 9.0]);
+    t.set("E4", "=SUM(INDEX(A1:C3,{1,2,3},2))");
+    assert_eq!(t.num("E4"), 15.0);
+    t.set("E5", "=INDEX({10,20,30},{3,1})");
+    assert_eq!([t.num("E5"), t.num("F5")], [30.0, 10.0]);
+    t.set("E7", "=INDEX(A1:C3,2,3)");
+    assert_eq!(t.num("E7"), 6.0);
 }
 
 #[test]
@@ -259,6 +310,32 @@ fn references_functions() {
     t.set("A2", "25");
     assert_eq!(t.num("B3"), 55.0);
     assert_eq!(t.num("B6"), 105.0);
+}
+
+#[test]
+fn relative_names() {
+    let mut t = T::new();
+    // As files store them: relative to A1. `Left` is the cell to the left, `Above3` the three
+    // cells above, `Mixed` column A of the same row.
+    for (name, formula) in [("Left", "Sheet1!XFD1"), ("Above3", "Sheet1!A1048574:A1048576"), ("Mixed", "Sheet1!$A1")] {
+        t.wb.names.push(gridcraft_model::DefinedName {
+            name: name.into(),
+            scope: None,
+            formula: formula.into(),
+            comment: String::new(),
+            hidden: false,
+        });
+    }
+    t.calc.rebuild(&t.wb);
+    for r in 1..=5 {
+        t.set(&format!("A{r}"), &(r * 10).to_string());
+    }
+    t.set("B2", "=Left");
+    assert_eq!(t.num("B2"), 20.0);
+    t.set("B4", "=Left+Mixed");
+    assert_eq!(t.num("B4"), 80.0);
+    t.set("A6", "=SUM(Above3)");
+    assert_eq!(t.num("A6"), 120.0);
 }
 
 #[test]

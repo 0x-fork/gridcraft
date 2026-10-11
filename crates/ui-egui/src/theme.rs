@@ -25,6 +25,8 @@ pub struct Tokens {
     pub pressed: Color32,
     pub separator: Color32,
     pub grid_bg: Color32,
+    /// Behind the pages in Page Layout view.
+    pub desk: Color32,
     pub gridline: Color32,
     pub header_bg: Color32,
     pub header_text: Color32,
@@ -43,6 +45,11 @@ pub struct Tokens {
     pub menu_bg: Color32,
     pub shadow: Color32,
     pub danger: Color32,
+    /// Info-bar (notice strip) fills, by severity.
+    pub notice_warn_bg: Color32,
+    pub notice_warn_border: Color32,
+    pub notice_info_bg: Color32,
+    pub notice_info_border: Color32,
 }
 
 impl Tokens {
@@ -62,6 +69,7 @@ impl Tokens {
             pressed: Color32::from_rgb(0xDD, 0xDD, 0xDD),
             separator: Color32::from_rgb(0xE0, 0xE0, 0xE0),
             grid_bg: Color32::WHITE,
+            desk: Color32::from_rgb(0xDE, 0xDE, 0xDE),
             gridline: Color32::from_rgb(0xE1, 0xE1, 0xE1),
             header_bg: Color32::from_rgb(0xF8, 0xF8, 0xF8),
             header_text: Color32::from_rgb(0x42, 0x42, 0x42),
@@ -80,6 +88,10 @@ impl Tokens {
             menu_bg: Color32::WHITE,
             shadow: Color32::from_black_alpha(40),
             danger: Color32::from_rgb(0xC4, 0x2B, 0x1C),
+            notice_warn_bg: Color32::from_rgb(0xFF, 0xF4, 0xCE),
+            notice_warn_border: Color32::from_rgb(0xF0, 0xC3, 0x6E),
+            notice_info_bg: Color32::from_rgb(0xEA, 0xF2, 0xFB),
+            notice_info_border: Color32::from_rgb(0xB9, 0xD2, 0xEC),
         }
     }
 
@@ -99,6 +111,7 @@ impl Tokens {
             pressed: Color32::from_rgb(0x4D, 0x4D, 0x4D),
             separator: Color32::from_rgb(0x48, 0x48, 0x48),
             grid_bg: Color32::WHITE,
+            desk: Color32::from_rgb(0x3A, 0x3A, 0x3A),
             gridline: Color32::from_rgb(0xE1, 0xE1, 0xE1),
             header_bg: Color32::from_rgb(0x30, 0x30, 0x30),
             header_text: Color32::from_rgb(0xCC, 0xCC, 0xCC),
@@ -117,6 +130,10 @@ impl Tokens {
             menu_bg: Color32::from_rgb(0x30, 0x30, 0x30),
             shadow: Color32::from_black_alpha(90),
             danger: Color32::from_rgb(0xF1, 0x70, 0x5F),
+            notice_warn_bg: Color32::from_rgb(0x4A, 0x3F, 0x1E),
+            notice_warn_border: Color32::from_rgb(0x7A, 0x67, 0x30),
+            notice_info_bg: Color32::from_rgb(0x24, 0x33, 0x44),
+            notice_info_border: Color32::from_rgb(0x3B, 0x55, 0x72),
         }
     }
 
@@ -142,7 +159,16 @@ pub fn ui_bold(size: f32) -> FontId {
 }
 
 /// The font family to use for a cell font name and weight.
+///
+/// When the name is an installed font whose faces were bound by [`font_definitions`], that family
+/// is used; otherwise the name is bucketed to one of the built-in roles (mono/serif/cell). egui
+/// panics on a family that was never bound, so the installed branch is gated on
+/// [`crate::fonts::is_bound`] and never names a family egui hasn't been given.
 pub fn cell_family(name: &str, bold: bool, italic: bool) -> FontFamily {
+    let role = crate::fonts::role_key(name, bold, italic);
+    if crate::fonts::is_bound(&role) {
+        return FontFamily::Name(role.into());
+    }
     let lower = name.to_ascii_lowercase();
     if lower.contains("courier") || lower.contains("mono") || lower.contains("consolas") {
         return FontFamily::Name(MONO.into());
@@ -240,6 +266,11 @@ fn candidates(role: &str) -> Vec<(String, u32)> {
                 add(format!("{d}/dejavu/DejaVuSans.ttf"), 0);
                 add(format!("{d}/liberation/LiberationSans-Regular.ttf"), 0);
             }
+            // Fedora keeps each family in its own package folder (#54).
+            add("/usr/share/fonts/abattis-cantarell-fonts/Cantarell-Regular.otf".into(), 0);
+            add("/usr/share/fonts/google-noto/NotoSans-Regular.ttf".into(), 0);
+            add("/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf".into(), 0);
+            add("/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf".into(), 0);
         }
         "ui-bold" => {
             add(format!("{mac_sys}/HelveticaNeue.ttc"), 1);
@@ -249,6 +280,9 @@ fn candidates(role: &str) -> Vec<(String, u32)> {
                 add(format!("{d}/dejavu/DejaVuSans-Bold.ttf"), 0);
                 add(format!("{d}/liberation/LiberationSans-Bold.ttf"), 0);
             }
+            add("/usr/share/fonts/google-noto/NotoSans-Bold.ttf".into(), 0);
+            add("/usr/share/fonts/dejavu-sans-fonts/DejaVuSans-Bold.ttf".into(), 0);
+            add("/usr/share/fonts/liberation-sans-fonts/LiberationSans-Bold.ttf".into(), 0);
         }
         "cell" | "cell-bold" | "cell-italic" | "cell-bold-italic" => {
             let (carlito, calibri_win, calibri_mac, arial_mac, arial_win, lib, dejavu) = match role {
@@ -345,9 +379,17 @@ impl HanOrder {
 
 /// Builds the font set with the Han fallback faces ordered for the interface language.
 pub fn font_definitions_for_language(language: crate::i18n::Language) -> FontDefinitions {
+    font_definitions_with(language, &[])
+}
+
+/// [`font_definitions_for_language`] that also binds the workbook fonts in `used` that are
+/// installed, so cells set in them render with them; the rest fall back to the roles. The bound
+/// families are recorded in [`crate::fonts`] so [`cell_family`] only names a family egui has.
+pub fn font_definitions_with(language: crate::i18n::Language, used: &[String]) -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     let base_prop: Vec<String> = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     let base_mono: Vec<String> = fonts.families.get(&FontFamily::Monospace).cloned().unwrap_or_default();
+    let mut bound: Vec<String> = Vec::new();
     // The non-Latin fallback faces have to sit at the end of each chain: a Latin font owns Latin,
     // and epaint picks the first face that has the glyph, so they only catch their own scripts.
     let fallback = load_fallback(&mut fonts, HanOrder::of(language));
@@ -368,12 +410,20 @@ pub fn font_definitions_for_language(language: crate::i18n::Language) -> FontDef
         chain.extend(fallback.iter().cloned());
         chain.retain(|k| fonts.font_data.contains_key(k));
         fonts.families.insert(FontFamily::Name(role.into()), chain);
+        bound.push(role.to_string());
+    }
+    // Installed workbook fonts, so a cell's chosen font actually renders in it.
+    for family in crate::fonts::installed_among(used) {
+        bound.extend(crate::fonts::bind_family(&mut fonts, &family));
     }
     // Default proportional text in widgets uses the UI font.
     if let Some(ui) = fonts.families.get(&FontFamily::Name(UI.into())).cloned() {
         fonts.families.insert(FontFamily::Proportional, ui);
     }
     drop_unparseable_fonts(&mut fonts);
+    // Only families egui still has data for count as bound (a dropped face can empty a chain).
+    bound.retain(|f| fonts.families.get(&FontFamily::Name(f.as_str().into())).is_some_and(|c| !c.is_empty()));
+    crate::fonts::set_bound(bound);
     fonts
 }
 
@@ -422,7 +472,15 @@ fn fallback_faces(han: HanOrder) -> Vec<(&'static str, Vec<(String, u32)>)> {
         HanOrder::Japanese => (ja, zh),
         HanOrder::Chinese => (zh, ja),
     };
-    vec![first, second, ("sys-cjk-hangul", cjk_hangul()), ("sys-thai", thai()), ("sys-hebrew", hebrew())]
+    vec![
+        first,
+        second,
+        ("sys-cjk-hangul", cjk_hangul()),
+        ("sys-thai", thai()),
+        ("sys-hebrew", hebrew()),
+        ("sys-symbols", symbols()),
+        ("sys-symbols-2", symbols_more()),
+    ]
 }
 
 /// Linux directories that hold CJK fonts across distributions: Debian/Ubuntu (`opentype/noto`,
@@ -547,6 +605,59 @@ fn hebrew() -> Vec<(String, u32)> {
     v
 }
 
+/// Symbol faces behind the UI font. Interface fonts such as Noto Sans and Cantarell (and egui's
+/// built-in Ubuntu) lack arrows, check marks, geometric shapes and keyboard symbols (▾ ✓ ✕ ▲ ↳ ⇧),
+/// which then render as empty boxes (#197, #54). DejaVu Sans covers most of them; the paths cover
+/// Debian/Ubuntu, Fedora and Arch layouts. [`load_fallback`] skips the file if Hebrew already
+/// loaded it.
+#[cfg(not(target_arch = "wasm32"))]
+fn symbols() -> Vec<(String, u32)> {
+    let win = std::env::var("WINDIR").map(|w| format!("{w}\\Fonts")).unwrap_or_else(|_| "C:\\Windows\\Fonts".into());
+    let mut v: Vec<(String, u32)> = vec![(format!("{win}\\seguisym.ttf"), 0), ("/System/Library/Fonts/Apple Symbols.ttf".into(), 0)];
+    for d in [
+        "/usr/share/fonts/truetype/dejavu",
+        "/usr/share/fonts/dejavu-sans-fonts",
+        "/usr/share/fonts/TTF",
+        "/usr/share/fonts/dejavu",
+        "/usr/share/fonts/truetype/ttf-dejavu",
+        "/usr/local/share/fonts/dejavu",
+        "/usr/local/share/fonts",
+    ] {
+        v.push((format!("{d}/DejaVuSans.ttf"), 0));
+    }
+    v
+}
+
+/// A second symbol face for what the first lacks (⌘ and other technical symbols): Noto Sans
+/// Symbols 2 where it is installed, or Segoe UI Symbol behind Segoe UI.
+#[cfg(not(target_arch = "wasm32"))]
+fn symbols_more() -> Vec<(String, u32)> {
+    let mut v: Vec<(String, u32)> = Vec::new();
+    for d in [
+        "/usr/share/fonts/noto",
+        "/usr/share/fonts/truetype/noto",
+        "/usr/share/fonts/opentype/noto",
+        "/usr/share/fonts/google-noto-sans-symbols-2-fonts",
+        "/usr/share/fonts/google-noto",
+        "/usr/local/share/fonts/noto",
+    ] {
+        v.push((format!("{d}/NotoSansSymbols2-Regular.ttf"), 0));
+    }
+    v
+}
+
+/// Whether any symbol fallback face is installed (tests skip their glyph checks without one).
+pub fn symbol_face_installed() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        symbols().iter().chain(symbols_more().iter()).any(|(p, _)| std::path::Path::new(p).exists())
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
+    }
+}
+
 pub fn apply(ctx: &egui::Context, dark: bool) {
     // Install both palettes before System can switch between the style slots.
     for theme in [egui::Theme::Light, egui::Theme::Dark] {
@@ -589,6 +700,54 @@ pub fn color32(rgb: [u8; 3]) -> Color32 {
     Color32::from_rgb(rgb[0], rgb[1], rgb[2])
 }
 
+#[cfg(test)]
+mod font_binding_tests {
+    use super::*;
+
+    /// The families [`font_definitions`] always binds, whatever is installed.
+    fn always_bound() -> Vec<String> {
+        [UI, UI_BOLD, CELL, CELL_BOLD, CELL_ITALIC, CELL_BOLD_ITALIC, SERIF, MONO].iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_name_that_is_not_an_installed_font_gets_a_built_in_role() {
+        let _g = crate::fonts::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // Nothing installed: every name buckets to a role that font_definitions bound.
+        crate::fonts::set_bound(always_bound());
+        for name in ["", "Calibri", "Courier New", "Times New Roman", "Grossly Missing Font", "\u{1F600}"] {
+            for (b, i) in [(false, false), (true, false), (false, true), (true, true)] {
+                let FontFamily::Name(fam) = cell_family(name, b, i) else { panic!("{name:?} should name a family") };
+                assert!(crate::fonts::is_bound(&fam), "{name:?} {b} {i} → unbound {fam:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_bound_installed_font_is_used_by_name() {
+        let _g = crate::fonts::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let role = crate::fonts::role_key("Ubuntu", true, false);
+        crate::fonts::set_bound(always_bound().into_iter().chain([role.clone()]));
+        assert!(matches!(cell_family("Ubuntu", true, false), FontFamily::Name(f) if *f == *role));
+        // The same family in a style that wasn't bound falls back to a built-in role that is.
+        let FontFamily::Name(fallback) = cell_family("Ubuntu", false, true) else { panic!("should name a family") };
+        assert!(crate::fonts::is_bound(&fallback), "the fallback is a bound role");
+        crate::fonts::set_bound(always_bound());
+    }
+
+    #[test]
+    fn arbitrary_names_never_yield_an_unbound_family() {
+        let _g = crate::fonts::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // A workbook can hold any font name; none may name a family egui has no data for.
+        crate::fonts::set_bound(always_bound());
+        for seed in 0..500u32 {
+            let name: String =
+                (0..(seed % 40)).map(|k| char::from_u32(0x20 + (seed.wrapping_mul(31).wrapping_add(k) % 0x5F)).unwrap_or('x')).collect();
+            let FontFamily::Name(fam) = cell_family(&name, seed % 2 == 0, seed % 3 == 0) else { continue };
+            assert!(crate::fonts::is_bound(&fam), "{name:?} → unbound {fam:?}");
+        }
+    }
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
@@ -618,8 +777,14 @@ mod tests {
     #[test]
     fn language_reorders_only_the_han_faces() {
         let keys = |han| fallback_faces(han).into_iter().map(|(k, _)| k).collect::<Vec<_>>();
-        assert_eq!(keys(HanOrder::Japanese), ["sys-cjk-han-ja", "sys-cjk-han-zh", "sys-cjk-hangul", "sys-thai", "sys-hebrew"]);
-        assert_eq!(keys(HanOrder::Chinese), ["sys-cjk-han-zh", "sys-cjk-han-ja", "sys-cjk-hangul", "sys-thai", "sys-hebrew"]);
+        assert_eq!(
+            keys(HanOrder::Japanese),
+            ["sys-cjk-han-ja", "sys-cjk-han-zh", "sys-cjk-hangul", "sys-thai", "sys-hebrew", "sys-symbols", "sys-symbols-2"]
+        );
+        assert_eq!(
+            keys(HanOrder::Chinese),
+            ["sys-cjk-han-zh", "sys-cjk-han-ja", "sys-cjk-hangul", "sys-thai", "sys-hebrew", "sys-symbols", "sys-symbols-2"]
+        );
         assert_eq!(HanOrder::of(Language::Ja), HanOrder::Japanese);
         for l in [Language::En, Language::Zh, Language::Ko, Language::Ru, Language::PtBr, Language::De, Language::Cs] {
             assert_eq!(HanOrder::of(l), HanOrder::Chinese, "{l:?} shares the default order (no font rebuild)");

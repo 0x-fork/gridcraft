@@ -192,7 +192,7 @@ pub(crate) fn input_to_cell(input: &str, sheet: usize, at: CellRef, wb: &mut gri
 
 fn cell_set(s: &mut Session, p: &Json) -> Result<Json> {
     let sheet = target_sheet(s, p)?;
-    let at = match cell_param(p, "cell") {
+    let at = match cell_param_on(s, p, "cell", sheet)? {
         Some(c) => c,
         None => s.doc()?.selection.active,
     };
@@ -346,8 +346,9 @@ fn selection_set(s: &mut Session, p: &Json) -> Result<Json> {
         s.doc_mut()?.wb_switch_sheet(i);
     }
     let ranges = target_ranges(s, p)?;
+    let active = cell_param(s, p, "active")?;
     let d = s.doc_mut()?;
-    let active = cell_param(p, "active").or_else(|| ranges.last().map(|r| r.start)).unwrap_or_default();
+    let active = active.or_else(|| ranges.last().map(|r| r.start)).unwrap_or_default();
     let mut sel = crate::Selection { active, anchor: ranges.last().map(|r| r.start).unwrap_or(active), ranges };
     if let Some(sh) = d.wb.active() {
         sel.expand_merges(sh);
@@ -616,6 +617,8 @@ fn copy_impl(s: &mut Session, p: &Json, cut: bool) -> Result<Json> {
     if ranges.len() > 1 && cut {
         return Err(multiple());
     }
+    // The selection as made (untrimmed), for Insert Copied Cells.
+    let selected = ranges.first().copied().unwrap_or_default();
     let d = s.doc()?;
     let Some(sh) = d.wb.sheet(sheet) else { return Err(EngineError::NoDocument) };
     let trim = |range: RangeRef| {
@@ -637,7 +640,7 @@ fn copy_impl(s: &mut Session, p: &Json, cut: bool) -> Result<Json> {
     // The HTML rendering is for the host clipboard (UI); it can reach 4 MB, so agents and
     // scripts get it only when they ask for it.
     let html = if p.get("html").and_then(Json::as_bool) == Some(true) { crate::io::range_html(&wb, sheet, range, &text) } else { None };
-    let clip = Clipboard { wb, sheet, range, cut, doc_uid: d.uid, text: text.clone(), areas };
+    let clip = Clipboard { wb, sheet, range, cut, doc_uid: d.uid, text: text.clone(), areas, selected };
     s.clipboard = Some(clip);
     let mut result = json!({"range": range.a1(), "text": text});
     if let Some(html) = html {
@@ -764,7 +767,7 @@ fn paste(s: &mut Session, p: &Json) -> Result<Json> {
 
 fn paste_text(s: &mut Session, p: &Json, text: &str) -> Result<Json> {
     let sheet = target_sheet(s, p)?;
-    let at = cell_param(p, "at").unwrap_or(s.doc()?.selection.current().start);
+    let at = cell_param_on(s, p, "at", sheet)?.unwrap_or(s.doc()?.selection.current().start);
     let rows: Vec<Vec<String>> = parse_tsv(text);
     // The HTML flavour, when the host passed it: the number behind each cell's shown text.
     let html = str_param(p, "html").map(crate::clip_html::table_cells).unwrap_or_default();
@@ -892,14 +895,14 @@ fn paste_special(s: &mut Session, p: &Json) -> Result<Json> {
     }
     let dest_sheet = target_sheet(s, p)?;
     let sel = s.doc()?.selection.current();
-    let at = cell_param(p, "at").unwrap_or(sel.start);
+    let at = cell_param_on(s, p, "at", dest_sheet)?.unwrap_or(sel.start);
     let src = clip.range;
     let (h, w) = if transpose { (src.width(), src.height()) } else { (src.height(), src.width()) };
     // Tile the copy over a larger destination that is a multiple of its size.
     let tile = sel.height() % h == 0
         && sel.width() % w == 0
         && !sel.is_single()
-        && cell_param(p, "at").is_none()
+        && cell_param_on(s, p, "at", dest_sheet)?.is_none()
         && !sel.is_full_cols()
         && !sel.is_full_rows()
         && sel.count() <= 4_000_000;

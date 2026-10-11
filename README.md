@@ -84,6 +84,7 @@
 - **Compatible.** XLSX is the native format: styles, themes, formulas (including dynamic arrays),
   tables, conditional formats, validation, comments, hyperlinks, charts, pictures, sparklines,
   PivotTables and print settings round-trip. CSV and TSV too.
+  Excel 97-2003 `.xls` workbooks open with their values, formulas and number formats (formatting and objects not yet).
   [XLSB worksheet data can be imported](docs/xlsb-import.md), using saved values instead of formulas.
   [ODS worksheet data can be imported](docs/ods-import.md), using saved values instead of formulas.
   [Static pictures can live inside cells](docs/cell-pictures.md), fitting their size and moving with the data.
@@ -240,6 +241,11 @@ frame on the processor. In that case GridCraft uses OpenGL instead, without sett
 the first renderer fails to start, it tries the other one once. The log file records the choice
 (lines starting with `graphics:`). `WGPU_BACKEND` still overrides it (and then nothing else is
 tried), e.g. `$env:WGPU_BACKEND = "gl"` or `"dx12"`.
+
+DirectX 12 shaders are compiled with FXC, which is part of Windows, so no `dxcompiler.dll` or
+`dxil.dll` is needed, and a copy another program put on `PATH` can no longer stop the app at start
+("Parent device is lost", #339). `$env:WGPU_DX12_COMPILER = "dxc"` (or `"auto"`) selects wgpu's DXC
+handling again for troubleshooting.
 
 ### macOS
 
