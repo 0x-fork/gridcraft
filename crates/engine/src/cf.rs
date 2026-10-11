@@ -90,10 +90,7 @@ fn lerp(a: [u8; 3], b: [u8; 3], t: f64) -> [u8; 3] {
     ]
 }
 
-/// Number of icons in a set name like `3TrafficLights1`, `5Quarters`.
-pub fn icon_count(set: &str) -> usize {
-    set.chars().next().and_then(|c| c.to_digit(10)).unwrap_or(3) as usize
-}
+pub use gridcraft_model::icon_count;
 
 impl CfCache {
     pub fn new() -> Self {
@@ -261,11 +258,18 @@ impl CfCache {
                 CfRule::IconSet { set, thresholds, reverse, show_value } => {
                     if let Some(n) = v.as_f64() {
                         let k = icon_count(set);
-                        let cuts: Vec<f64> = if thresholds.len() + 1 == k {
-                            thresholds.iter().map(|t| threshold(wb, sheet, c, &st, t)).collect()
-                        } else {
-                            (1..k).map(|i| percentile(&st.sorted, i as f64 * 100.0 / k as f64)).collect()
+                        // One threshold per icon, the first being the lower bound (as in the file);
+                        // also accept the lower bound left out, else Excel's defaults.
+                        let defaults;
+                        let lower = match thresholds.len() {
+                            n if n == k => thresholds.get(1..).unwrap_or_default(),
+                            n if n + 1 == k => thresholds.as_slice(),
+                            _ => {
+                                defaults = default_icon_thresholds(set);
+                                defaults.get(1..).unwrap_or_default()
+                            }
                         };
+                        let cuts: Vec<f64> = lower.iter().map(|t| threshold(wb, sheet, c, &st, t)).collect();
                         let mut idx = cuts.iter().filter(|cut| n >= **cut).count();
                         if *reverse {
                             idx = k - 1 - idx.min(k - 1);

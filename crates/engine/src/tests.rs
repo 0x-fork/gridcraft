@@ -607,6 +607,27 @@ fn hidden_formulas_stay_hidden_on_protected_sheets() {
 }
 
 #[test]
+fn case_sensitive_sort_puts_lowercase_first() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["b"], ["B"], ["Ab"], ["a"], ["aB"], ["A"]]})).unwrap();
+    s.execute("data.sort", json!({"range": "A1:A6", "header": false, "matchCase": true, "keys": [{"column": "A"}]})).unwrap();
+    let col: Vec<Value> = (1..=6).map(|r| v(&s, &format!("A{r}"))).collect();
+    assert_eq!(col, ["a", "A", "aB", "Ab", "b", "B"].map(Value::from));
+}
+
+#[test]
+fn remove_duplicates_compares_shown_text() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Date", "Price"], ["2006-03-08", 1.01], ["2006-03-08", 1.02]]})).unwrap();
+    s.execute("home.numberFormat", json!({"range": "A3", "code": "mmm d, yyyy"})).unwrap();
+    s.execute("home.numberFormat", json!({"range": "B2:B3", "code": "0.0"})).unwrap();
+    let r = s.execute("data.removeDuplicates", json!({"range": "A1:A3", "header": true})).unwrap();
+    assert_eq!(r["removed"], 0);
+    let r = s.execute("data.removeDuplicates", json!({"range": "B1:B3", "header": true})).unwrap();
+    assert_eq!(r["removed"], 1);
+}
+
+#[test]
 fn formatting_and_styles() {
     let mut s = s();
     s.execute("selection.set", json!({"range": "A1:B2"})).unwrap();
@@ -1632,4 +1653,33 @@ fn notes_comments_and_links_survive_a_json_save() {
     assert_eq!(after.comments, before.comments);
     assert_eq!(after.hyperlinks, before.hyperlinks);
     assert_eq!(after.cells, before.cells);
+}
+
+/// Icon-set thresholds as read from a file (one per icon, the first the lower bound) decide the
+/// icon; a rule without thresholds uses Excel's defaults (percent 33 and 67) (#235).
+#[test]
+fn icon_set_thresholds_from_files_pick_the_icon() {
+    use gridcraft_model::{CfRule, CfValueKind, CondFormat};
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [[0], [10], [20], [30], [100]]})).unwrap();
+    s.execute("home.conditionalFormat", json!({"range": "A1:A5", "rule": {"type": "iconSet", "set": "3Arrows"}})).unwrap();
+    let icon = |s: &Session, a: &str| {
+        let wb = &s.doc().unwrap().wb;
+        crate::cf::CfCache::new().look(wb, 0, CellRef::parse(a).unwrap()).and_then(|l| l.icon).map(|(_, i)| i)
+    };
+    // Defaults: percent of the 0..100 span, so 30 is still the lowest icon.
+    assert_eq!([icon(&s, "A1"), icon(&s, "A4"), icon(&s, "A5")], [Some(0), Some(0), Some(2)]);
+    let sh = std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb).sheet_mut(0).unwrap();
+    sh.cond_formats = vec![CondFormat {
+        ranges: vec![gridcraft_core::RangeRef::parse("A1:A5").unwrap()],
+        rule: CfRule::IconSet {
+            set: "3Arrows".into(),
+            thresholds: vec![CfValueKind::Percent(0.0), CfValueKind::Number(10.0), CfValueKind::Number(25.0)],
+            reverse: false,
+            show_value: true,
+        },
+        priority: 1,
+        stop_if_true: false,
+    }];
+    assert_eq!([icon(&s, "A1"), icon(&s, "A2"), icon(&s, "A3"), icon(&s, "A4")], [Some(0), Some(1), Some(1), Some(2)]);
 }

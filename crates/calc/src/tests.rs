@@ -220,6 +220,25 @@ fn ifs_and_lazy() {
 }
 
 #[test]
+fn choose_with_an_array_index() {
+    let mut t = T::new();
+    for (i, (k, v)) in [(1, 10), (2, 20), (3, 30)].iter().enumerate() {
+        t.set(&format!("A{}", i + 1), &k.to_string());
+        t.set(&format!("B{}", i + 1), &v.to_string());
+    }
+    t.set("D1", "=CHOOSE({1,2},\"a\",\"b\")");
+    assert_eq!(t.get("D1"), Value::from("a"));
+    assert_eq!(t.get("E1"), Value::from("b"));
+    // The usual "look left" idiom: a two-column array from two ranges.
+    t.set("D3", "=VLOOKUP(20,CHOOSE({1,2},B1:B3,A1:A3),2,FALSE)");
+    assert_eq!(t.num("D3"), 2.0);
+    t.set("D4", "=SUM(CHOOSE({1,2},A1:A3,B1:B3))");
+    assert_eq!(t.num("D4"), 66.0);
+    t.set("D5", "=CHOOSE(2,A1:A3,B1:B3)");
+    assert_eq!(t.num("D7"), 30.0);
+}
+
+#[test]
 fn references_functions() {
     let mut t = T::new();
     for (i, v) in [10, 20, 30, 40].iter().enumerate() {

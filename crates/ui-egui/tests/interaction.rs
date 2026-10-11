@@ -126,6 +126,26 @@ fn space_toggles_the_active_checkbox_without_clicking_the_hovered_cell() {
 }
 
 #[test]
+fn name_box_enter_goes_to_the_typed_cell_not_the_one_below() {
+    // #247: typing A1 in the Name Box and pressing Enter selected A2; the grid replayed the Enter.
+    let mut h = harness(blank());
+    h.state_mut().session.run("selection.set", json!({"cell": "C5"})).unwrap();
+    h.run_steps(2);
+    h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("gridcraft.name_box")));
+    h.run_steps(2);
+    h.input_mut().events.push(Event::Key { key: Key::A, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND });
+    h.input_mut().events.push(Event::Text("A1".into()));
+    h.run_steps(2);
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    h.run_steps(2);
+    assert_eq!(h.state().session.active().unwrap().selection.active, CellRef::new(0, 0));
+    assert!(h.state().name_box.is_none());
+    // The grid has the focus back: a plain Enter there still moves down.
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    assert_eq!(h.state().session.active().unwrap().selection.active, CellRef::new(1, 0));
+}
+
+#[test]
 fn typing_enters_values_and_moves_down() {
     let mut h = harness(blank());
     text(&mut h, "42");

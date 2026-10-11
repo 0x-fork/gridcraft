@@ -236,6 +236,13 @@ impl Parser {
                 {
                     return Ok(Expr::Unary(UnOp::Spill, Box::new(r)));
                 }
+                // Files write `@x` as `_xlfn.SINGLE(x)`.
+                if name == "SINGLE"
+                    && args.len() == 1
+                    && let Some(x) = args.pop()
+                {
+                    return Ok(Expr::Unary(UnOp::At, Box::new(x)));
+                }
                 Ok(Expr::Call(name, args))
             }
             Tok::Sheet(a, b) => {

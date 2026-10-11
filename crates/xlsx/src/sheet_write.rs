@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use gridcraft_core::{CellError, CellRef, RangeRef, Value};
 use gridcraft_model::{
     AutoFilter, Cell, CfOperator, CfRule, CfValueKind, Color, CondFormat, ErrorStyle, FilterCriterion, LineInfo, Orientation, Sheet, SparklineKind,
-    Style, Table, TotalsFn, Validation, ValidationKind, Workbook,
+    Style, Table, TotalsFn, Validation, ValidationKind, Workbook, default_icon_thresholds, icon_count,
 };
 
 use crate::drawing::{Obj, image_content_type, image_ext};
@@ -778,7 +778,15 @@ fn cf_rule_xml(cf: &CondFormat, priority: u32, out: &mut Out) -> String {
                 b.push_str(" showValue=\"0\"");
             }
             b.push('>');
-            for t in thresholds {
+            // CT_IconSet needs one cfvo per icon (minOccurs 2); the first is the lower bound.
+            let k = icon_count(set);
+            let defaults = default_icon_thresholds(set);
+            let cfvos: Vec<&CfValueKind> = match thresholds.len() {
+                n if n == k => thresholds.iter().collect(),
+                n if n + 1 == k => defaults.iter().take(1).chain(thresholds).collect(),
+                _ => defaults.iter().collect(),
+            };
+            for t in cfvos {
                 b.push_str(&cfvo_xml(t));
             }
             b.push_str("</iconSet>");
