@@ -51,6 +51,16 @@ impl eframe::App for App {
     }
     fn on_exit(&mut self) {
         save_prefs(&self.0);
+        // macOS (#117): end the process here, before eframe tears the window down. AccessKit's
+        // macOS adapter subclasses the window's content view and restores its class on teardown;
+        // AppKit's Touch Bar support observes that view (KVO), so in the next display cycle
+        // `-[_NSTouchBarFinderObservation invalidate]` throws "not registered" and the quit ends
+        // in a crash report. eframe calls `on_exit` on every way of quitting (Quit/⌘Q, the Dock,
+        // the close button, `app.quit`), and nothing after it is needed: the preferences are
+        // saved and the log file is unbuffered. eframe does the same when it doesn't
+        // run-and-return. `on_exit` only runs once the app exists, never on a failed start.
+        #[cfg(target_os = "macos")]
+        std::process::exit(0);
     }
 }
 
