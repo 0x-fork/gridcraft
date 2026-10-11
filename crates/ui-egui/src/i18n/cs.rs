@@ -184,6 +184,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Gridlines" => "Mřížka",
         "Headings" => "Záhlaví",
         "Zoom" => "Lupa",
+        "Interface size" => "Velikost rozhraní",
+        "Auto" => "Automaticky",
         "100%" => "100 %",
         "Zoom to\nSelection" => "Přiblížit\nna výběr",
         "Freeze\nPanes" => "Ukotvit\npříčky",
