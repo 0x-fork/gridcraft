@@ -177,6 +177,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Threaded Comments" => "스레드 댓글",
         "Show\nComments" => "댓글\n표시",
         "Protect\nWorkbook" => "통합 문서\n보호",
+        "Allow Edit\nRanges" => "범위 편집\n허용",
+        "Allow Edit Ranges" => "범위 편집 허용",
         "Unprotect\nSheet" => "시트 보호\n해제",
         "Protect Sheet…" => "시트 보호…",
         "Comments" => "댓글",

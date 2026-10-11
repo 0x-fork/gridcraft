@@ -565,6 +565,24 @@ pub struct SheetProtection {
     pub autofilter: bool,
 }
 
+/// Review › Allow Edit Ranges: cells that stay editable on a protected sheet, with or without a
+/// password (XLSX `<protectedRange>`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EditRange {
+    pub title: String,
+    pub ranges: Vec<RangeRef>,
+    pub password: Option<crate::PasswordHash>,
+    /// Windows permissions (`securityDescriptor`), kept as read from the file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_descriptor: Option<String>,
+}
+
+impl EditRange {
+    pub fn contains(&self, c: CellRef) -> bool {
+        self.ranges.iter().any(|r| r.contains(c))
+    }
+}
+
 /// Simple non-cryptographic password hash for sheet protection (like Excel's, protection is a
 /// convenience, not security).
 pub fn password_hash(pw: &str) -> u64 {

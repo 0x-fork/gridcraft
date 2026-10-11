@@ -782,7 +782,7 @@ fn insert_picture(s: &mut Session, p: &Json) -> Result<Json> {
         };
         let at = sh.merge_at(at).map(|r| r.start).unwrap_or(at);
         let style = sh.style_id(at);
-        if sh.is_protected() && d.wb.styles.get(style).protection.locked {
+        if sh.is_protected() && d.wb.styles.get(style).protection.locked && locked_cell_error(sh, at, &d.unlocked_ranges).is_some() {
             return Err(EngineError::Other("The cell you're trying to change is on a protected sheet.".into()));
         }
         let picture = CellPicture { data, mime: mime.into(), alt: str_param(p, "alt").unwrap_or("").into() };

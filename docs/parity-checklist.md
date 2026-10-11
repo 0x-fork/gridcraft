@@ -276,7 +276,7 @@ Missing:
 - `data.solver` Solver (Analysis)
 - `data.analysisToolPak` Data Analysis (Analysis)
 
-## Review (9 / 18, 50%)
+## Review (10 / 18, 56%)
 
 Implemented:
 
@@ -289,6 +289,7 @@ Implemented:
 - `review.showNote` Show/Hide Note (Notes)
 - `review.unprotectSheet` Unprotect Sheet (Protect)
 - `review.protectWorkbook` Protect Workbook (Protect)
+- `review.allowEditRanges` Allow Edit Ranges (Protect)
 
 Missing:
 
@@ -299,7 +300,6 @@ Missing:
 - `review.showComments` Show Comments (Comments)
 - `review.showAllNotes` Show All Notes (Notes)
 - `review.convertToComments` Convert to Comments (Notes)
-- `review.allowEditRanges` Allow Edit Ranges (Protect)
 - `review.showChanges` Show Changes (Changes)
 
 ## View (20 / 20, 100%)

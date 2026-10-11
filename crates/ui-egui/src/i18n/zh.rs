@@ -177,6 +177,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Threaded Comments" => "线程式批注",
         "Show\nComments" => "显示\n批注",
         "Protect\nWorkbook" => "保护\n工作簿",
+        "Allow Edit\nRanges" => "允许编辑\n区域",
+        "Allow Edit Ranges" => "允许编辑区域",
         "Unprotect\nSheet" => "撤销\n工作表保护",
         "Protect Sheet…" => "保护工作表…",
         "Comments" => "批注",

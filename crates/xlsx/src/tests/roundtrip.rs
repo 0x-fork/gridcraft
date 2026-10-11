@@ -187,6 +187,21 @@ fn sample() -> Workbook {
         allow_blank: false,
         ..Default::default()
     });
+    s.edit_ranges = vec![
+        EditRange { title: "Open & <free>".into(), ranges: vec![rr("A1:B2"), rr("D4")], password: None, security_descriptor: None },
+        EditRange {
+            title: "Old".into(),
+            ranges: vec![rr("C1:C9")],
+            password: Some(PasswordHash::Legacy(0x83AF)),
+            security_descriptor: Some("O:WDG:WDD:(A;;CC;;;WD)".into()),
+        },
+        EditRange {
+            title: "New".into(),
+            ranges: vec![rr("E1")],
+            password: Some(PasswordHash::new_sha512("pw", b"0123456789abcdef")),
+            security_descriptor: None,
+        },
+    ];
     s.hyperlinks.insert(at("A2"), Hyperlink { target: "https://example.com/?a=1&b=2".into(), tooltip: Some("go".into()) });
     s.hyperlinks.insert(at("A3"), Hyperlink { target: "'Data & Stuff'!B2".into(), tooltip: None });
     s.hyperlinks.insert(at("A4"), Hyperlink { target: "mailto:me@example.com".into(), tooltip: None });
@@ -435,6 +450,7 @@ fn full_roundtrip() {
     assert_eq!(b.comments, a.comments);
     assert_eq!(b.autofilter, a.autofilter);
     assert_eq!(b.protection, a.protection);
+    assert_eq!(b.edit_ranges, a.edit_ranges);
     assert_eq!(b.print, a.print);
     let mut sp = a.sparklines.clone();
     sp[0].source = "'Data & Stuff'!B2:B3".into();

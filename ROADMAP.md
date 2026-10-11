@@ -145,6 +145,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 | 2026-10-11 | Freeze panes by dragging the freeze handles on the header edges (#195) |
 | 2026-10-11 | XLSX: threaded comments (replies, resolved, timestamps) and note visibility survive a save (#300) |
 | 2026-10-11 | Cell checkboxes: Insert › Checkbox on the ribbon, Excel's Delete and value rules, XLSX round trip as Excel cell controls (#196) |
+| 2026-10-11 | Review › Allow Edit Ranges with Excel-compatible password hashes, kept in XLSX (#307) |
 | 2026-10-10 | Ribbon translated into Japanese, Chinese, Korean, Brazilian Portuguese and Russian with system-language default (#31, #104, #82); CJK/Thai/Hebrew font fallback (#38); clear messages for encrypted and `.xls` files (#17); smooth line charts (#62). Progress docs restructured to the craftrules standard; full re-measure (this page). Initial ribbon key tips (#43), in-place text box editing (#84), copy as HTML table (#36). ODS and XLSB data import (#100, #101); recalc linear in the number of range formulas (#66); RISC-V Linux build; Flatpak repository on Pages; web cell-commit trap fixed |
 | 2026-10-09 | Community fixes: spill range operator `A1#`, sheet-scoped names, protection refuses locked-cell edits, Insert/Delete Cells adjust references, `DATE(1900,2,29)`, SUMIF sizing, `ROUND` at 15 digits, `_xlpm.` LAMBDA parameters in XLSX, vertical scrollbar, system appearance, border previews; v0.4.0 |
 | 2026-10-08 | v0.2.0 and v0.3.0 releases; Flatpak, AppImage zsync, branded DMG; desktop log file; DirectX 12 default on Windows |
@@ -163,6 +164,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 | 2026-10-11 | minor | Selected objects can be deleted from the keyboard (#213) |
 | 2026-10-11 | minor | Catalog 258 → 260 / 290: View › Formula Bar and Zoom 100% (#289) |
 | 2026-10-11 | minor | Progress log: XLSX threaded comments round trip (#300) |
+| 2026-10-11 | minor | Catalog 258 → 259 / 290: Allow Edit Ranges (#307) |
 | 2026-10-10 | minor | Readiness-by-audience table with hours to ~95% per audience; full number unchanged (additive weighted sum) |
 | 2026-10-10 | minor | Added Mainstream practitioner (~50%) and Essentials user (~63%); languages updated for the 10-10 merges (ribbon in ja, zh, ko, pt-BR, ru); localization 5%→10%; full number re-checked (51.6, unchanged) |
 | 2026-10-10 | minor | Checked against the alpha gate (six core workflows pass): stays alpha |

@@ -199,10 +199,13 @@ fn cell_set(s: &mut Session, p: &Json) -> Result<Json> {
     let input =
         str_param(p, "input").or_else(|| str_param(p, "value")).map(str::to_string).or_else(|| p.get("value").map(json_to_input)).unwrap_or_default();
     let array = bool_param(p, "array").unwrap_or(false);
-    let protected =
-        s.doc()?.wb.sheet(sheet).is_some_and(|sh| sh.is_protected() && s.doc().is_ok_and(|d| d.wb.styles.get(sh.style_id(at)).protection.locked));
-    if protected {
-        return Err(EngineError::Other("The cell or chart you're trying to change is on a protected sheet.".into()));
+    let d = s.doc()?;
+    if let Some(sh) = d.wb.sheet(sheet)
+        && sh.is_protected()
+        && d.wb.styles.get(sh.style_id(at)).protection.locked
+        && let Some(m) = locked_cell_error(sh, at, &d.unlocked_ranges)
+    {
+        return Err(EngineError::Other(m));
     }
     edit(s, |cx| {
         if array {

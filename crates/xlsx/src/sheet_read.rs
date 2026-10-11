@@ -7,8 +7,8 @@ use gridcraft_core::date::{serial_from_ymd, time_fraction};
 use gridcraft_core::{CellError, CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
 use gridcraft_formula::Expr;
 use gridcraft_model::{
-    AutoFilter, Cell, CfOperator, CfRule, CfValueKind, Comment, CondFormat, ErrorStyle, FilterCriterion, Formula, Hyperlink, LineInfo, Orientation,
-    Sheet, SheetProtection, Sparkline, SparklineKind, Table, TableColumn, TotalsFn, Validation, ValidationKind,
+    AutoFilter, Cell, CfOperator, CfRule, CfValueKind, Comment, CondFormat, EditRange, ErrorStyle, FilterCriterion, Formula, Hyperlink, LineInfo,
+    Orientation, PasswordHash, Sheet, SheetProtection, Sparkline, SparklineKind, Table, TableColumn, TotalsFn, Validation, ValidationKind,
 };
 
 use crate::IoError;
@@ -183,6 +183,7 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
                 }
             }
             "extLst" => read_ext(cx, e, &mut sheet),
+            "protectedRanges" => read_protected_ranges(e, &mut sheet),
             "oleObjects" | "controls" => cx.warn(format!("sheet \"{name}\": embedded objects and form controls are not supported")),
             _ => {}
         }
@@ -208,6 +209,33 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
         }
     }
     Ok(sheet)
+}
+
+/// Allow Edit Ranges. A range whose password can't be read keeps a hash that never matches
+/// (or an unsupported algorithm), so it stays locked rather than open.
+fn read_protected_ranges(e: &El, sheet: &mut Sheet) {
+    for p in e.kids("protectedRange") {
+        let ranges: Vec<RangeRef> = p.attr("sqref").unwrap_or("").split_whitespace().filter_map(RangeRef::parse).collect();
+        if ranges.is_empty() {
+            continue;
+        }
+        let password = if p.attr("algorithmName").is_some() || p.attr("hashValue").is_some() {
+            Some(PasswordHash::Iterated {
+                algorithm: p.attr("algorithmName").unwrap_or("").to_string(),
+                hash: p.attr("hashValue").unwrap_or("").to_string(),
+                salt: p.attr("saltValue").unwrap_or("").to_string(),
+                spin_count: p.attr_u32("spinCount").unwrap_or(0),
+            })
+        } else {
+            p.attr("password").map(|h| match u16::from_str_radix(h.trim(), 16) {
+                Ok(h) => PasswordHash::Legacy(h),
+                // Unreadable: keep it locked.
+                Err(_) => PasswordHash::Iterated { algorithm: String::new(), hash: String::new(), salt: String::new(), spin_count: 0 },
+            })
+        };
+        let title = p.attr("name").unwrap_or("").to_string();
+        sheet.edit_ranges.push(EditRange { title, ranges, password, security_descriptor: p.attr("securityDescriptor").map(str::to_string) });
+    }
 }
 
 fn read_views(e: &El, sheet: &mut Sheet) {
