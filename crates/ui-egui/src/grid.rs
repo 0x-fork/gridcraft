@@ -8,7 +8,7 @@ use std::sync::Arc;
 use egui::{Align2, Color32, CursorIcon, FontId, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use gridcraft_engine::cf::{CfCache, CfLook};
 use gridcraft_engine::core::{CellRef, MAX_COLS, MAX_ROWS, RangeRef, Value, col_to_letters};
-use gridcraft_engine::model::{BorderStyle, Color, HAlign, LineIndex, PatternType, Sheet, Style, Underline, VAlign, Workbook};
+use gridcraft_engine::model::{BorderLine, BorderStyle, Color, HAlign, LineIndex, PatternType, Sheet, Style, Underline, VAlign, Workbook};
 use serde_json::json;
 
 use crate::SheetApp;
@@ -100,6 +100,8 @@ pub struct GridState {
     pub paper: Option<crate::paper_view::PaperCache>,
     /// Header or footer being edited in place (Page Layout view).
     pub hf_edit: Option<crate::paper_view::HfEdit>,
+    /// Insert › Header & Footer: start editing the first page's header once Page Layout view is up.
+    pub hf_start: bool,
     /// The grid geometry of the last frame (hit-testing for agents and tests).
     pub geo: Option<Geo>,
 }
@@ -121,6 +123,12 @@ pub struct Geo {
     pub z: f32,
     pub header_w: f32,
     pub header_h: f32,
+    /// The outline bands (grouped rows / columns): left of the row headers and above the column
+    /// headers; 0 without an outline (see `outline`).
+    pub band_w: f32,
+    pub band_h: f32,
+    pub row_outline: Arc<crate::outline::Axis>,
+    pub col_outline: Arc<crate::outline::Axis>,
     pub fr: u32,
     pub fc: u32,
     pub frozen_w: f32,
@@ -151,8 +159,46 @@ impl Geo {
         let (fr, fc) = sh.freeze.unwrap_or((0, 0));
         let frozen_w = (ci.start(fc) as f32) * z;
         let frozen_h = (ri.start(fr) as f32) * z;
-        let cells = Rect::from_min_max(pos2(rect.left() + header_w, rect.top() + header_h), rect.max);
-        Geo { rect, cells, z, header_w, header_h, fr, fc, frozen_w, frozen_h, scroll, rtl: sh.right_to_left, ri, ci, paper: None }
+        let row_outline = Arc::new(crate::outline::Axis::new(&sh.rows));
+        let col_outline = Arc::new(crate::outline::Axis::new(&sh.cols));
+        let mut band_w = crate::outline::band(row_outline.levels, zoom);
+        let mut band_h = crate::outline::band(col_outline.levels, zoom);
+        // Without headings the level buttons still need a corner to sit in.
+        if row_outline.levels > 0 && header_h == 0.0 {
+            band_h = band_h.max(crate::outline::lane(zoom) + 3.0);
+        }
+        if col_outline.levels > 0 && header_w == 0.0 {
+            band_w = band_w.max(crate::outline::lane(zoom) + 3.0);
+        }
+        let cells = Rect::from_min_max(pos2(rect.left() + band_w + header_w, rect.top() + band_h + header_h), rect.max);
+        Geo {
+            rect,
+            cells,
+            z,
+            header_w,
+            header_h,
+            band_w,
+            band_h,
+            row_outline,
+            col_outline,
+            fr,
+            fc,
+            frozen_w,
+            frozen_h,
+            scroll,
+            rtl: sh.right_to_left,
+            ri,
+            ci,
+            paper: None,
+        }
+    }
+    /// Left edge of the row headers (right of the outline band).
+    pub fn head_left(&self) -> f32 {
+        self.cells.left() - self.header_w
+    }
+    /// Top edge of the column headers (below the outline band).
+    pub fn head_top(&self) -> f32 {
+        self.cells.top() - self.header_h
     }
     /// Page Layout view geometry: `rect` excludes the rulers; cells are drawn at the print scale
     /// on pages laid out by `grid`; frozen panes don't apply (as in Excel).
@@ -558,6 +604,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
         paint_headers(&painter, &geo, sh, &sel, &t, &quads);
         paint_freeze_handles(&painter, &geo, sh, &app.grid.drag, &t);
     }
+    crate::outline::paint(&painter, &geo, sh, &t);
     if geo.rtl {
         let mirror_to = painter.add(egui::Shape::Noop);
         mirror_painted(ui.ctx(), painter.layer_id(), mirror_from.0..mirror_to.0, &geo, &objects);
@@ -934,10 +981,17 @@ pub(crate) fn paint_quadrant(
             continue;
         }
         let first_line = text.lines().next().unwrap_or("").to_string();
+        // Shrink to fit: too-wide content is drawn in a smaller font so it fits the cell (or the
+        // merged area): it neither spills, nor is clipped, nor turns into ####.
+        let small = (st.align.shrink && !rotated && st.align.h != HAlign::Fill && fill_char.is_none())
+            .then(|| shrink_font(p, &first_line, &font, avail_w - 2.0 * pad - indent))
+            .flatten();
+        let shrunk = small.is_some();
+        let font = small.unwrap_or(font);
         let mut galley = p.layout_no_wrap(first_line.clone(), font.clone(), color);
         let mut w = galley.size().x;
         // Numbers and dates never overflow: they show #### when too narrow.
-        if (numeric || matches!(v, Value::Number(_))) && w > avail_w - 2.0 * pad && st.align.h != HAlign::Fill {
+        if !shrunk && (numeric || matches!(v, Value::Number(_))) && w > avail_w - 2.0 * pad && st.align.h != HAlign::Fill {
             let n = ((avail_w - 2.0 * pad) / char_w).floor().max(1.0) as usize;
             galley = p.layout_no_wrap("#".repeat(n), font.clone(), color);
             w = galley.size().x;
@@ -1037,12 +1091,19 @@ pub(crate) fn paint_quadrant(
     // Borders (over fills and text).
     for (c, rect, lk, _) in &looks {
         let b = &lk.style.borders;
-        let edges = [
-            (b.top, [rect.left_top(), rect.right_top()]),
-            (b.bottom, [rect.left_bottom(), rect.right_bottom()]),
-            (b.left, [rect.left_top(), rect.left_bottom()]),
-            (b.right, [rect.right_top(), rect.right_bottom()]),
-        ];
+        let merge = merges.iter().find(|m| m.start == *c);
+        let edges = match merge {
+            // A merged area's outline lives on the cells along each of its edges (Excel writes the
+            // right edge on the last column's cells and the bottom edge on the last row's), so each
+            // edge is drawn cell by cell from the cell it belongs to.
+            Some(m) => merged_edges(wb, si, sh, geo, *m, *rect, (r0, r1), (c0, c1), cf),
+            None => vec![
+                (b.top, [rect.left_top(), rect.right_top()]),
+                (b.bottom, [rect.left_bottom(), rect.right_bottom()]),
+                (b.left, [rect.left_top(), rect.left_bottom()]),
+                (b.right, [rect.right_top(), rect.right_bottom()]),
+            ],
+        };
         for (line, pts) in edges {
             if line.is_none() {
                 continue;
@@ -1111,6 +1172,60 @@ pub fn filter_button_rect(geo: &Geo, sh: &Sheet, c: CellRef) -> Rect {
     let rect = geo.cell_rect(sh, c);
     let s = (rect.height() - 4.0).clamp(10.0, 18.0);
     Rect::from_min_size(pos2(rect.right() - s - 2.0, rect.bottom() - s - 2.0), vec2(s, s))
+}
+
+/// The outline segments of merged area `m` drawn at `rect`: the top and left edges come from the
+/// first row's and first column's cells, the bottom and right edges from the last row's and last
+/// column's cells, one segment per visible cell (limited to the visible `rows` × `cols`).
+#[allow(clippy::too_many_arguments)]
+fn merged_edges(
+    wb: &Workbook,
+    si: usize,
+    sh: &Sheet,
+    geo: &Geo,
+    m: RangeRef,
+    rect: Rect,
+    rows: (u32, u32),
+    cols: (u32, u32),
+    cf: &mut CfCache,
+) -> Vec<(BorderLine, [Pos2; 2])> {
+    let mut out = Vec::new();
+    let (cs, ce) = (m.start.col.max(cols.0), m.end.col.min(cols.1));
+    for col in cs..=ce {
+        if sh.col_width(col) == 0.0 {
+            continue;
+        }
+        let (x0, x1) = (geo.x(sh, col), geo.x(sh, col.saturating_add(1)));
+        let top = look(wb, si, sh, CellRef::new(m.start.row, col), cf).0.style.borders.top;
+        let bottom = look(wb, si, sh, CellRef::new(m.end.row, col), cf).0.style.borders.bottom;
+        out.push((top, [pos2(x0, rect.top()), pos2(x1, rect.top())]));
+        out.push((bottom, [pos2(x0, rect.bottom()), pos2(x1, rect.bottom())]));
+    }
+    let (rs, re) = (m.start.row.max(rows.0), m.end.row.min(rows.1));
+    for row in rs..=re {
+        if sh.row_height(row) == 0.0 {
+            continue;
+        }
+        let (y0, y1) = (geo.y(sh, row), geo.y(sh, row.saturating_add(1)));
+        let left = look(wb, si, sh, CellRef::new(row, m.start.col), cf).0.style.borders.left;
+        let right = look(wb, si, sh, CellRef::new(row, m.end.col), cf).0.style.borders.right;
+        out.push((left, [pos2(rect.left(), y0), pos2(rect.left(), y1)]));
+        out.push((right, [pos2(rect.right(), y0), pos2(rect.right(), y1)]));
+    }
+    out
+}
+
+/// The smaller font that makes `text` fit in `room` points of width (Shrink to fit), or `None`
+/// when it already fits at its own size.
+fn shrink_font(p: &Painter, text: &str, font: &FontId, room: f32) -> Option<FontId> {
+    let natural = p.layout_no_wrap(text.to_string(), font.clone(), Color32::PLACEHOLDER).size().x;
+    let room = room.max(1.0);
+    if natural.is_nan() || natural <= room {
+        return None;
+    }
+    // Glyph advances don't scale exactly linearly (rounding), so leave a little slack.
+    let size = (font.size * room / natural * 0.97).max(1.0);
+    Some(FontId::new(size, font.family.clone()))
 }
 
 pub(crate) fn paint_border(p: &Painter, pts: [Pos2; 2], style: BorderStyle, col: Color32) {
@@ -1333,7 +1448,8 @@ pub(crate) fn paint_headers(
     quads: &[((u32, u32), (u32, u32), Rect)],
 ) {
     let font = theme::ui_font((11.5 * (geo.z / DISPLAY_SCALE).max(0.75)).min(16.0));
-    let r = geo.rect;
+    // The headers' own area: inside the outline bands.
+    let r = Rect::from_min_max(pos2(geo.head_left(), geo.head_top()), geo.rect.max);
     let top = Rect::from_min_max(pos2(geo.cells.left(), r.top()), pos2(r.right(), geo.cells.top()));
     let left = Rect::from_min_max(pos2(r.left(), geo.cells.top()), pos2(geo.cells.left(), r.bottom()));
     p.rect_filled(top, 0.0, t.header_bg);
@@ -1421,9 +1537,9 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
     // Hit-testing works in logical coordinates (see `Geo::rtl`).
     let pos = pointer.interact_pos().or(pointer.hover_pos()).map(|p| geo.mirror_pos(p));
     let in_cells = pos.is_some_and(|p| geo.in_cells(p));
-    let in_col_header = pos.is_some_and(|p| p.y < geo.cells.top() && p.y >= geo.rect.top() && p.x >= geo.cells.left());
-    let in_row_header = pos.is_some_and(|p| p.x < geo.cells.left() && p.x >= geo.rect.left() && p.y >= geo.cells.top());
-    let in_corner = pos.is_some_and(|p| p.x < geo.cells.left() && p.y < geo.cells.top() && geo.rect.contains(p));
+    let in_col_header = pos.is_some_and(|p| p.y < geo.cells.top() && p.y >= geo.head_top() && p.x >= geo.cells.left());
+    let in_row_header = pos.is_some_and(|p| p.x < geo.cells.left() && p.x >= geo.head_left() && p.y >= geo.cells.top());
+    let in_corner = pos.is_some_and(|p| p.x < geo.cells.left() && p.y < geo.cells.top() && p.x >= geo.head_left() && p.y >= geo.head_top());
     let sel = app.session.active().map(|d| d.selection.clone()).unwrap_or_default();
     let cur_rect = geo.range_rect(sh, sel.current());
     let handle = Rect::from_center_size(cur_rect.right_bottom(), vec2(9.0, 9.0));
@@ -1604,6 +1720,14 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
     if resp.drag_started() || (primary_clicked && app.grid.drag == Drag::None) {
         // Where the press began (a drag is only recognised after the pointer has moved).
         let Some(p) = pointer.press_origin().map(|p| geo.mirror_pos(p)).or(pos) else { return };
+        // The outline band's − / + and level buttons act on release, like buttons.
+        if let Some(action) = crate::outline::hit(geo, sh, p) {
+            if primary_clicked {
+                let (command, params) = action.command();
+                app.run_or_alert(command, params);
+            }
+            return;
+        }
         // Freeze handles sit on the header edges (and the corner's edges when nothing is frozen).
         if freeze_cols.contains(p) || freeze_rows.contains(p) {
             app.grid.drag = Drag::Freeze { cols: freeze_cols.contains(p), to: None };
@@ -2031,8 +2155,8 @@ fn on_border(r: Rect, p: Pos2) -> bool {
 pub fn freeze_handles(geo: &Geo) -> (Rect, Rect) {
     let x = geo.cells.left() + geo.frozen_w;
     let y = geo.cells.top() + geo.frozen_h;
-    let cols = Rect::from_min_max(pos2(x - 3.0, geo.rect.top()), pos2(x + 3.0, geo.rect.top() + geo.header_h * 0.4));
-    let rows = Rect::from_min_max(pos2(geo.rect.left(), y - 3.0), pos2(geo.rect.left() + geo.header_w * 0.4, y + 3.0));
+    let cols = Rect::from_min_max(pos2(x - 3.0, geo.head_top()), pos2(x + 3.0, geo.head_top() + geo.header_h * 0.4));
+    let rows = Rect::from_min_max(pos2(geo.head_left(), y - 3.0), pos2(geo.head_left() + geo.header_w * 0.4, y + 3.0));
     (cols, rows)
 }
 
@@ -2070,10 +2194,10 @@ fn paint_freeze_handles(p: &Painter, geo: &Geo, sh: &Sheet, drag: &Drag, t: &Tok
         let stroke = Stroke::new(2.0, t.accent);
         if cols {
             let x = geo.cells.left() + sh.col_left(to) as f32 * geo.z;
-            p.line_segment([pos2(x, geo.rect.top()), pos2(x, geo.cells.bottom())], stroke);
+            p.line_segment([pos2(x, geo.head_top()), pos2(x, geo.cells.bottom())], stroke);
         } else {
             let y = geo.cells.top() + sh.row_top(to) as f32 * geo.z;
-            p.line_segment([pos2(geo.rect.left(), y), pos2(geo.cells.right(), y)], stroke);
+            p.line_segment([pos2(geo.head_left(), y), pos2(geo.cells.right(), y)], stroke);
         }
     }
 }
@@ -2192,6 +2316,11 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
         m.set_focus_lock_filter(resp.id, egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true })
     });
     let events = ctx.input(|i| i.events.clone());
+    // A shortcut key that also types a character (Shift+Space sends Text(" ")) must not start an edit.
+    let shortcut_pressed = events.iter().any(|e| {
+        matches!(e, egui::Event::Key { pressed: true, modifiers: m, key, .. }
+            if !m.alt && (m.ctrl || m.command || (m.shift && *key == egui::Key::Space)))
+    });
     let page = ((geo.cells.height() / geo.z) / sh.default_row_height).floor().max(1.0) as i64;
     for ev in events {
         match ev {
@@ -2202,6 +2331,7 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
                 app.copy_to_clipboard(ctx, "edit.cut");
             }
             egui::Event::Paste(text) => app.paste_external(text),
+            egui::Event::Text(_) if shortcut_pressed => {}
             egui::Event::Text(text) if text.chars().all(|c| !c.is_control()) && !text.is_empty() => {
                 app.begin_edit(Some(text), false);
                 if let Some(ed) = app.editor.as_mut() {
@@ -2270,8 +2400,9 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
                         app.session.format_painter = None;
                     }
                     Key::Space if !cmd && !shift && is_checkbox(sh, app) => app.run_or_alert("cell.toggleCheckbox", json!({})),
-                    Key::Space if cmd && !shift => app.run_or_alert("selection.column", json!({})),
-                    Key::Space if shift && !cmd => app.run_or_alert("selection.row", json!({})),
+                    Key::F8 if m.alt => {
+                        app.open_dialog("macros", json!({}));
+                    }
                     Key::F9 => app.run_or_alert("formulas.calculateNow", json!({})),
                     Key::F4 if !cmd => {}
                     _ if cmd => crate::ribbon::shortcut(app, key, m),
@@ -2335,7 +2466,12 @@ fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_open: bool)
     let Some(sh) = wb.sheet(si) else { return };
     let _ = geo;
     // Tables get an autofilter on demand.
-    let table_range = sh.tables.first().filter(|t| col >= t.range.start.col && col <= t.range.end.col).map(|t| t.range);
+    let table_range = sh
+        .tables
+        .iter()
+        .find(|t| t.range.start.row <= at.y as u32 || true)
+        .filter(|t| col >= t.range.start.col && col <= t.range.end.col)
+        .map(|t| t.range);
     if sh.autofilter.is_none()
         && let Some(r) = table_range
     {

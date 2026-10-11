@@ -1369,11 +1369,11 @@ fn draw_headings(pg: &mut Page, b: &Block, col_heads: bool, row_heads: bool, at:
     }
 }
 
-fn draw_header_footer(pg: &mut Page, lay: &SheetLayout, cx: &HfContext) {
+fn draw_header_footer(pg: &mut Page, lay: &SheetLayout, which: gridcraft_model::HfPage, cx: &HfContext) {
     let [l, r, _, _, hm, fm] = lay.margins;
     let pw = lay.page_w;
     let ph = lay.page_h;
-    for (spec, header) in [(&lay.settings.header, true), (&lay.settings.footer, false)] {
+    for (spec, header) in [(lay.settings.hf(which, false), true), (lay.settings.hf(which, true), false)] {
         if spec.is_empty() {
             continue;
         }
@@ -1449,7 +1449,7 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
         let mut cf = if sh.cond_formats.is_empty() { None } else { Some(crate::cf::CfCache::new()) };
         let k = lay.k();
         let (aw, ah) = lay.avail();
-        for (ri, ci) in &lay.pages {
+        for (pi, (ri, ci)) in lay.pages.iter().enumerate() {
             page_no += 1;
             let (Some(rband), Some(cband)) = (lay.row_bands.get(*ri).copied(), lay.col_bands.get(*ci).copied()) else { continue };
             let rsegs = segments(lay.title_rows, rband);
@@ -1493,7 +1493,7 @@ pub fn render_pdf(wb: &Workbook, layouts: &[SheetLayout], file: &str, path: &str
                 date: date.clone(),
                 time: time.clone(),
             };
-            draw_header_footer(pg, lay, &cx);
+            draw_header_footer(pg, lay, lay.settings.hf_page(pi == 0, page_no), &cx);
         }
     }
     let n = doc.page_count();
@@ -1510,7 +1510,7 @@ fn build_pdf(s: &Session, p: &Json, cmd: &str) -> Result<(Vec<u8>, usize)> {
     Ok(render_pdf(&d.wb, &lays, &d.display_title(), &path))
 }
 
-fn export_pdf(s: &mut Session, p: &Json) -> Result<Json> {
+pub(crate) fn export_pdf(s: &mut Session, p: &Json) -> Result<Json> {
     let (bytes, pages) = build_pdf(s, p, "file.exportPdf")?;
     match str_param(p, "path").filter(|x| !x.is_empty()) {
         Some(path) => {
@@ -1843,6 +1843,32 @@ mod tests {
     }
 
     #[test]
+    fn first_and_even_pages_print_their_own_headers() {
+        let mut s = s();
+        s.execute("range.setValues", json!({"range": "A1", "values": [["a"], ["b"], ["c"], ["d"], ["e"], ["f"]]})).unwrap();
+        s.execute("pageLayout.pageSetup", json!({"rowBreaks": [2, 4]})).unwrap();
+        let r = s
+            .execute(
+                "pageLayout.headerFooter",
+                json!({"header": "&COdd &P", "evenHeader": "&CEven &P", "firstHeader": "&CCover", "differentFirst": true, "differentOddEven": true}),
+            )
+            .unwrap();
+        assert_eq!(r["firstHeader"], "&CCover");
+        let (pdf, pages) = pdf_of(&mut s, json!({}));
+        assert_eq!(pages, 3);
+        assert!(contains(&pdf, "(Cover) Tj") && contains(&pdf, "(Even 2) Tj") && contains(&pdf, "(Odd 3) Tj"));
+        assert!(!contains(&pdf, "(Odd 1) Tj"), "the first page has its own header");
+        // One section of the even-page footer, edited in place.
+        s.execute("pageLayout.headerFooter", json!({"page": "even", "part": "footer", "section": "right", "text": "&[Tab]"})).unwrap();
+        assert_eq!(s.doc().unwrap().wb.sheet(0).unwrap().print.even_footer, "&R&A");
+        assert!(s.execute("pageLayout.headerFooter", json!({"page": "last", "part": "header", "text": "x"})).is_err());
+        // Turned off, every page prints the odd header again.
+        s.execute("pageLayout.headerFooter", json!({"differentFirst": false, "differentOddEven": false})).unwrap();
+        let (pdf, _) = pdf_of(&mut s, json!({}));
+        assert!(contains(&pdf, "(Odd 1) Tj") && contains(&pdf, "(Odd 2) Tj") && !contains(&pdf, "(Cover) Tj"));
+    }
+
+    #[test]
     fn pdf_contains_text_and_header_codes_expand() {
         let mut s = s();
         s.execute("range.setValues", json!({"range": "A1", "values": [["Quarterly Report", null], ["Total", 1234.5]]})).unwrap();
@@ -1895,6 +1921,24 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let r = s.execute("file.print", json!({})).unwrap();
         assert!(r["base64"].as_str().unwrap().len() > 100);
+    }
+
+    #[test]
+    fn save_as_pdf_writes_a_pdf_and_keeps_the_workbook_file() {
+        let mut s = s();
+        s.execute("cell.set", json!({"cell": "B2", "input": "hello"})).unwrap();
+        let dir = std::env::temp_dir().join(format!("gridcraft-save-pdf-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Out.PDF");
+        let r = s.execute("file.saveAs", json!({"path": path.to_str().unwrap()})).unwrap();
+        assert_eq!(r["pages"], 1);
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(bytes.starts_with(b"%PDF-"));
+        assert!(contains(&bytes, "(hello) Tj"));
+        // The PDF is a print, not the workbook's file: Save still asks where to put the workbook.
+        let d = s.doc().unwrap();
+        assert!(d.path.is_none() && d.is_dirty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

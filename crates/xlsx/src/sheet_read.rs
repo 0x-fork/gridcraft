@@ -137,17 +137,29 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
                 }
             }
             "headerFooter" => {
-                sheet.print.header = e.child("oddHeader").map(|h| h.text.clone()).unwrap_or_default();
-                sheet.print.footer = e.child("oddFooter").map(|h| h.text.clone()).unwrap_or_default();
+                let pr = &mut sheet.print;
+                for (tag, slot) in [
+                    ("oddHeader", &mut pr.header),
+                    ("oddFooter", &mut pr.footer),
+                    ("evenHeader", &mut pr.even_header),
+                    ("evenFooter", &mut pr.even_footer),
+                    ("firstHeader", &mut pr.first_header),
+                    ("firstFooter", &mut pr.first_footer),
+                ] {
+                    // Excel caps each at 255 characters; a hostile file can't make them huge.
+                    *slot = e.child(tag).map(|h| h.text.chars().take(255).collect()).unwrap_or_default();
+                }
+                pr.different_first = e.flag("differentFirst", false);
+                pr.different_odd_even = e.flag("differentOddEven", false);
+                pr.hf_scale_with_doc = e.flag("scaleWithDoc", true);
+                pr.hf_align_with_margins = e.flag("alignWithMargins", true);
             }
             "rowBreaks" => sheet.print.row_breaks = e.kids("brk").filter_map(|b| b.attr_u32("id")).filter(|&r| r > 0 && r < MAX_ROWS).collect(),
             "colBreaks" => sheet.print.col_breaks = e.kids("brk").filter_map(|b| b.attr_u32("id")).filter(|&c| c > 0 && c < MAX_COLS).collect(),
             "sheetProtection" if e.flag("sheet", false) => {
-                if e.attr("password").is_some() || e.attr("hashValue").is_some() {
-                    cx.warn(format!("sheet \"{name}\": the protection password was not imported"));
-                }
                 sheet.protection = Some(SheetProtection {
-                    password_hash: None,
+                    password: read_password(e, ""),
+                    legacy_password_hash: None,
                     select_locked: !e.flag("selectLockedCells", false),
                     select_unlocked: !e.flag("selectUnlockedCells", false),
                     format_cells: !e.flag("formatCells", true),
@@ -208,6 +220,35 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
     Ok(sheet)
 }
 
+/// A protection password hash: the iterated attributes (`algorithmName`, `hashValue`,
+/// `saltValue`, `spinCount`) or the legacy 16-bit `password`, each name preceded by `prefix`
+/// (`workbook` gives `workbookHashValue`…). One that can't be read keeps a hash that never
+/// matches, so what it protects stays locked rather than open.
+pub(crate) fn read_password(e: &El, prefix: &str) -> Option<PasswordHash> {
+    let attr = |base: &str| e.attr(&password_attr(prefix, base));
+    if attr("algorithmName").is_some() || attr("hashValue").is_some() {
+        return Some(PasswordHash::Iterated {
+            algorithm: attr("algorithmName").unwrap_or("").to_string(),
+            hash: attr("hashValue").unwrap_or("").to_string(),
+            salt: attr("saltValue").unwrap_or("").to_string(),
+            spin_count: e.attr_u32(&password_attr(prefix, "spinCount")).unwrap_or(0),
+        });
+    }
+    attr("password").map(|h| match u16::from_str_radix(h.trim(), 16) {
+        Ok(h) => PasswordHash::Legacy(h),
+        Err(_) => PasswordHash::Iterated { algorithm: String::new(), hash: String::new(), salt: String::new(), spin_count: 0 },
+    })
+}
+
+/// `base` preceded by `prefix` in camel case: ("workbook", "hashValue") → `workbookHashValue`.
+pub(crate) fn password_attr(prefix: &str, base: &str) -> String {
+    let mut chars = base.chars();
+    match chars.next() {
+        Some(c) if !prefix.is_empty() => format!("{prefix}{}{}", c.to_ascii_uppercase(), chars.as_str()),
+        _ => base.to_string(),
+    }
+}
+
 /// Allow Edit Ranges. A range whose password can't be read keeps a hash that never matches
 /// (or an unsupported algorithm), so it stays locked rather than open.
 fn read_protected_ranges(e: &El, sheet: &mut Sheet) {
@@ -216,20 +257,7 @@ fn read_protected_ranges(e: &El, sheet: &mut Sheet) {
         if ranges.is_empty() {
             continue;
         }
-        let password = if p.attr("algorithmName").is_some() || p.attr("hashValue").is_some() {
-            Some(PasswordHash::Iterated {
-                algorithm: p.attr("algorithmName").unwrap_or("").to_string(),
-                hash: p.attr("hashValue").unwrap_or("").to_string(),
-                salt: p.attr("saltValue").unwrap_or("").to_string(),
-                spin_count: p.attr_u32("spinCount").unwrap_or(0),
-            })
-        } else {
-            p.attr("password").map(|h| match u16::from_str_radix(h.trim(), 16) {
-                Ok(h) => PasswordHash::Legacy(h),
-                // Unreadable: keep it locked.
-                Err(_) => PasswordHash::Iterated { algorithm: String::new(), hash: String::new(), salt: String::new(), spin_count: 0 },
-            })
-        };
+        let password = read_password(p, "");
         let title = p.attr("name").unwrap_or("").to_string();
         sheet.edit_ranges.push(EditRange { title, ranges, password, security_descriptor: p.attr("securityDescriptor").map(str::to_string) });
     }
@@ -256,6 +284,10 @@ fn read_views(e: &El, sheet: &mut Sheet) {
             let rows = p.attr_f64("ySplit").unwrap_or(0.0).clamp(0.0, (MAX_ROWS - 1) as f64) as u32;
             if rows > 0 || cols > 0 {
                 sheet.freeze = Some((rows, cols));
+                // With frozen panes the scroll position is the scrolling pane's first cell.
+                if let Some(c) = p.attr("topLeftCell").and_then(CellRef::parse) {
+                    sheet.view_top_left = c;
+                }
             }
         }
         active_pane = p.attr("activePane");

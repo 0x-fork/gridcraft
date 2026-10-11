@@ -171,6 +171,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Clear Validation" => "유효성 검사 지우기",
         "Group" => "그룹",
         "Ungroup" => "그룹 해제",
+        "Show Detail" => "세부 정보 표시",
+        "Hide Detail" => "세부 정보 숨기기",
         "Subtotal" => "부분합",
         "Data\nAnalysis" => "데이터 분석",
         "Data Analysis" => "데이터 분석",
@@ -321,6 +323,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "File Name" => "파일 이름",
         "Sheet Name" => "시트 이름",
         "Go to Header" => "머리글로 이동",
+        "Different First Page" => "첫 페이지를 다르게 지정",
+        "Different Odd & Even Pages" => "짝수와 홀수 페이지를 다르게 지정",
         "Go to Footer" => "바닥글로 이동",
         "Ruler" => "눈금자",
         // File › Backstage view.
@@ -357,9 +361,16 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Keywords" => "키워드",
         "Description" => "설명",
         "No workbook is open." => "열려 있는 통합 문서가 없습니다.",
+        "Save as type" => "파일 형식",
+        "Excel Workbook (*.xlsx)" => "Excel 통합 문서 (*.xlsx)",
+        "CSV UTF-8 (Comma delimited) (*.csv)" => "CSV UTF-8(쉼표로 분리) (*.csv)",
+        "Web Page (*.html)" => "웹 페이지 (*.html)",
+        "PDF (*.pdf)" => "PDF 파일 (*.pdf)",
+        "Download" => "다운로드",
+        "A CSV file, web page or PDF is a copy: the workbook keeps its own file." => {
+            "CSV 파일, 웹 페이지 또는 PDF는 사본이며 통합 문서는 원래 파일을 유지합니다."
+        }
         "Save the workbook under another name or in another folder." => "통합 문서를 다른 이름 또는 다른 폴더에 저장합니다.",
-        "Download (.xlsx)" => "다운로드(.xlsx)",
-        "PDF, CSV and web pages are on the Export page." => "PDF, CSV 및 웹 페이지는 내보내기 페이지에 있습니다.",
         "Print Active Sheets" => "활성 시트 인쇄",
         "Print Entire Workbook" => "전체 통합 문서 인쇄",
         "Fit Sheet on One Page" => "한 페이지에 시트 맞추기",

@@ -829,9 +829,9 @@ fn font_combo(app: &mut SheetApp, ui: &mut Ui, st: &Style) {
     let mut name = st.font.name.clone();
     let before = name.clone();
     egui::ComboBox::from_id_salt("font_name").width(150.0).selected_text(egui::RichText::new(&name).font(theme::ui_font(12.5))).show_ui(ui, |ui| {
-        for f in FONTS {
-            let fam = theme::cell_family(f, false, false);
-            ui.selectable_value(&mut name, f.to_string(), egui::RichText::new(*f).font(egui::FontId::new(14.0, fam)));
+        for f in crate::fonts::families() {
+            let fam = theme::cell_family(&f, false, false);
+            ui.selectable_value(&mut name, f.clone(), egui::RichText::new(&f).font(egui::FontId::new(14.0, fam)));
         }
     });
     if name != before {
@@ -1295,7 +1295,8 @@ fn insert(app: &mut SheetApp, ui: &mut Ui) {
         act(app, "insert.textBox", json!({}));
     }
     if big_button(ui, Icon::PageLayout, "Header &\nFooter", "Header & Footer", false).clicked() {
-        app.open_dialog("headerFooter", json!({}));
+        // As in Excel: Page Layout view, editing the header in place (the dialog is under Page Setup).
+        crate::paper_view::start_editing(app);
     }
     let sym = big_button(ui, Icon::Symbol, "Symbol", "Symbol", true);
     egui::Popup::menu(&sym).show(|ui| {
@@ -1648,6 +1649,14 @@ fn data(app: &mut SheetApp, ui: &mut Ui) {
             app.open_dialog("subtotal", json!({}));
         }
     });
+    ui.vertical(|ui| {
+        if small_button(ui, Icon::Plus, "Show Detail", "Show Detail", false).clicked() {
+            act(app, "data.showDetail", json!({}));
+        }
+        if small_button(ui, Icon::Minus, "Hide Detail", "Hide Detail", false).clicked() {
+            act(app, "data.hideDetail", json!({}));
+        }
+    });
     sep(ui);
     if big_button(ui, Icon::ChartBar, "Data\nAnalysis", "Data Analysis", false).clicked() {
         app.open_dialog("analysisToolPak", json!({}));
@@ -1720,7 +1729,7 @@ fn review(app: &mut SheetApp, ui: &mut Ui) {
         }
     }
     if big_button(ui, Icon::Book, "Protect\nWorkbook", "Protect Workbook structure", false).clicked() {
-        act(app, "review.protectWorkbook", json!({}));
+        crate::backstage::protect_workbook(app);
     }
     if big_button(ui, Icon::Validation, "Allow Edit\nRanges", "Allow Edit Ranges", false).clicked() {
         app.open_dialog("allowEditRanges", json!({}));
@@ -1844,6 +1853,9 @@ fn view(app: &mut SheetApp, ui: &mut Ui) {
 }
 
 fn automate(app: &mut SheetApp, ui: &mut Ui) {
+    if big_button(ui, Icon::Script, "Macros", "Macros and scripts in this workbook (Alt+F8)", false).clicked() {
+        app.open_dialog("macros", json!({}));
+    }
     if big_button(ui, Icon::Script, "Command\nPalette", "Search and run any command", false).clicked() {
         app.open_dialog("commandSearch", json!({}));
     }

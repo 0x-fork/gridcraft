@@ -45,6 +45,11 @@ pub struct Tokens {
     pub menu_bg: Color32,
     pub shadow: Color32,
     pub danger: Color32,
+    /// Info-bar (notice strip) fills, by severity.
+    pub notice_warn_bg: Color32,
+    pub notice_warn_border: Color32,
+    pub notice_info_bg: Color32,
+    pub notice_info_border: Color32,
 }
 
 impl Tokens {
@@ -83,6 +88,10 @@ impl Tokens {
             menu_bg: Color32::WHITE,
             shadow: Color32::from_black_alpha(40),
             danger: Color32::from_rgb(0xC4, 0x2B, 0x1C),
+            notice_warn_bg: Color32::from_rgb(0xFF, 0xF4, 0xCE),
+            notice_warn_border: Color32::from_rgb(0xF0, 0xC3, 0x6E),
+            notice_info_bg: Color32::from_rgb(0xEA, 0xF2, 0xFB),
+            notice_info_border: Color32::from_rgb(0xB9, 0xD2, 0xEC),
         }
     }
 
@@ -121,6 +130,10 @@ impl Tokens {
             menu_bg: Color32::from_rgb(0x30, 0x30, 0x30),
             shadow: Color32::from_black_alpha(90),
             danger: Color32::from_rgb(0xF1, 0x70, 0x5F),
+            notice_warn_bg: Color32::from_rgb(0x4A, 0x3F, 0x1E),
+            notice_warn_border: Color32::from_rgb(0x7A, 0x67, 0x30),
+            notice_info_bg: Color32::from_rgb(0x24, 0x33, 0x44),
+            notice_info_border: Color32::from_rgb(0x3B, 0x55, 0x72),
         }
     }
 
@@ -146,7 +159,16 @@ pub fn ui_bold(size: f32) -> FontId {
 }
 
 /// The font family to use for a cell font name and weight.
+///
+/// When the name is an installed font whose faces were bound by [`font_definitions`], that family
+/// is used; otherwise the name is bucketed to one of the built-in roles (mono/serif/cell). egui
+/// panics on a family that was never bound, so the installed branch is gated on
+/// [`crate::fonts::is_bound`] and never names a family egui hasn't been given.
 pub fn cell_family(name: &str, bold: bool, italic: bool) -> FontFamily {
+    let role = crate::fonts::role_key(name, bold, italic);
+    if crate::fonts::is_bound(&role) {
+        return FontFamily::Name(role.into());
+    }
     let lower = name.to_ascii_lowercase();
     if lower.contains("courier") || lower.contains("mono") || lower.contains("consolas") {
         return FontFamily::Name(MONO.into());
@@ -357,9 +379,17 @@ impl HanOrder {
 
 /// Builds the font set with the Han fallback faces ordered for the interface language.
 pub fn font_definitions_for_language(language: crate::i18n::Language) -> FontDefinitions {
+    font_definitions_with(language, &[])
+}
+
+/// [`font_definitions_for_language`] that also binds the workbook fonts in `used` that are
+/// installed, so cells set in them render with them; the rest fall back to the roles. The bound
+/// families are recorded in [`crate::fonts`] so [`cell_family`] only names a family egui has.
+pub fn font_definitions_with(language: crate::i18n::Language, used: &[String]) -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     let base_prop: Vec<String> = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     let base_mono: Vec<String> = fonts.families.get(&FontFamily::Monospace).cloned().unwrap_or_default();
+    let mut bound: Vec<String> = Vec::new();
     // The non-Latin fallback faces have to sit at the end of each chain: a Latin font owns Latin,
     // and epaint picks the first face that has the glyph, so they only catch their own scripts.
     let fallback = load_fallback(&mut fonts, HanOrder::of(language));
@@ -380,12 +410,34 @@ pub fn font_definitions_for_language(language: crate::i18n::Language) -> FontDef
         chain.extend(fallback.iter().cloned());
         chain.retain(|k| fonts.font_data.contains_key(k));
         fonts.families.insert(FontFamily::Name(role.into()), chain);
+        bound.push(role.to_string());
+    }
+    // Installed workbook fonts, so a cell's chosen font actually renders in it.
+    for family in crate::fonts::installed_among(used) {
+        bound.extend(crate::fonts::bind_family(&mut fonts, &family));
+    }
+    // Interface text (formula bar, name box, dialogs) falls back to the cell font before the
+    // script faces: whatever a cell can draw, the formula bar can draw too, even where no script
+    // fallback face was found (#349: macOS UI font without Hebrew, cells in Arial with it).
+    let cell_key = format!("sys-{CELL}");
+    if fonts.font_data.contains_key(&cell_key) {
+        for role in [UI, UI_BOLD, SERIF, MONO] {
+            if let Some(chain) = fonts.families.get_mut(&FontFamily::Name(role.into()))
+                && !chain.contains(&cell_key)
+            {
+                let at = chain.iter().position(|k| fallback.contains(k)).unwrap_or(chain.len());
+                chain.insert(at, cell_key.clone());
+            }
+        }
     }
     // Default proportional text in widgets uses the UI font.
     if let Some(ui) = fonts.families.get(&FontFamily::Name(UI.into())).cloned() {
         fonts.families.insert(FontFamily::Proportional, ui);
     }
     drop_unparseable_fonts(&mut fonts);
+    // Only families egui still has data for count as bound (a dropped face can empty a chain).
+    bound.retain(|f| fonts.families.get(&FontFamily::Name(f.as_str().into())).is_some_and(|c| !c.is_empty()));
+    crate::fonts::set_bound(bound);
     fonts
 }
 
@@ -556,8 +608,11 @@ fn hebrew() -> Vec<(String, u32)> {
     v.push((format!("{win}\\david.ttf"), 0)); // David
     v.push((format!("{win}\\frank.ttf"), 0)); // FrankRuehl
     v.push((format!("{win}\\tahoma.ttf"), 0)); // Tahoma
+    v.push((format!("{mac_sys}/ArialHB.ttc"), 0)); // Arial Hebrew
+    v.push((format!("{mac_sys}/SFHebrew.ttf"), 0));
     v.push((format!("{mac_sup}/Arial Hebrew.ttf"), 0));
     v.push((format!("{mac_sup}/David.ttf"), 0));
+    v.push((format!("{mac_sys}/LucidaGrande.ttc"), 0));
     v.push((format!("{mac_sys}/Lucida Grande.ttc"), 0));
     for d in lin {
         v.push((format!("{d}/NotoSansHebrew-Regular.ttf"), 0));
@@ -662,6 +717,54 @@ pub fn color32(rgb: [u8; 3]) -> Color32 {
     Color32::from_rgb(rgb[0], rgb[1], rgb[2])
 }
 
+#[cfg(test)]
+mod font_binding_tests {
+    use super::*;
+
+    /// The families [`font_definitions`] always binds, whatever is installed.
+    fn always_bound() -> Vec<String> {
+        [UI, UI_BOLD, CELL, CELL_BOLD, CELL_ITALIC, CELL_BOLD_ITALIC, SERIF, MONO].iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_name_that_is_not_an_installed_font_gets_a_built_in_role() {
+        let _g = crate::fonts::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // Nothing installed: every name buckets to a role that font_definitions bound.
+        crate::fonts::set_bound(always_bound());
+        for name in ["", "Calibri", "Courier New", "Times New Roman", "Grossly Missing Font", "\u{1F600}"] {
+            for (b, i) in [(false, false), (true, false), (false, true), (true, true)] {
+                let FontFamily::Name(fam) = cell_family(name, b, i) else { panic!("{name:?} should name a family") };
+                assert!(crate::fonts::is_bound(&fam), "{name:?} {b} {i} → unbound {fam:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_bound_installed_font_is_used_by_name() {
+        let _g = crate::fonts::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let role = crate::fonts::role_key("Ubuntu", true, false);
+        crate::fonts::set_bound(always_bound().into_iter().chain([role.clone()]));
+        assert!(matches!(cell_family("Ubuntu", true, false), FontFamily::Name(f) if *f == *role));
+        // The same family in a style that wasn't bound falls back to a built-in role that is.
+        let FontFamily::Name(fallback) = cell_family("Ubuntu", false, true) else { panic!("should name a family") };
+        assert!(crate::fonts::is_bound(&fallback), "the fallback is a bound role");
+        crate::fonts::set_bound(always_bound());
+    }
+
+    #[test]
+    fn arbitrary_names_never_yield_an_unbound_family() {
+        let _g = crate::fonts::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // A workbook can hold any font name; none may name a family egui has no data for.
+        crate::fonts::set_bound(always_bound());
+        for seed in 0..500u32 {
+            let name: String =
+                (0..(seed % 40)).map(|k| char::from_u32(0x20 + (seed.wrapping_mul(31).wrapping_add(k) % 0x5F)).unwrap_or('x')).collect();
+            let FontFamily::Name(fam) = cell_family(&name, seed % 2 == 0, seed % 3 == 0) else { continue };
+            assert!(crate::fonts::is_bound(&fam), "{name:?} → unbound {fam:?}");
+        }
+    }
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
@@ -685,6 +788,25 @@ mod tests {
                 let tail = &chain[chain.len() - fb_keys.len()..];
                 assert_eq!(tail, fb_keys.as_slice(), "{role} must end its chain with the fallback faces");
             }
+        }
+    }
+
+    #[test]
+    fn interface_families_fall_back_to_the_cell_font() {
+        // Structural (#349): the formula bar, name box and dialogs draw every script the cells can,
+        // so each interface chain carries the cell face, ahead of the script fallback faces.
+        let fonts = font_definitions_for_language(Language::En);
+        let cell = format!("sys-{CELL}");
+        if !fonts.font_data.contains_key(&cell) {
+            return; // no system cell font on this machine
+        }
+        let fb: Vec<String> = fallback_faces(HanOrder::Chinese).into_iter().map(|(k, _)| k.to_string()).collect();
+        for family in [FontFamily::Proportional, FontFamily::Name(UI.into()), FontFamily::Name(UI_BOLD.into()), FontFamily::Name(MONO.into())] {
+            let chain = fonts.families.get(&family).cloned().unwrap_or_default();
+            let at = chain.iter().position(|k| *k == cell);
+            assert!(at.is_some(), "{family:?} lacks the cell face: {chain:?}");
+            let first_fb = chain.iter().position(|k| fb.contains(k)).unwrap_or(chain.len());
+            assert!(at.unwrap_or(usize::MAX) < first_fb, "{family:?}: cell face must precede the script faces");
         }
     }
 

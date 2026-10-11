@@ -124,3 +124,41 @@ fn header_is_edited_in_place_committed_by_a_click_elsewhere_and_undoable() {
     assert!(h.state().grid.hf_edit.is_none());
     assert_eq!(header(&h), "&LLeft");
 }
+
+#[test]
+fn the_first_page_edits_its_own_header_when_different_first_page_is_on() {
+    let mut h = fixture();
+    h.state_mut().run("pageLayout.headerFooter", json!({"differentFirst": true, "firstHeader": "&CCover"})).unwrap();
+    h.run_steps(3);
+    // Insert › Header & Footer edits the first page's centre header, here the first-page one.
+    gridcraft_ui_egui::paper_view::start_editing(h.state_mut());
+    h.run_steps(3);
+    {
+        let e = h.state().grid.hf_edit.as_ref().expect("Insert › Header & Footer starts editing");
+        assert_eq!((e.footer, e.section, e.kind), (false, 1, gridcraft_engine::model::HfPage::First));
+        assert_eq!(e.texts[1], "Cover");
+    }
+    h.input_mut().events.push(Event::Text(" page".into()));
+    h.run_steps(2);
+    let g = geo(&h);
+    let b3 = {
+        let app = h.state();
+        g.cell_rect(app.session.doc().unwrap().wb.active().unwrap(), CellRef::parse("B3").unwrap()).center()
+    };
+    click(&mut h, b3);
+    let pr = h.state().session.doc().unwrap().wb.active().unwrap().print.clone();
+    assert_eq!(pr.first_header, "&CCover page");
+    assert_eq!(pr.header, "&LLeft", "the other pages keep their header");
+}
+
+#[test]
+fn insert_header_and_footer_switches_to_page_layout_view() {
+    let mut h = fixture();
+    h.state_mut().run("view.normal", json!({})).unwrap();
+    h.run_steps(3);
+    gridcraft_ui_egui::paper_view::start_editing(h.state_mut());
+    h.run_steps(4);
+    assert_eq!(h.state().session.doc().unwrap().wb.active().unwrap().view, SheetViewMode::PageLayout);
+    let e = h.state().grid.hf_edit.as_ref().expect("the header is being edited");
+    assert_eq!((e.footer, e.section, e.texts[0].as_str()), (false, 1, "Left"));
+}

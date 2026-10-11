@@ -164,8 +164,9 @@ pub fn sheet_tabs(app: &mut SheetApp, ui: &mut Ui) {
                                         app.run_or_alert("sheet.unhide", json!({}));
                                     }
                                     ui.separator();
-                                    if ui.button("Protect Sheet…").clicked() {
-                                        app.open_dialog("protectSheet", json!({}));
+                                    let protected = app.session.active().and_then(|d| d.wb.active().map(|s| s.is_protected())).unwrap_or(false);
+                                    if ui.button(if protected { "Unprotect Sheet…" } else { "Protect Sheet…" }).clicked() {
+                                        app.open_dialog(if protected { "unprotectSheet" } else { "protectSheet" }, json!({}));
                                     }
                                     if ui.button("Select All Sheets").clicked() {
                                         ui.close();
@@ -229,6 +230,10 @@ pub fn status_bar(app: &mut SheetApp, ui: &mut Ui) {
                 };
                 ui.label(egui::RichText::new(app.ui.language.tr(mode)).font(theme::ui_font(12.5)).color(t.text_dim));
                 if let Some(d) = app.session.active() {
+                    if d.wb.vba_project.is_some() {
+                        ui.add_space(12.0);
+                        ui.label(egui::RichText::new("Macros preserved (not executed)").font(theme::ui_font(12.5)).color(t.danger));
+                    }
                     if d.wb.calc.mode == gridcraft_engine::model::CalcMode::Manual {
                         ui.add_space(12.0);
                         ui.label(egui::RichText::new(app.ui.language.tr("Calculate")).font(theme::ui_font(12.5)).color(t.text_dim));

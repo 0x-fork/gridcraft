@@ -55,10 +55,12 @@ fn borders(preset: &str) -> Shortcut {
 
 /// The shortcut for a key press in the grid, if any. `physical` is the key's position on a US
 /// layout (as Excel matches Ctrl+Shift+4 rather than the `$` character); `mac` selects the Excel
-/// for Mac variants where they differ.
+/// for Mac variants where they differ. Navigation keys go by the logical key: with Num Lock off
+/// the numpad's arrows and Page Down report the digit keys (Num6, Num3) as their physical keys.
 pub fn lookup(key: Key, physical: Option<Key>, m: Modifiers, mac: bool) -> Option<Shortcut> {
     use Key::*;
-    let k = physical.unwrap_or(key);
+    let navigation = matches!(key, ArrowLeft | ArrowRight | ArrowUp | ArrowDown | PageUp | PageDown | Home | End | Insert | Delete);
+    let k = if navigation { key } else { physical.unwrap_or(key) };
     // Control itself (Excel for Mac also uses Control for these), Ctrl on Windows / Cmd on Mac,
     // and Alt/Option alone.
     let ctrl = m.ctrl && !m.alt;
@@ -108,6 +110,11 @@ pub fn lookup(key: Key, physical: Option<Key>, m: Modifiers, mac: bool) -> Optio
         Period if cmd && s => run("home.increaseFontSize"),
         Comma if cmd && s => run("home.decreaseFontSize"),
         Space if cmd && s => run("edit.selectAll"),
+        // Shift+Space selects the row; Ctrl+Space (Windows) / Control+Space (Excel for Mac) the
+        // column. Cmd+Space stays free: it is the macOS Spotlight shortcut.
+        Space if plain && s => run("selection.row"),
+        Space if !mac && cmd && !s => run("selection.column"),
+        Space if mac && ctrl && !m.command && !s => run("selection.column"),
         Home if cmd && s => Shortcut::ExtendToStart,
         End if cmd && s => Shortcut::ExtendToEnd,
         Home if plain && s => Shortcut::ExtendToRowStart,
