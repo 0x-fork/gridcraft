@@ -139,6 +139,7 @@ pub fn read_csv(bytes: &[u8], opts: &CsvOptions) -> Result<Workbook, IoError> {
     }
     let mut wb = Workbook::new();
     wb.date_system = opts.date_system;
+    wb.csv_delimiter = u8::try_from(delim).ok();
     let mut sheet = Sheet::new("Sheet1");
     let mut styles = std::mem::take(&mut wb.styles);
     let mut fmt_cache: Vec<(&'static str, StyleId)> = vec![];

@@ -80,6 +80,11 @@ fn delimiter_sniffing() {
     assert_eq!(sniff_delimiter("a;b\r\n\r\nc;d\r\n", '"'), b';');
     let wb = read_csv(b"x;y\n1,5;2", &CsvOptions { delimiter: 0, ..Default::default() }).unwrap();
     assert_eq!(v(&wb, 1, 1), Value::Number(2.0));
+    // The workbook remembers the separator it was read with, sniffed or given.
+    assert_eq!(wb.csv_delimiter, Some(b';'));
+    assert_eq!(read_csv(b"a\tb", &CsvOptions { delimiter: 0, ..Default::default() }).unwrap().csv_delimiter, Some(b'\t'));
+    assert_eq!(read_csv(b"a;b", &CsvOptions::default()).unwrap().csv_delimiter, Some(b','));
+    assert_eq!(Workbook::new().csv_delimiter, None);
     assert!(read_csv(b"a", &CsvOptions { delimiter: b'"', ..Default::default() }).is_err());
 }
 

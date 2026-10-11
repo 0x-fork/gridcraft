@@ -79,6 +79,10 @@ pub struct Workbook {
     /// macros it arrived with. base64 in JSON. `None` = the workbook has no macros.
     #[serde(default, with = "crate::b64::opt")]
     pub vba_project: Option<Vec<u8>>,
+    /// Field separator of the CSV this workbook was read from, so saving it as CSV writes the same
+    /// separator back (a `;` file stays a `;` file). `None` = not read from CSV: CSV saves use `,`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub csv_delimiter: Option<u8>,
     /// Unmodelled file content kept for saving (package root and workbook level). Not in JSON.
     #[serde(skip)]
     pub preserved: Option<Arc<crate::preserved::Preserved>>,
@@ -107,6 +111,7 @@ impl Workbook {
             custom_lists: vec![],
             cell_styles: vec![],
             vba_project: None,
+            csv_delimiter: None,
             preserved: None,
         }
     }

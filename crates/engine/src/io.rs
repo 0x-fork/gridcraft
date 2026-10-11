@@ -85,6 +85,8 @@ pub fn open_bytes(name: &str, bytes: &[u8]) -> Result<(Workbook, Vec<String>)> {
         Some(FileKind::Tsv) => {
             let opts = gridcraft_xlsx::CsvOptions { delimiter: b'\t', ..Default::default() };
             let mut wb = gridcraft_xlsx::read_csv(bytes, &opts).map_err(|e| EngineError::Other(e.to_string()))?;
+            // Tab is what makes it a .tsv/.txt; saved as .csv it gets the CSV default.
+            wb.csv_delimiter = None;
             rename_first_sheet(&mut wb, name);
             Ok((wb, vec![]))
         }
@@ -126,7 +128,8 @@ pub fn save_bytes(wb: &Workbook, path: &str) -> Result<Vec<u8>> {
         }
         FileKind::Xlsb => Err(EngineError::Other("XLSB is supported for data import only. Save as .xlsx or another supported export format.".into())),
         FileKind::Ods => Err(EngineError::Other("ODS is supported for data import only. Save as .xlsx or another supported export format.".into())),
-        FileKind::Csv => Ok(wb.sheet(sheet).map(|sh| gridcraft_xlsx::write_csv(sh, wb, b',')).unwrap_or_default()),
+        // A workbook read from CSV keeps the separator it was read with (a `;` file stays `;`).
+        FileKind::Csv => Ok(wb.sheet(sheet).map(|sh| gridcraft_xlsx::write_csv(sh, wb, wb.csv_delimiter.unwrap_or(b','))).unwrap_or_default()),
         FileKind::Tsv => Ok(wb.sheet(sheet).map(|sh| gridcraft_xlsx::write_csv(sh, wb, b'\t')).unwrap_or_default()),
         FileKind::Json => serde_json::to_vec_pretty(wb).map_err(|e| EngineError::Other(e.to_string())),
         FileKind::Html => Ok(to_html(wb, sheet).into_bytes()),
@@ -408,6 +411,47 @@ mod tests {
             put(1024 + k * 128 + 64, &(units.len() as u16 + 2).to_le_bytes());
         }
         b
+    }
+
+    /// Cut-list rows as a CAD/CAM program exports them: `;`-separated, CRLF, part codes in the last
+    /// two columns, a part name containing a comma.
+    const CUT_LIST: &str = "1;511;184;P3_L1_led;2162PE;16;1MM_2162PE;1MM_2162PE;;;1244121406FB;\r\n\
+                            1;562.5;510;Komoda, lijevo;2162PE;19;1MM_2162PE;;;;12441214071A;124412140710\r\n";
+
+    #[test]
+    fn csv_save_keeps_the_separator_it_was_opened_with() {
+        let (wb, _) = open_bytes("cut list.csv", CUT_LIST.as_bytes()).unwrap();
+        assert_eq!(wb.csv_delimiter, Some(b';'));
+        assert_eq!(String::from_utf8(save_bytes(&wb, "cut list.csv").unwrap()).unwrap(), CUT_LIST);
+        // Save As another .csv name keeps it too; a comma file stays a comma file (quoting only
+        // fields that contain the separator in use).
+        assert_eq!(String::from_utf8(save_bytes(&wb, "copy.CSV").unwrap()).unwrap(), CUT_LIST);
+        let commas = "\"Komoda, lijevo\",b\r\n1,x;y\r\n";
+        let (wb, _) = open_bytes("plain.csv", commas.as_bytes()).unwrap();
+        assert_eq!(String::from_utf8(save_bytes(&wb, "plain.csv").unwrap()).unwrap(), commas);
+        // A tab-separated file named .csv round-trips with tabs.
+        let tabs = "a\tb\r\n1\t2\r\n";
+        let (wb, _) = open_bytes("tabs.csv", tabs.as_bytes()).unwrap();
+        assert_eq!(String::from_utf8(save_bytes(&wb, "tabs.csv").unwrap()).unwrap(), tabs);
+    }
+
+    #[test]
+    fn csv_save_of_a_workbook_not_read_from_csv_uses_commas() {
+        let mut wb = Workbook::new();
+        if let Some(sh) = wb.sheet_mut(0) {
+            sh.set_value(CellRef::new(0, 0), gridcraft_core::Value::text("a"));
+            sh.set_value(CellRef::new(0, 1), gridcraft_core::Value::Number(1.0));
+        }
+        assert_eq!(save_bytes(&wb, "new.csv").unwrap(), b"a,1\r\n");
+        // Through .xlsx the CSV origin is gone, as in Excel.
+        let (from_csv, _) = open_bytes("cut list.csv", CUT_LIST.as_bytes()).unwrap();
+        let (reopened, _) = open_bytes("book.xlsx", &save_bytes(&from_csv, "book.xlsx").unwrap()).unwrap();
+        assert_eq!(reopened.csv_delimiter, None);
+        assert!(String::from_utf8(save_bytes(&reopened, "again.csv").unwrap()).unwrap().starts_with("1,511,184,"));
+        // A .tsv/.txt saved as .csv gets commas; as .tsv it keeps tabs.
+        let (tsv, _) = open_bytes("list.txt", b"a\tb\r\n").unwrap();
+        assert_eq!(save_bytes(&tsv, "list.csv").unwrap(), b"a,b\r\n");
+        assert_eq!(save_bytes(&tsv, "list.tsv").unwrap(), b"a\tb\r\n");
     }
 
     #[test]
