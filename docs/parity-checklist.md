@@ -14,7 +14,7 @@ Each entry is an Excel ribbon or menu command (feature names only). It counts as
 | Draw | 4 | 4 | 100% |
 | Page Layout | 23 | 23 | 100% |
 | Formulas | 23 | 23 | 100% |
-| Data | 20 | 28 | 71% |
+| Data | 21 | 28 | 75% |
 | Review | 9 | 18 | 50% |
 | View | 20 | 20 | 100% |
 | Automate | 3 | 3 | 100% |
@@ -240,7 +240,7 @@ Implemented:
 - `formulas.calculateNow` Calculate Now (Calculation)
 - `formulas.calculateSheet` Calculate Sheet (Calculation)
 
-## Data (20 / 28, 71%)
+## Data (21 / 28, 75%)
 
 Implemented:
 
@@ -264,6 +264,7 @@ Implemented:
 - `data.subtotal` Subtotal (Outline)
 - `data.showDetail` Show Detail (Outline)
 - `data.hideDetail` Hide Detail (Outline)
+- `data.analysisToolPak` Data Analysis (Analysis)
 
 Missing:
 
@@ -274,7 +275,6 @@ Missing:
 - `data.forecastSheet` Forecast Sheet (Forecast)
 - `data.analyzeData` Analyze Data (Analysis)
 - `data.solver` Solver (Analysis)
-- `data.analysisToolPak` Data Analysis (Analysis)
 
 ## Review (10 / 18, 56%)
 

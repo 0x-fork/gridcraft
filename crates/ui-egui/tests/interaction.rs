@@ -377,6 +377,7 @@ fn dialogs_open_and_close() {
         "goTo",
         "pivotCalculatedField",
         "about",
+        "analysisToolPak",
     ] {
         h.state_mut().open_dialog(name, json!({}));
         h.run_steps(2);
@@ -384,6 +385,39 @@ fn dialogs_open_and_close() {
         h.state_mut().dialog = None;
         h.state_mut().message = None;
     }
+}
+
+#[test]
+fn data_analysis_dialog_runs_a_tool_and_asks_before_overwriting() {
+    let mut s = blank();
+    s.execute("range.setValues", json!({"range": "A1", "values": [[1], [2], [3], [4], [5]]})).unwrap();
+    let mut h = harness(s);
+    h.state_mut().open_dialog("analysisToolPak", json!({}));
+    h.state_mut().dialog.as_mut().unwrap().values.insert("pick".into(), json!("descriptive"));
+    h.run_steps(2);
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    assert_eq!(h.state().dialog.as_ref().map(|d| d.title.clone()).as_deref(), Some("Descriptive Statistics"));
+    let fill = |h: &mut egui_kittest::Harness<'static, SheetApp>| {
+        let d = h.state_mut().dialog.as_mut().unwrap();
+        d.values.insert("range".into(), json!("A1:A5"));
+        d.values.insert("outputTo".into(), json!("range"));
+        d.values.insert("output".into(), json!("C1"));
+    };
+    fill(&mut h);
+    h.run_steps(2);
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    assert!(h.state().dialog.is_none(), "OK runs the tool and closes the dialog");
+    assert_eq!(value(&h, "C3"), Value::from("Mean"));
+    assert_eq!(value(&h, "D3"), Value::Number(3.0));
+    // A second report into the same cells asks before replacing them (opened with a tool, the
+    // dialog starts at that tool's form).
+    h.state_mut().open_dialog("analysisToolPak", json!({"tool": "descriptive"}));
+    fill(&mut h);
+    h.run_steps(2);
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    let d = h.state().dialog.as_ref().expect("the dialog stays open to ask");
+    assert_eq!(d.values.get("askOverwrite"), Some(&json!(true)));
+    assert!(h.state().message.is_none());
 }
 
 #[test]

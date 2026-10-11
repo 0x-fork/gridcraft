@@ -118,7 +118,7 @@ text, so AltGr symbols (e.g. `~` on a German layout) never trigger a shortcut.
 
 Format Cells, Insert Function/Formula Builder, Find and Replace, Go To and Go To Special, Sort,
 Name Manager, Data Validation, Paste Special, Conditional Formatting manager, Page Setup, Goal
-Seek, Scenario Manager and others exist. Missing or partial: Options, Solver, Data Analysis,
+Seek, Scenario Manager, Data Analysis and others exist. Missing or partial: Options, Solver,
 Forecast Sheet, Power Query editor, Insert Object, Equation editor, Protect/Allow Edit Ranges,
 Workbook Links, Accessibility checker.
 
