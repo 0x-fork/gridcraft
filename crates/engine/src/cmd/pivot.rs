@@ -52,6 +52,15 @@ pub fn specs() -> Vec<CommandSpec> {
             has_doc,
             calculated_field
         ),
+        cmd!(
+            "insert.pivotChart",
+            "PivotChart",
+            ["Insert", "Charts"],
+            None,
+            "{pivot?: name | id | a cell of the report (\"Sheet2!B5\"; default: the PivotTable at the active cell), type?: column|bar|line|pie|area|… (default column), subtype?, title?, at?: \"H2\", width?, height?} adds a chart bound to the PivotTable's report: categories are the innermost row items, series the column items × value fields; it follows refreshes and layout changes → {chart, pivot, series}",
+            has_doc,
+            insert_pivot_chart
+        ),
         cmd!(query "pivot.fields", "PivotTable Fields", [], None, "{pivot?} → source fields (name, numeric, date, samples, areas) and the current layout", has_doc, fields),
         cmd!(query "pivot.fieldList", "Field List", ["PivotTable Analyze", "Show"], None, "{pivot?} (same as pivot.fields)", has_doc, fields),
         cmd!(query "pivot.list", "PivotTables", [], None, "{} → every PivotTable in the workbook", has_doc, list),
@@ -1272,6 +1281,18 @@ fn change_source(s: &mut Session, p: &Json) -> Result<Json> {
 fn delete(s: &mut Session, p: &Json) -> Result<Json> {
     let (si, pi) = find_pivot(s, p)?;
     edit(s, |cx| {
+        // Its PivotCharts become ordinary charts.
+        let link = cx.wb.sheet(si).and_then(|sh| sh.pivots.get(pi).map(|pt| (sh.name.clone(), pt.name.clone())));
+        if let Some((sheet, name)) = link {
+            for i in 0..cx.wb.sheets.len() {
+                let linked = |c: &Chart| c.pivot.as_deref().is_some_and(|l| pv::links_to(l, &sheet, &name));
+                if cx.wb.sheet(i).is_some_and(|sh| sh.charts.iter().any(linked)) {
+                    for c in cx.sheet_mut(i)?.charts.iter_mut().filter(|c| linked(c)) {
+                        c.pivot = None;
+                    }
+                }
+            }
+        }
         pv::clear_output(&mut cx.wb, si, pi);
         let sh = cx.sheet_mut(si)?;
         if pi < sh.pivots.len() {
@@ -1279,6 +1300,80 @@ fn delete(s: &mut Session, p: &Json) -> Result<Json> {
         }
         cx.structural = true;
         Ok(json!({}))
+    })
+}
+
+// ---------------------------------------------------------------- PivotChart
+
+/// The PivotTable a PivotChart call targets: `pivot` may also be a cell of its report.
+fn chart_pivot(s: &Session, p: &Json) -> Result<(usize, usize)> {
+    if let Some(t) = str_param(p, "pivot") {
+        let d = s.doc()?;
+        let (sheet, addr) = match t.rsplit_once('!') {
+            Some((sh, a)) => {
+                let sh = sh.trim();
+                let sh = sh.strip_prefix('\'').and_then(|x| x.strip_suffix('\'')).map(|x| x.replace("''", "'")).unwrap_or_else(|| sh.to_string());
+                (d.wb.sheet_index(&sh), a)
+            }
+            None => (Some(d.wb.active_sheet), t),
+        };
+        if let (Some(si), Some(c)) = (sheet, CellRef::parse(addr.trim().replace('$', "").as_str())) {
+            let hit = d.wb.sheet(si).and_then(|sh| sh.pivots.iter().position(|pt| pt.last_range.is_some_and(|r| r.contains(c)) || pt.anchor == c));
+            return hit.map(|pi| (si, pi)).ok_or_else(|| bad("insert.pivotChart", format!("{t} is not in a PivotTable")));
+        }
+    }
+    find_pivot(s, p)
+}
+
+fn insert_pivot_chart(s: &mut Session, p: &Json) -> Result<Json> {
+    let (si, pi) = chart_pivot(s, p)?;
+    let d = s.doc()?;
+    let sh = d.wb.sheet(si).ok_or(EngineError::NoDocument)?;
+    let pt = sh.pivots.get(pi).ok_or_else(|| other("There's no such PivotTable."))?;
+    let area = pt.last_range.ok_or_else(|| other("Refresh the PivotTable before adding a PivotChart."))?;
+    let out = pv::compute(&d.wb, pt, si).map_err(other)?;
+    if out.chart_rows.is_empty() || out.chart_cols.is_empty() {
+        return Err(other("Add a field to the Values area and one to Rows or Columns before creating a PivotChart."));
+    }
+    let series = pv::chart_series(&sh.name, area.start, &out);
+    let t = str_param(p, "type").unwrap_or("column");
+    let kind = super::insert::chart_kind(t, str_param(p, "subtype").unwrap_or(""));
+    let at = cell_param(p, "at").unwrap_or_else(|| CellRef::new(area.start.row, area.end.col.saturating_add(2).min(gridcraft_core::MAX_COLS - 1)));
+    let title = match p.get("title") {
+        Some(Json::String(t)) => Some(t.clone()),
+        Some(Json::Null) => None,
+        _ => Some(if series.len() == 1 { "Total".to_string() } else { "Chart Title".to_string() }),
+    };
+    let id = d.wb.next_object_id();
+    let link = pv::chart_link(&sh.name, &pt.name);
+    let pivot_name = pt.name.clone();
+    let n = series.len();
+    let chart = Chart {
+        id,
+        kind,
+        anchor: Anchor {
+            cell: at,
+            dx: 0.0,
+            dy: 0.0,
+            width: f64_param(p, "width").unwrap_or(480.0).clamp(10.0, 10_000.0) as f32,
+            height: f64_param(p, "height").unwrap_or(288.0).clamp(10.0, 10_000.0) as f32,
+            mode: anchor_mode_param(p).unwrap_or_default(),
+        },
+        title,
+        series,
+        legend: if matches!(kind, ChartKind::Pie | ChartKind::Doughnut) { LegendPos::Right } else { LegendPos::Bottom },
+        data_labels: false,
+        gridlines: !matches!(kind, ChartKind::Pie | ChartKind::Doughnut | ChartKind::Treemap | ChartKind::Sunburst | ChartKind::Funnel),
+        style: 1,
+        x_title: None,
+        y_title: None,
+        source: None,
+        by_rows: false,
+        pivot: Some(link),
+    };
+    edit(s, |cx| {
+        cx.sheet_mut(si)?.charts.push(chart);
+        Ok(json!({"chart": id, "pivot": pivot_name, "series": n}))
     })
 }
 
@@ -1649,6 +1744,76 @@ mod tests {
         // Old rows were cleared.
         assert_eq!(sh.value(CellRef::parse("A7").unwrap()), Value::Empty);
         s.execute("pivot.refresh", json!({"pivot": "PivotTable1"})).unwrap();
+    }
+
+    fn pivot_chart(s: &Session) -> gridcraft_model::Chart {
+        s.doc().unwrap().wb.active().unwrap().charts.last().unwrap().clone()
+    }
+    fn plotted(s: &Session) -> Vec<Vec<Option<f64>>> {
+        let d = s.doc().unwrap();
+        let data = gridcraft_chart::resolve(&d.wb, d.wb.active_sheet, &pivot_chart(s));
+        data.series.into_iter().map(|x| x.values).collect()
+    }
+
+    #[test]
+    fn pivot_chart_follows_the_report() {
+        let mut s = sales();
+        s.execute("insert.pivotTable", json!({"rows": ["Region"], "values": ["Sales"]})).unwrap();
+        // Any cell of the report picks the PivotTable.
+        let r = s.execute("insert.pivotChart", json!({"pivot": "B5"})).unwrap();
+        assert_eq!(r["series"], 1);
+        let ch = pivot_chart(&s);
+        assert_eq!(ch.pivot.as_deref(), Some("Sheet2!PivotTable1"));
+        assert_eq!(ch.title.as_deref(), Some("Total"));
+        assert_eq!(ch.series[0].values, "Sheet2!$B$4:$B$6");
+        assert_eq!(ch.series[0].categories.as_deref(), Some("Sheet2!$A$4:$A$6"));
+        assert_eq!(plotted(&s), vec![vec![Some(415.0), Some(135.0), Some(285.0)]]);
+        // A column field: one series per item, rebound by the layout change.
+        s.execute("pivot.addField", json!({"field": "Product", "area": "columns"})).unwrap();
+        let ch = pivot_chart(&s);
+        let names: Vec<_> = ch.series.iter().map(|x| x.name.clone().unwrap_or_default()).collect();
+        assert_eq!(names, vec!["\"Apples\"", "\"Pears\"", "\"Plums\""]);
+        assert_eq!(plotted(&s)[0], vec![Some(160.0), Some(90.0), Some(170.0)]);
+        // Nested row fields: the innermost items only, as a union around the parent rows.
+        s.execute("pivot.moveField", json!({"field": "Product", "from": "columns", "to": "rows"})).unwrap();
+        let ch = pivot_chart(&s);
+        assert!(ch.series[0].values.starts_with('('), "{}", ch.series[0].values);
+        let pts = plotted(&s);
+        assert_eq!(pts[0].len(), 9);
+        assert_eq!(pts[0].iter().flatten().sum::<f64>(), TOTAL);
+        // Survives an XLSX round trip as a PivotChart.
+        let wb = (*s.doc().unwrap().wb).clone();
+        let (back, _) = gridcraft_xlsx::read_xlsx(&gridcraft_xlsx::write_xlsx(&wb).unwrap()).unwrap();
+        let si = back.sheet_index("Sheet2").unwrap();
+        assert_eq!(back.sheet(si).unwrap().charts.first().and_then(|c| c.pivot.clone()).as_deref(), Some("Sheet2!PivotTable1"));
+        // Renaming the sheet keeps the link; a refresh still rebinds.
+        s.execute("sheet.rename", json!({"name": "Report"})).unwrap();
+        assert_eq!(pivot_chart(&s).pivot.as_deref(), Some("Report!PivotTable1"));
+        s.execute("pivot.moveField", json!({"field": "Region", "from": "rows", "to": "columns"})).unwrap();
+        assert_eq!(pivot_chart(&s).series.len(), 3);
+        // Deleting the PivotTable leaves an ordinary chart.
+        s.execute("pivot.delete", json!({})).unwrap();
+        assert_eq!(pivot_chart(&s).pivot, None);
+    }
+
+    #[test]
+    fn pivot_chart_errors() {
+        let mut s = sales();
+        // No PivotTable yet.
+        assert!(s.execute("insert.pivotChart", json!({})).is_err());
+        s.execute("insert.pivotTable", json!({"rows": ["Region"]})).unwrap();
+        // Not in the report; no values.
+        assert!(s.execute("insert.pivotChart", json!({"pivot": "Z99"})).is_err());
+        assert!(s.execute("insert.pivotChart", json!({})).unwrap_err().to_string().contains("Values"));
+        s.execute("pivot.addField", json!({"field": "Units", "area": "values"})).unwrap();
+        let r = s.execute("insert.pivotChart", json!({"pivot": "PivotTable1", "type": "line", "title": null})).unwrap();
+        assert_eq!(r["series"], 1);
+        let ch = pivot_chart(&s);
+        assert_eq!(ch.kind, gridcraft_model::ChartKind::Line);
+        assert_eq!(ch.title, None);
+        // One undo step.
+        s.execute("edit.undo", json!({})).unwrap();
+        assert!(s.doc().unwrap().wb.active().unwrap().charts.is_empty());
     }
 
     #[test]

@@ -406,6 +406,10 @@ pub struct Chart {
     /// Source range when created from a selection (for Switch Row/Column).
     pub source: Option<String>,
     pub by_rows: bool,
+    /// A PivotChart's PivotTable (`Sheet2!PivotTable1`): its series are rebuilt from the report
+    /// whenever the PivotTable is refreshed or its layout changes.
+    #[serde(default)]
+    pub pivot: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
