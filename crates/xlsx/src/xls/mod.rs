@@ -31,7 +31,9 @@ const MAX_SHEETS: usize = 4096;
 const MAX_NAMES: usize = 65_536;
 const MAX_XFS: usize = 65_536;
 const MAX_MERGES: usize = 100_000;
-/// Records read from one substream at most (a 65,536 × 256 sheet has fewer).
+/// Records read from the whole Workbook stream at most (a 65,536 × 256 sheet has fewer). One
+/// allowance shared by every substream: many BoundSheet records pointing into one huge
+/// substream must not each get their own.
 const MAX_RECORDS: usize = 40_000_000;
 
 const BOF: u16 = 0x0809;
@@ -53,13 +55,32 @@ pub(crate) fn is_xls(bytes: &[u8]) -> bool {
     cf.has_root_stream("Workbook") || cf.has_root_stream("Book")
 }
 
-#[derive(Default)]
-struct Budget {
+pub(crate) struct Budget {
     cells: usize,
     text: usize,
+    records: usize,
+    max_records: usize,
+}
+
+impl Default for Budget {
+    fn default() -> Self {
+        Budget { cells: 0, text: 0, records: 0, max_records: MAX_RECORDS }
+    }
 }
 
 impl Budget {
+    /// A budget with a smaller record allowance (tests).
+    #[cfg(test)]
+    pub(crate) fn with_max_records(max_records: usize) -> Self {
+        Budget { max_records, ..Budget::default() }
+    }
+    fn record(&mut self) -> Result<(), IoError> {
+        self.records = self.records.saturating_add(1);
+        if self.records > self.max_records {
+            return Err(IoError::TooLarge("XLS: too many records".into()));
+        }
+        Ok(())
+    }
     fn cell(&mut self) -> Result<(), IoError> {
         self.cells += 1;
         if self.cells > MAX_CELLS {
@@ -106,6 +127,11 @@ struct Globals {
 
 /// Reads an Excel 97-2003 workbook. Inspect the report's warnings for what was skipped.
 pub fn read_xls(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
+    read_xls_with(bytes, Budget::default())
+}
+
+/// [`read_xls`] with an explicit resource budget.
+pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workbook, ReadReport), IoError> {
     let cf = Compound::open(bytes).map_err(invalid)?;
     let stream = match cf.root_stream("Workbook").map_err(invalid)? {
         Some(s) => s,
@@ -117,7 +143,6 @@ pub fn read_xls(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         }
     };
     let mut report = ReadReport::default();
-    let mut budget = Budget::default();
     let g = globals(&stream, &mut budget)?;
 
     let mut wb = Workbook::new();
@@ -195,12 +220,9 @@ fn globals(stream: &[u8], budget: &mut Budget) -> Result<Globals, IoError> {
         return Err(invalid("the Workbook stream does not start with the workbook globals"));
     }
     let mut g = Globals::default();
-    let mut count = 0usize;
+    let mut offsets = std::collections::HashSet::new();
     while let Some(rec) = recs.next_record()? {
-        count += 1;
-        if count > MAX_RECORDS {
-            return Err(IoError::TooLarge("XLS: too many records".into()));
-        }
+        budget.record()?;
         let mut c = Cursor::new(&rec.parts);
         match rec.id {
             EOF => break,
@@ -210,6 +232,9 @@ fn globals(stream: &[u8], budget: &mut Budget) -> Result<Globals, IoError> {
                     return Err(IoError::TooLarge("XLS: too many sheets".into()));
                 }
                 let pos = c.u32()? as usize;
+                if !offsets.insert(pos) {
+                    return Err(invalid("two sheets point at the same substream"));
+                }
                 let state = c.u8()?;
                 let kind = c.u8()?;
                 let name = c.short_string()?;
@@ -460,12 +485,8 @@ fn worksheet(
         unsupported: vec![],
     };
     let mut depth = 1usize;
-    let mut count = 0usize;
     while let Some(rec) = recs.next_record()? {
-        count += 1;
-        if count > MAX_RECORDS {
-            return Err(IoError::TooLarge("XLS: too many records in a sheet".into()));
-        }
+        budget.record()?;
         match rec.id {
             BOF => {
                 // An embedded chart's substream.

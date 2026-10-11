@@ -180,13 +180,35 @@ fn function_name(name: &str) -> String {
     n.to_ascii_uppercase()
 }
 
-fn pop(stack: &mut Vec<Expr>) -> Result<Expr, Unsupported> {
-    stack.pop().ok_or(Unsupported("malformed formula (operand missing)"))
+/// Expression nesting at most, as in the formula parser: deeper trees would overflow the stack
+/// when printed, evaluated or dropped (a hostile file can chain thousands of PtgParen tokens).
+const MAX_DEPTH: usize = 256;
+
+/// Operand stack entries: an expression and its nesting depth.
+type Stack = Vec<(Expr, usize)>;
+
+/// Pops an operand, recording its depth in `kids` (the deepest operand this token consumed).
+fn pop(stack: &mut Stack, kids: &mut usize) -> Result<Expr, Unsupported> {
+    let (e, d) = stack.pop().ok_or(Unsupported("malformed formula (operand missing)"))?;
+    *kids = (*kids).max(d);
+    Ok(e)
 }
 
-fn pop_n(stack: &mut Vec<Expr>, n: usize) -> Result<Vec<Expr>, Unsupported> {
+fn pop_n(stack: &mut Stack, n: usize, kids: &mut usize) -> Result<Vec<Expr>, Unsupported> {
     let at = stack.len().checked_sub(n).ok_or(Unsupported("malformed formula (argument missing)"))?;
-    Ok(stack.split_off(at))
+    let popped = stack.split_off(at);
+    *kids = popped.iter().map(|(_, d)| *d).fold(*kids, usize::max);
+    Ok(popped.into_iter().map(|(e, _)| e).collect())
+}
+
+/// Pushes the result of a token one level above the operands it consumed.
+fn push(stack: &mut Stack, kids: usize, e: Expr) -> Result<(), Unsupported> {
+    let depth = kids.saturating_add(1);
+    if depth > MAX_DEPTH {
+        return Err(Unsupported("formula nested too deeply"));
+    }
+    stack.push((e, depth));
+    Ok(())
 }
 
 /// Decodes `rgce` (tokens) with `rgcb` (the extra data for array constants) evaluated at
@@ -197,9 +219,10 @@ pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links:
     }
     let mut t = Bytes { b: rgce, pos: 0 };
     let mut extra = Bytes { b: rgcb, pos: 0 };
-    let mut stack: Vec<Expr> = Vec::new();
+    let mut stack: Stack = Vec::new();
     while t.pos < rgce.len() {
         let ptg = t.u8()?;
+        let mut kids = 0usize;
         // Operand classes (reference / value / array) share one token number.
         let id = if ptg & 0x60 != 0 { 0x20 | (ptg & 0x1F) } else { ptg };
         match id {
@@ -221,9 +244,9 @@ pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links:
                     0x10 => BinOp::Union,
                     _ => BinOp::Range,
                 };
-                let b = pop(&mut stack)?;
-                let a = pop(&mut stack)?;
-                stack.push(Expr::Binary(op, Box::new(a), Box::new(b)));
+                let b = pop(&mut stack, &mut kids)?;
+                let a = pop(&mut stack, &mut kids)?;
+                push(&mut stack, kids, Expr::Binary(op, Box::new(a), Box::new(b)))?;
             }
             0x12..=0x14 => {
                 let op = match id {
@@ -231,18 +254,18 @@ pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links:
                     0x13 => UnOp::Neg,
                     _ => UnOp::Percent,
                 };
-                let x = pop(&mut stack)?;
-                stack.push(Expr::Unary(op, Box::new(x)));
+                let x = pop(&mut stack, &mut kids)?;
+                push(&mut stack, kids, Expr::Unary(op, Box::new(x)))?;
             }
             0x15 => {
-                let x = pop(&mut stack)?;
-                stack.push(Expr::Paren(Box::new(x)));
+                let x = pop(&mut stack, &mut kids)?;
+                push(&mut stack, kids, Expr::Paren(Box::new(x)))?;
             }
-            0x16 => stack.push(Expr::Missing),
+            0x16 => push(&mut stack, kids, Expr::Missing)?,
             0x17 => {
                 let cch = usize::from(t.u8()?);
                 let high = t.u8()? & 1 != 0;
-                stack.push(Expr::Text(Arc::from(t.chars(cch, high)?)));
+                push(&mut stack, kids, Expr::Text(Arc::from(t.chars(cch, high)?)))?;
             }
             0x19 => {
                 let kind = t.u8()?;
@@ -255,34 +278,34 @@ pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links:
                 }
                 if kind & 0x10 != 0 {
                     // PtgAttrSum: SUM of the single operand.
-                    let x = pop(&mut stack)?;
-                    stack.push(Expr::Call("SUM".into(), vec![x]));
+                    let x = pop(&mut stack, &mut kids)?;
+                    push(&mut stack, kids, Expr::Call("SUM".into(), vec![x]))?;
                 }
                 // Semi (volatile), If, Goto, Space, Baxcel: no effect on the expression.
             }
             0x1C => {
                 let e = t.u8()?;
-                stack.push(Expr::Error(error_code(e).ok_or(Unsupported("unknown error constant"))?));
+                push(&mut stack, kids, Expr::Error(error_code(e).ok_or(Unsupported("unknown error constant"))?))?;
             }
-            0x1D => stack.push(Expr::Bool(t.u8()? != 0)),
-            0x1E => stack.push(Expr::Number(f64::from(t.u16()?))),
+            0x1D => push(&mut stack, kids, Expr::Bool(t.u8()? != 0))?,
+            0x1E => push(&mut stack, kids, Expr::Number(f64::from(t.u16()?)))?,
             0x1F => {
                 let n = t.f64()?;
                 if !n.is_finite() {
                     return Err(Unsupported("invalid number constant"));
                 }
-                stack.push(Expr::Number(n));
+                push(&mut stack, kids, Expr::Number(n))?;
             }
             0x20 => {
                 t.take(7)?;
-                stack.push(array_constant(&mut extra)?);
+                push(&mut stack, kids, array_constant(&mut extra)?)?;
             }
             0x21 => {
                 let iftab = t.u16()?;
                 let (name, args) = function(iftab).ok_or(Unsupported("unknown function"))?;
                 let n = usize::try_from(args).map_err(|_| Unsupported("unknown function argument count"))?;
-                let args = pop_n(&mut stack, n)?;
-                stack.push(Expr::Call(name.to_string(), args));
+                let args = pop_n(&mut stack, n, &mut kids)?;
+                push(&mut stack, kids, Expr::Call(name.to_string(), args))?;
             }
             0x22 => {
                 let n = usize::from(t.u8()?);
@@ -290,7 +313,7 @@ pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links:
                 if tab & 0x8000 != 0 {
                     return Err(Unsupported("macro sheet commands"));
                 }
-                let mut args = pop_n(&mut stack, n)?;
+                let mut args = pop_n(&mut stack, n, &mut kids)?;
                 if tab & 0x7FFF == 0x00FF {
                     // A function called by name (add-in or newer function): the name comes first.
                     if args.is_empty() {
@@ -300,10 +323,10 @@ pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links:
                         Expr::Name(n) => function_name(&n),
                         _ => return Err(Unsupported("function call through an expression")),
                     };
-                    stack.push(Expr::Call(name, args));
+                    push(&mut stack, kids, Expr::Call(name, args))?;
                 } else {
                     let (name, _) = function(tab & 0x7FFF).ok_or(Unsupported("unknown function"))?;
-                    stack.push(Expr::Call(name.to_string(), args));
+                    push(&mut stack, kids, Expr::Call(name.to_string(), args))?;
                 }
             }
             0x23 => {
@@ -314,17 +337,17 @@ pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links:
                     .and_then(|i| links.names.get(i))
                     .filter(|n| !n.is_empty())
                     .ok_or(Unsupported("reference to a missing defined name"))?;
-                stack.push(Expr::Name(name.clone()));
+                push(&mut stack, kids, Expr::Name(name.clone()))?;
             }
             0x24 | 0x2C => {
                 let (r, c) = (t.u16()?, t.u16()?);
                 let a = anchor(r, c, base, id == 0x2C);
-                stack.push(Expr::Ref(Reference { sheet: SheetSel::Current, kind: RefKind::Cell(a) }));
+                push(&mut stack, kids, Expr::Ref(Reference { sheet: SheetSel::Current, kind: RefKind::Cell(a) }))?;
             }
             0x25 | 0x2D => {
                 let (r0, r1, c0, c1) = (t.u16()?, t.u16()?, t.u16()?, t.u16()?);
                 let kind = area(r0, r1, c0, c1, base, id == 0x2D);
-                stack.push(Expr::Ref(Reference { sheet: SheetSel::Current, kind }));
+                push(&mut stack, kids, Expr::Ref(Reference { sheet: SheetSel::Current, kind }))?;
             }
             0x26 => {
                 // PtgMemArea: a cache of the sub-expression that follows; skip its extra data.
@@ -340,42 +363,50 @@ pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links:
             }
             0x2A => {
                 t.take(4)?;
-                stack.push(Expr::Error(CellError::Ref));
+                push(&mut stack, kids, Expr::Error(CellError::Ref))?;
             }
             0x2B => {
                 t.take(8)?;
-                stack.push(Expr::Error(CellError::Ref));
+                push(&mut stack, kids, Expr::Error(CellError::Ref))?;
             }
             0x39 => {
                 let ixti = t.u16()?;
                 let i = t.u32()?;
-                stack.push(Expr::Name(links.extern_name(ixti, i)?));
+                push(&mut stack, kids, Expr::Name(links.extern_name(ixti, i)?))?;
             }
             0x3A => {
                 let ixti = t.u16()?;
                 let (r, c) = (t.u16()?, t.u16()?);
                 let a = anchor(r, c, base, mode == Mode::Name);
-                stack.push(match links.sheet_sel(ixti)? {
-                    Some(sheet) => Expr::Ref(Reference { sheet, kind: RefKind::Cell(a) }),
-                    None => Expr::Error(CellError::Ref),
-                });
+                push(
+                    &mut stack,
+                    kids,
+                    match links.sheet_sel(ixti)? {
+                        Some(sheet) => Expr::Ref(Reference { sheet, kind: RefKind::Cell(a) }),
+                        None => Expr::Error(CellError::Ref),
+                    },
+                )?;
             }
             0x3B => {
                 let ixti = t.u16()?;
                 let (r0, r1, c0, c1) = (t.u16()?, t.u16()?, t.u16()?, t.u16()?);
                 let kind = area(r0, r1, c0, c1, base, mode == Mode::Name);
-                stack.push(match links.sheet_sel(ixti)? {
-                    Some(sheet) => Expr::Ref(Reference { sheet, kind }),
-                    None => Expr::Error(CellError::Ref),
-                });
+                push(
+                    &mut stack,
+                    kids,
+                    match links.sheet_sel(ixti)? {
+                        Some(sheet) => Expr::Ref(Reference { sheet, kind }),
+                        None => Expr::Error(CellError::Ref),
+                    },
+                )?;
             }
             0x3C => {
                 t.take(6)?;
-                stack.push(Expr::Error(CellError::Ref));
+                push(&mut stack, kids, Expr::Error(CellError::Ref))?;
             }
             0x3D => {
                 t.take(10)?;
-                stack.push(Expr::Error(CellError::Ref));
+                push(&mut stack, kids, Expr::Error(CellError::Ref))?;
             }
             0x01 => return Err(Unsupported("nested shared or array formula reference")),
             0x02 => return Err(Unsupported("what-if data tables")),
@@ -386,7 +417,7 @@ pub(super) fn decode(rgce: &[u8], rgcb: &[u8], base: CellRef, mode: Mode, links:
             return Err(Unsupported("formula too complex"));
         }
     }
-    let e = pop(&mut stack)?;
+    let (e, _) = stack.pop().ok_or(Unsupported("malformed formula (operand missing)"))?;
     if !stack.is_empty() {
         return Err(Unsupported("malformed formula (unused operands)"));
     }
@@ -492,5 +523,26 @@ mod tests {
         assert!(text(&[0x03], &[]).is_err());
         assert!(text(&[0x21, 0xFF, 0x7F], &[]).is_err());
         assert!(text(&[0x60, 0, 0, 0, 0, 0, 0, 0], &[0xFF, 0xFF, 0xFF]).is_err());
+    }
+
+    #[test]
+    fn deep_nesting_is_refused_not_a_stack_overflow() {
+        // 1 followed by thousands of PtgParen / PtgUminus tokens: a hostile file used to build a
+        // 16K-deep tree that overflowed the stack when printed or dropped.
+        for op in [0x15u8, 0x13] {
+            let mut rgce = vec![0x1E, 1, 0];
+            rgce.resize(MAX_RGCE, op);
+            assert_eq!(text(&rgce, &[]), Err(Unsupported("formula nested too deeply")));
+        }
+        // Binary chains nest too: 1+1+1+... left-associated.
+        let mut chain = vec![0x1E, 1, 0];
+        while chain.len() + 4 <= MAX_RGCE {
+            chain.extend([0x1E, 1, 0, 0x03]);
+        }
+        assert!(text(&chain, &[]).is_err());
+        // Nesting up to the limit still decodes.
+        let mut ok = vec![0x1E, 1, 0];
+        ok.resize(3 + MAX_DEPTH - 1, 0x15);
+        assert!(text(&ok, &[]).is_ok());
     }
 }

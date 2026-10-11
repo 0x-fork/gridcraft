@@ -437,3 +437,42 @@ fn hostile_xls_input_never_panics_or_hangs() {
         let _ = read_xls(&b);
     }
 }
+
+#[test]
+fn sheets_share_one_record_budget() {
+    // Many BoundSheet records point into one long substream (at successive nested BOFs), so each
+    // sheet would read the whole tail. The record allowance is shared, not per sheet.
+    let n = 300u32;
+    let tail: Vec<u8> = (0..2000u16).flat_map(|r| rec(0x0203, &cat(&[&cell(r, 0, 0), &1.0f64.to_le_bytes()]))).collect();
+    let boundsheet = |pos: u32, name: &str| rec(0x0085, &cat(&[&pos.to_le_bytes(), &[0, 0, name.len() as u8, 0], name.as_bytes()]));
+    let globals = |base: u32| {
+        let mut g = bof(0x0005);
+        for i in 0..n {
+            g.extend(boundsheet(base + i * bof(0x0010).len() as u32, &format!("S{i}")));
+        }
+        g.extend(eof());
+        g
+    };
+    let base = globals(0).len() as u32;
+    let mut stream = globals(base);
+    for _ in 0..n {
+        stream.extend(bof(0x0010));
+    }
+    stream.extend(tail);
+    stream.extend(eof());
+    let file = compound("Workbook", &stream);
+    // About n × 2,000 records in all: over a 100,000 shared allowance, though each sheet alone fits.
+    assert!(matches!(crate::xls::read_xls_with(&file, crate::xls::Budget::with_max_records(100_000)), Err(IoError::TooLarge(_))));
+    assert!(crate::xls::read_xls_with(&file, crate::xls::Budget::with_max_records(10_000_000)).is_ok());
+
+    // Two sheets at the same offset are refused outright.
+    let mut dup = bof(0x0005);
+    let at = (dup.len() + 2 * boundsheet(0, "A").len() + eof().len()) as u32;
+    dup.extend(boundsheet(at, "A"));
+    dup.extend(boundsheet(at, "B"));
+    dup.extend(eof());
+    dup.extend(bof(0x0010));
+    dup.extend(eof());
+    let err = read_xls(&compound("Workbook", &dup)).unwrap_err().to_string();
+    assert!(err.contains("same substream"), "{err}");
+}
