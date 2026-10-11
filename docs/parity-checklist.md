@@ -8,7 +8,7 @@ Each entry is an Excel ribbon or menu command (feature names only). It counts as
 
 | Tab | Implemented | Total | Parity |
 |---|---|---|---|
-| File | 10 | 11 | 91% |
+| File | 11 | 11 | 100% |
 | Home | 94 | 94 | 100% |
 | Insert | 16 | 25 | 64% |
 | Draw | 4 | 4 | 100% |
@@ -24,7 +24,7 @@ Each entry is an Excel ribbon or menu command (feature names only). It counts as
 | PivotTable Analyze | 13 | 13 | 100% |
 | PivotTable Design | 4 | 4 | 100% |
 
-## File (10 / 11, 91%)
+## File (11 / 11, 100%)
 
 Implemented:
 
@@ -38,9 +38,6 @@ Implemented:
 - `file.exportCsv` CSV (Export)
 - `file.exportHtml` Web Page (Export)
 - `file.properties` Properties (Info)
-
-Missing:
-
 - `file.options` Options (Options)
 
 ## Home (94 / 94, 100%)

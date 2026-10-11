@@ -1303,6 +1303,22 @@ fn checkboxes_survive_xlsx_as_cell_controls() {
     assert_eq!(v(&s, "A2"), Value::Bool(false));
 }
 
+#[test]
+fn file_options_reports_settings_and_asks_for_the_options_page() {
+    let mut s = Session::new();
+    // No workbook: nothing to report, but still no error.
+    assert_eq!(s.execute("file.options", json!({})).unwrap(), json!({"calculation": null}));
+    s.take_ui_requests();
+    s.new_workbook();
+    s.execute("formulas.calculationOptions", json!({"mode": "manual", "iterative": true})).unwrap();
+    let before = s.active().unwrap().wb.clone();
+    let r = s.execute("file.options", json!({})).unwrap();
+    assert_eq!(r["calculation"]["mode"], "manual");
+    assert_eq!(r["calculation"]["iterative"], true);
+    assert!(matches!(s.take_ui_requests().as_slice(), [crate::UiRequest::Dialog(name, _)] if name == "options"));
+    assert_eq!(s.active().unwrap().wb, before, "Options never changes the workbook");
+}
+
 fn reopen(s: &mut Session) {
     let r = s.execute("file.saveBytes", json!({"format": "xlsx"})).unwrap();
     let b64 = r["base64"].as_str().unwrap().to_string();

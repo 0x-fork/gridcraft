@@ -239,33 +239,15 @@ pub fn show(app: &mut SheetApp, ui: &mut Ui) {
         });
 }
 
+/// The File tab opens the Backstage view (New, Open, Info, Save As, Print, Export, Options…), like
+/// Excel's; the ribbon's tab and collapsed state are left as they were for when it closes.
 fn file_menu(app: &mut SheetApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
-    let label = egui::RichText::new("File").font(theme::ui_font(13.5)).color(t.accent);
-    let file = ui.add_sized(vec2(46.0, 30.0), egui::Button::new(label).frame(false));
-    egui::Popup::menu(&file).show(|ui| {
-        for (label, id, needs_document) in [
-            ("New Workbook", "file.new", false),
-            ("Open…", "file.open", false),
-            ("Save", "file.save", true),
-            ("Save As…", "file.saveAs", true),
-            ("Close", "file.close", true),
-        ] {
-            if id == "file.save" || id == "file.close" {
-                ui.separator();
-            }
-            if ui.add_enabled(!needs_document || app.session.active().is_some(), egui::Button::new(label)).clicked() {
-                // File operations must include the cell the user is still editing.
-                if app.commit_edit(0, 0, false, false) {
-                    app.run_or_alert(id, json!({}));
-                }
-                ui.close();
-            }
-        }
-        // Excel keeps the theme under File › Account › Office Theme (#194).
-        ui.separator();
-        ui.menu_button(app.ui.language.tr("Display theme"), |ui| theme_choices(app, ui));
-    });
+    let label = egui::RichText::new(app.ui.language.tr("File")).font(theme::ui_font(13.5)).color(t.accent);
+    let file = ui.add(egui::Button::new(label).frame(false).min_size(vec2(46.0, 30.0)));
+    if file.clicked() {
+        app.open_backstage(crate::backstage::Page::Home);
+    }
 }
 
 /// System / Light / Dark, as in the View tab's Display theme box (`view.theme`).
