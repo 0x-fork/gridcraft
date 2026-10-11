@@ -22,6 +22,7 @@ fn sample() -> Workbook {
     wb.date_system = DateSystem::D1904;
     wb.calc = CalcSettings { mode: CalcMode::Manual, iterative: true, max_iterations: 42, max_change: 0.5, precision_as_displayed: true };
     wb.protected_structure = true;
+    wb.structure_password = Some(gridcraft_model::PasswordHash::new_sha512("s3cret", b"0123456789abcdef"));
     wb.props = DocProps {
         title: "T & <x>".into(),
         subject: "S".into(),
@@ -247,7 +248,14 @@ fn sample() -> Workbook {
             (3, FilterCriterion::FillColor(Color::Rgb(0xFF0000))),
         ],
     });
-    s.protection = Some(SheetProtection { format_cells: true, sort: true, select_locked: true, select_unlocked: true, ..Default::default() });
+    s.protection = Some(SheetProtection {
+        format_cells: true,
+        sort: true,
+        select_locked: true,
+        select_unlocked: true,
+        password: Some(gridcraft_model::PasswordHash::new_sha512("sheet pw", b"fedcba9876543210")),
+        ..Default::default()
+    });
     s.print = PrintSettings {
         orientation: Orientation::Landscape,
         paper: "A4".into(),
@@ -412,6 +420,8 @@ fn full_roundtrip() {
     assert_eq!(back.date_system, wb.date_system);
     assert_eq!(back.calc, wb.calc);
     assert!(back.protected_structure);
+    assert_eq!(back.structure_password, wb.structure_password);
+    assert!(back.structure_password.as_ref().unwrap().verify("s3cret").unwrap());
     assert_eq!(back.props, wb.props);
     assert_eq!(back.theme, wb.theme);
     assert_eq!(back.names, wb.names);
@@ -812,4 +822,29 @@ fn bad_comment_dates_are_left_out() {
     let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
     let c = &back.sheets[0].comments[&at("A1")];
     assert!(c.threaded && c.dates.is_empty());
+}
+
+/// #378: the saved scroll position survives a round trip, with and without frozen panes (where it
+/// is the scrolling pane's `topLeftCell`).
+#[test]
+fn scroll_position_round_trips_with_and_without_frozen_panes() {
+    let mut wb = Workbook::new();
+    wb.sheet_mut(0).unwrap().view_top_left = at("A31");
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    assert_eq!(back.sheet(0).unwrap().view_top_left, at("A31"));
+
+    let s = wb.sheet_mut(0).unwrap();
+    s.freeze = Some((1, 0));
+    s.view_top_left = at("C40");
+    let bytes = write_xlsx(&wb).unwrap();
+    let (xml, _) = sheet1_xml(&bytes);
+    assert!(xml.contains(r#"<pane ySplit="1" topLeftCell="C40""#), "{xml}");
+    let (back, _) = read_xlsx(&bytes).unwrap();
+    assert_eq!(back.sheet(0).unwrap().view_top_left, at("C40"));
+    assert_eq!(back.sheet(0).unwrap().freeze, Some((1, 0)));
+
+    // A scroll position inside the frozen rows is written as the first scrolling row.
+    wb.sheet_mut(0).unwrap().view_top_left = at("A1");
+    let (xml, _) = sheet1_xml(&write_xlsx(&wb).unwrap());
+    assert!(xml.contains(r#"topLeftCell="A2""#), "{xml}");
 }

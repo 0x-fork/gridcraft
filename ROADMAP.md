@@ -132,6 +132,13 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-10-11 | Windows: DirectX 12 shaders compile with FXC, so a missing or stray `dxcompiler.dll` no longer stops the app at start (#339, #354) |
+| 2026-10-11 | Merged cells draw their whole outline: right and bottom edges come from the last column's and last row's cells (#376) |
+| 2026-10-11 | Shrink to fit draws too-wide text and numbers in a smaller font inside the cell or merged area (#375) |
+| 2026-10-11 | Shift+Space and Ctrl+Space select the row / column without starting an edit; Control+Space on Mac (#338) |
+| 2026-10-11 | Workbooks reopen at their saved scroll position (`topLeftCell`, also with frozen panes) and save the current one back (#378) |
+| 2026-10-11 | Protect Sheet passwords use Excel-compatible hashes and round-trip in XLSX `sheetProtection` (imported passwords verify instead of being dropped) |
+| 2026-10-11 | Review › Protect Workbook opens a dialog with an optional password (Excel-compatible hash, kept in XLSX `workbookProtection`); unprotecting verifies it (#345) |
 | 2026-10-11 | Legacy Excel 97-2003 `.xls` (BIFF8) import with formulas, number formats, merges, sizes and names (#121) |
 | 2026-10-11 | XLSX pass-through: custom XML, external links, connections, query tables, printer settings, form/ActiveX controls and OLE objects are kept on save (#330, #324) |
 | 2026-10-11 | Data › Forecast › Forecast Sheet: a new sheet with the history, FORECAST.ETS forecast, confidence bounds, statistics and a chart (#322) |

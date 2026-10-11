@@ -219,6 +219,23 @@ impl Dialog {
                     json!({"action": "add", "range": sel}),
                 )
             }
+            "protectWorkbook" => Dialog::form(
+                "protectWorkbook",
+                "Protect Structure and Windows",
+                "review.protectWorkbook",
+                vec![
+                    Password { key: "password", label: "Password (optional):" },
+                    Note("Protect workbook for: Structure (sheets can't be added, moved, renamed, hidden or deleted).".into()),
+                ],
+                json!({"on": true}),
+            ),
+            "unprotectWorkbook" => Dialog::form(
+                "unprotectWorkbook",
+                "Unprotect Workbook",
+                "review.protectWorkbook",
+                vec![Password { key: "password", label: "Password:" }],
+                json!({"on": false}),
+            ),
             "unprotectSheet" => Dialog::form(
                 "unprotectSheet",
                 "Unprotect Sheet",
@@ -1414,8 +1431,8 @@ fn format_cells(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: 
         }
         "Font" => {
             egui::ComboBox::from_label("Font").selected_text(st.font.name.clone()).show_ui(ui, |ui| {
-                for f in crate::ribbon::FONTS {
-                    ui.selectable_value(&mut st.font.name, f.to_string(), *f);
+                for f in crate::fonts::families() {
+                    ui.selectable_value(&mut st.font.name, f.clone(), f.clone());
                 }
             });
             ui.add(egui::Slider::new(&mut st.font.size, 6.0..=72.0).text("Size"));

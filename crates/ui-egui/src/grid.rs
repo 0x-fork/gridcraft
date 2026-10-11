@@ -8,7 +8,7 @@ use std::sync::Arc;
 use egui::{Align2, Color32, CursorIcon, FontId, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use gridcraft_engine::cf::{CfCache, CfLook};
 use gridcraft_engine::core::{CellRef, MAX_COLS, MAX_ROWS, RangeRef, Value, col_to_letters};
-use gridcraft_engine::model::{BorderStyle, Color, HAlign, LineIndex, PatternType, Sheet, Style, Underline, VAlign, Workbook};
+use gridcraft_engine::model::{BorderLine, BorderStyle, Color, HAlign, LineIndex, PatternType, Sheet, Style, Underline, VAlign, Workbook};
 use serde_json::json;
 
 use crate::SheetApp;
@@ -934,10 +934,17 @@ pub(crate) fn paint_quadrant(
             continue;
         }
         let first_line = text.lines().next().unwrap_or("").to_string();
+        // Shrink to fit: too-wide content is drawn in a smaller font so it fits the cell (or the
+        // merged area): it neither spills, nor is clipped, nor turns into ####.
+        let small = (st.align.shrink && !rotated && st.align.h != HAlign::Fill && fill_char.is_none())
+            .then(|| shrink_font(p, &first_line, &font, avail_w - 2.0 * pad - indent))
+            .flatten();
+        let shrunk = small.is_some();
+        let font = small.unwrap_or(font);
         let mut galley = p.layout_no_wrap(first_line.clone(), font.clone(), color);
         let mut w = galley.size().x;
         // Numbers and dates never overflow: they show #### when too narrow.
-        if (numeric || matches!(v, Value::Number(_))) && w > avail_w - 2.0 * pad && st.align.h != HAlign::Fill {
+        if !shrunk && (numeric || matches!(v, Value::Number(_))) && w > avail_w - 2.0 * pad && st.align.h != HAlign::Fill {
             let n = ((avail_w - 2.0 * pad) / char_w).floor().max(1.0) as usize;
             galley = p.layout_no_wrap("#".repeat(n), font.clone(), color);
             w = galley.size().x;
@@ -1037,12 +1044,19 @@ pub(crate) fn paint_quadrant(
     // Borders (over fills and text).
     for (c, rect, lk, _) in &looks {
         let b = &lk.style.borders;
-        let edges = [
-            (b.top, [rect.left_top(), rect.right_top()]),
-            (b.bottom, [rect.left_bottom(), rect.right_bottom()]),
-            (b.left, [rect.left_top(), rect.left_bottom()]),
-            (b.right, [rect.right_top(), rect.right_bottom()]),
-        ];
+        let merge = merges.iter().find(|m| m.start == *c);
+        let edges = match merge {
+            // A merged area's outline lives on the cells along each of its edges (Excel writes the
+            // right edge on the last column's cells and the bottom edge on the last row's), so each
+            // edge is drawn cell by cell from the cell it belongs to.
+            Some(m) => merged_edges(wb, si, sh, geo, *m, *rect, (r0, r1), (c0, c1), cf),
+            None => vec![
+                (b.top, [rect.left_top(), rect.right_top()]),
+                (b.bottom, [rect.left_bottom(), rect.right_bottom()]),
+                (b.left, [rect.left_top(), rect.left_bottom()]),
+                (b.right, [rect.right_top(), rect.right_bottom()]),
+            ],
+        };
         for (line, pts) in edges {
             if line.is_none() {
                 continue;
@@ -1111,6 +1125,60 @@ pub fn filter_button_rect(geo: &Geo, sh: &Sheet, c: CellRef) -> Rect {
     let rect = geo.cell_rect(sh, c);
     let s = (rect.height() - 4.0).clamp(10.0, 18.0);
     Rect::from_min_size(pos2(rect.right() - s - 2.0, rect.bottom() - s - 2.0), vec2(s, s))
+}
+
+/// The outline segments of merged area `m` drawn at `rect`: the top and left edges come from the
+/// first row's and first column's cells, the bottom and right edges from the last row's and last
+/// column's cells, one segment per visible cell (limited to the visible `rows` × `cols`).
+#[allow(clippy::too_many_arguments)]
+fn merged_edges(
+    wb: &Workbook,
+    si: usize,
+    sh: &Sheet,
+    geo: &Geo,
+    m: RangeRef,
+    rect: Rect,
+    rows: (u32, u32),
+    cols: (u32, u32),
+    cf: &mut CfCache,
+) -> Vec<(BorderLine, [Pos2; 2])> {
+    let mut out = Vec::new();
+    let (cs, ce) = (m.start.col.max(cols.0), m.end.col.min(cols.1));
+    for col in cs..=ce {
+        if sh.col_width(col) == 0.0 {
+            continue;
+        }
+        let (x0, x1) = (geo.x(sh, col), geo.x(sh, col.saturating_add(1)));
+        let top = look(wb, si, sh, CellRef::new(m.start.row, col), cf).0.style.borders.top;
+        let bottom = look(wb, si, sh, CellRef::new(m.end.row, col), cf).0.style.borders.bottom;
+        out.push((top, [pos2(x0, rect.top()), pos2(x1, rect.top())]));
+        out.push((bottom, [pos2(x0, rect.bottom()), pos2(x1, rect.bottom())]));
+    }
+    let (rs, re) = (m.start.row.max(rows.0), m.end.row.min(rows.1));
+    for row in rs..=re {
+        if sh.row_height(row) == 0.0 {
+            continue;
+        }
+        let (y0, y1) = (geo.y(sh, row), geo.y(sh, row.saturating_add(1)));
+        let left = look(wb, si, sh, CellRef::new(row, m.start.col), cf).0.style.borders.left;
+        let right = look(wb, si, sh, CellRef::new(row, m.end.col), cf).0.style.borders.right;
+        out.push((left, [pos2(rect.left(), y0), pos2(rect.left(), y1)]));
+        out.push((right, [pos2(rect.right(), y0), pos2(rect.right(), y1)]));
+    }
+    out
+}
+
+/// The smaller font that makes `text` fit in `room` points of width (Shrink to fit), or `None`
+/// when it already fits at its own size.
+fn shrink_font(p: &Painter, text: &str, font: &FontId, room: f32) -> Option<FontId> {
+    let natural = p.layout_no_wrap(text.to_string(), font.clone(), Color32::PLACEHOLDER).size().x;
+    let room = room.max(1.0);
+    if natural.is_nan() || natural <= room {
+        return None;
+    }
+    // Glyph advances don't scale exactly linearly (rounding), so leave a little slack.
+    let size = (font.size * room / natural * 0.97).max(1.0);
+    Some(FontId::new(size, font.family.clone()))
 }
 
 pub(crate) fn paint_border(p: &Painter, pts: [Pos2; 2], style: BorderStyle, col: Color32) {
@@ -2192,6 +2260,11 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
         m.set_focus_lock_filter(resp.id, egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true })
     });
     let events = ctx.input(|i| i.events.clone());
+    // A shortcut key that also types a character (Shift+Space sends Text(" ")) must not start an edit.
+    let shortcut_pressed = events.iter().any(|e| {
+        matches!(e, egui::Event::Key { pressed: true, modifiers: m, key, .. }
+            if !m.alt && (m.ctrl || m.command || (m.shift && *key == egui::Key::Space)))
+    });
     let page = ((geo.cells.height() / geo.z) / sh.default_row_height).floor().max(1.0) as i64;
     for ev in events {
         match ev {
@@ -2202,6 +2275,7 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
                 app.copy_to_clipboard(ctx, "edit.cut");
             }
             egui::Event::Paste(text) => app.paste_external(text),
+            egui::Event::Text(_) if shortcut_pressed => {}
             egui::Event::Text(text) if text.chars().all(|c| !c.is_control()) && !text.is_empty() => {
                 app.begin_edit(Some(text), false);
                 if let Some(ed) = app.editor.as_mut() {
@@ -2270,8 +2344,6 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
                         app.session.format_painter = None;
                     }
                     Key::Space if !cmd && !shift && is_checkbox(sh, app) => app.run_or_alert("cell.toggleCheckbox", json!({})),
-                    Key::Space if cmd && !shift => app.run_or_alert("selection.column", json!({})),
-                    Key::Space if shift && !cmd => app.run_or_alert("selection.row", json!({})),
                     Key::F8 if m.alt => {
                         app.open_dialog("macros", json!({}));
                     }
