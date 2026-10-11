@@ -11,6 +11,9 @@ pub enum Action {
     Tab(&'static str),
     Command(&'static str),
     Dialog(&'static str),
+    /// The target command does not exist yet: the sequence is reserved, its badge shows, and
+    /// invoking it is a silent no-op until the command lands (see keytips.json `pending`).
+    Pending(&'static str),
 }
 
 #[derive(Default)]

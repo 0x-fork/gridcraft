@@ -1,13 +1,16 @@
 //! The keytip sequence table: every Excel-style Alt access sequence and what it does.
 //!
-//! This is the single source of truth for sequential access keys. Both the matcher in
-//! [`super::KeyTips::process`] and the badge painter in `ribbon.rs` read from here, so a
-//! sequence is added in exactly one place.
+//! The matcher in [`super::KeyTips::process`] and the badge painter in `ribbon.rs` both read
+//! [`SEQUENCES`], so a sequence is added in exactly one place: `keytips.json`.
 //!
-//! Regenerated (T5) from `plan/keytips-map-results.json` — the Excel-sequence collection and
-//! catalog join. Do not hand-edit entries without updating that source data.
+//! `keytips.json` is the human-edited source of truth (grouped, commented, one line per
+//! sequence; `pending` reserves sequences for commands that do not exist yet). `generated.rs`
+//! is produced from it by `cargo xtask keytips` — edit the JSON, not the generated file.
 
-use super::Action;
+pub(crate) use super::Action;
+
+mod generated;
+pub use generated::SEQUENCES;
 
 /// What a fully-matched sequence does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,38 +22,6 @@ pub enum Entry {
     /// Complete the sequence: run the action and clear the prefix.
     Finish(Action),
 }
-
-/// All known sequences, in no particular order (lookup is linear; sizes are small).
-pub const SEQUENCES: &[(&str, Entry)] = &[
-    // Ribbon tabs. Legacy Edit/Format paths (E/O/OC) lead to the same Home menus.
-    ("H", Entry::Tab("Home")),
-    ("N", Entry::Tab("Insert")),
-    ("P", Entry::Tab("Page Layout")),
-    ("M", Entry::Tab("Formulas")),
-    ("A", Entry::Tab("Data")),
-    ("R", Entry::Tab("Review")),
-    ("W", Entry::Tab("View")),
-    // Draw is a two-letter unit in Excel: the badge shows "JI" as one keytip, and the
-    // matcher waits after "J" (implicit level — no table entry needed).
-    ("JI", Entry::Tab("Draw")),
-    ("E", Entry::Tab("Home")),
-    ("O", Entry::Tab("Home")),
-    // Home tab groups.
-    ("HA", Entry::Continue),
-    ("HV", Entry::Continue),
-    ("HO", Entry::Continue),
-    ("OC", Entry::Continue),
-    // Home > Alignment.
-    ("HAR", Entry::Finish(Action::Command("home.alignRight"))),
-    ("HAL", Entry::Finish(Action::Command("home.alignLeft"))),
-    ("HAC", Entry::Finish(Action::Command("home.alignCenter"))),
-    // Paste Special — ribbon and legacy routes.
-    ("HVS", Entry::Finish(Action::Dialog("pasteSpecial"))),
-    ("ES", Entry::Finish(Action::Dialog("pasteSpecial"))),
-    // AutoFit column width — ribbon and legacy routes.
-    ("HOI", Entry::Finish(Action::Command("home.autofitColumnWidth"))),
-    ("OCA", Entry::Finish(Action::Command("home.autofitColumnWidth"))),
-];
 
 /// Look up a complete sequence.
 pub fn lookup(sequence: &str) -> Option<Entry> {
@@ -79,7 +50,7 @@ pub fn is_group_level(seq: &str) -> bool {
 
 fn matches_target(action: &Action, target: &str) -> bool {
     match action {
-        Action::Command(id) => *id == target,
+        Action::Command(id) | Action::Pending(id) => *id == target,
         Action::Dialog(name) => format!("dialog:{name}") == target,
         Action::Tab(_) => false,
     }

@@ -298,13 +298,35 @@ fn held_keys_do_not_toggle_twice_or_leak_repeated_letters() {
 #[test]
 fn tab_letters_switch_to_their_ribbon_tabs() {
     let mut h = harness(blank());
-    for (k, tab) in [(Key::N, "Insert"), (Key::P, "Page Layout"), (Key::M, "Formulas"), (Key::A, "Data"), (Key::R, "Review"), (Key::W, "View")] {
+    for (k, tab) in [(Key::N, "Insert"), (Key::P, "Page Layout"), (Key::M, "Formulas"), (Key::A, "Data"), (Key::R, "Review")] {
         key(&mut h, Key::F10); // arm
         letter(&mut h, k, false);
         assert_eq!(h.state().ui.ribbon_tab, tab, "letter {k:?}");
         assert_eq!(h.state().keytips.prefix(), None, "terminal tab units finish cleanly");
         assert!(h.state().editor.is_none(), "tab letters must not begin a cell edit");
     }
+}
+
+#[test]
+fn view_gridlines_sequence_runs_end_to_end() {
+    let mut h = harness(blank());
+    let gridlines = |h: &Harness| h.state().session.active().unwrap().wb.active().unwrap().show_gridlines;
+    assert!(gridlines(&h), "gridlines start visible");
+    key(&mut h, Key::F10);
+    letter(&mut h, Key::W, false);
+    // W has deeper sequences: it stays as an active level so View badges show.
+    assert_eq!(h.state().ui.ribbon_tab, "View");
+    assert_eq!(h.state().keytips.prefix(), Some("W"));
+    letter(&mut h, Key::V, false);
+    assert_eq!(h.state().keytips.prefix(), Some("WV"), "implicit group level waits for the last key");
+    letter(&mut h, Key::G, false);
+    assert_eq!(h.state().keytips.prefix(), None, "the finished sequence clears the prefix");
+    assert!(!gridlines(&h), "WVG toggles gridlines off");
+    key(&mut h, Key::F10);
+    for k in [Key::W, Key::V, Key::G] {
+        letter(&mut h, k, false);
+    }
+    assert!(gridlines(&h), "WVG toggles gridlines back on");
 }
 
 #[test]

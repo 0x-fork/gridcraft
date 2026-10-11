@@ -1015,6 +1015,9 @@ impl SheetApp {
                 }
                 keytips::Action::Command(id) => self.run_or_alert(id, json!({})),
                 keytips::Action::Dialog(name) => self.open_dialog(name, json!({})),
+                // Reserved sequence: the command does not exist yet. Badge shows, invocation
+                // is silent (see keytips.json `pending`).
+                keytips::Action::Pending(_) => {}
             }
         }
     }

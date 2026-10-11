@@ -1,0 +1,35 @@
+{
+  "doc": [
+    "Single source of truth for Excel-style sequential access keys (Alt+H+X+X style).",
+    "The generated keytip_table/generated.rs is produced from this file: `cargo xtask keytips`.",
+    "Adding or removing a shortcut is a one-line edit here. Rules:",
+    "  - seq: the access-key sequence, letters and digits only (two-letter units like \"JI\" are one entry).",
+    "  - kind: \"tab\" (switches a ribbon tab), \"command\" (runs a command id), \"dialog\" (opens a dialog by name),",
+    "    \"continue\" (an explicit group level with no deeper sequences yet).",
+    "  - Intermediate levels need no entries: the matcher waits automatically when deeper sequences exist.",
+    "  - pending: true = the command does not exist yet; the sequence stays reserved and silent until it lands.",
+    "  - Keep entries grouped by tab and sorted by sequence within a group; the FIRST entry for a tab is its canonical badge (legacy aliases come after it)."
+  ],
+  "sequences": [
+    { "seq": "H", "kind": "tab", "target": "Home" },
+    { "seq": "N", "kind": "tab", "target": "Insert" },
+    { "seq": "JI", "kind": "tab", "target": "Draw", "note": "Two-letter unit. Deeper Draw letters differ between Excel and GridCraft; left blank for future contributors." },
+    { "seq": "P", "kind": "tab", "target": "Page Layout" },
+    { "seq": "M", "kind": "tab", "target": "Formulas" },
+    { "seq": "A", "kind": "tab", "target": "Data" },
+    { "seq": "R", "kind": "tab", "target": "Review" },
+    { "seq": "W", "kind": "tab", "target": "View" },
+    { "seq": "E", "kind": "tab", "target": "Home", "note": "Legacy Edit-menu path (Excel 2003); leads to the same Home menus." },
+    { "seq": "O", "kind": "tab", "target": "Home", "note": "Legacy Format-menu path (Excel 2003); leads to the same Home menus." },
+
+    { "seq": "HAR", "kind": "command", "target": "home.alignRight" },
+    { "seq": "HAL", "kind": "command", "target": "home.alignLeft" },
+    { "seq": "HAC", "kind": "command", "target": "home.alignCenter" },
+    { "seq": "HVS", "kind": "dialog", "target": "pasteSpecial" },
+    { "seq": "ES", "kind": "dialog", "target": "pasteSpecial", "note": "Legacy Edit menu." },
+    { "seq": "HOI", "kind": "command", "target": "home.autofitColumnWidth" },
+    { "seq": "OCA", "kind": "command", "target": "home.autofitColumnWidth", "note": "Legacy Format menu." },
+
+    { "seq": "WVG", "kind": "command", "target": "view.gridlines" }
+  ]
+}
