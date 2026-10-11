@@ -4,13 +4,13 @@
 
 Each entry is an Excel ribbon or menu command (feature names only). It counts as implemented when GridCraft registers a command with the same id. This measures breadth only; the overall assessment (depth, fidelity, effort) is in [target-app-parity.md](target-app-parity.md).
 
-**Overall: 272 / 290 commands implemented (93.8%).**
+**Overall: 274 / 290 commands implemented (94.5%).**
 
 | Tab | Implemented | Total | Parity |
 |---|---|---|---|
 | File | 11 | 11 | 100% |
 | Home | 94 | 94 | 100% |
-| Insert | 16 | 25 | 64% |
+| Insert | 17 | 25 | 68% |
 | Draw | 4 | 4 | 100% |
 | Page Layout | 23 | 23 | 100% |
 | Formulas | 23 | 23 | 100% |
@@ -18,7 +18,7 @@ Each entry is an Excel ribbon or menu command (feature names only). It counts as
 | Review | 15 | 18 | 83% |
 | View | 20 | 20 | 100% |
 | Automate | 3 | 3 | 100% |
-| Table Design | 12 | 13 | 92% |
+| Table Design | 13 | 13 | 100% |
 | Chart Design | 8 | 8 | 100% |
 | Format | 3 | 3 | 100% |
 | PivotTable Analyze | 13 | 13 | 100% |
@@ -139,7 +139,7 @@ Implemented:
 - `edit.goToSpecial` Go To Special (Editing)
 - `home.addIns` Add-ins (Add-ins)
 
-## Insert (16 / 25, 64%)
+## Insert (17 / 25, 68%)
 
 Implemented:
 
@@ -153,6 +153,7 @@ Implemented:
 - `insert.chart` Charts (Charts)
 - `insert.pivotChart` PivotChart (Charts)
 - `insert.sparkline` Sparklines (Sparklines)
+- `insert.slicer` Slicer (Filters)
 - `insert.link` Link (Links)
 - `review.newComment` Comment (Comments)
 - `insert.textBox` Text Box (Text)
@@ -165,7 +166,6 @@ Missing:
 - `insert.smartArt` SmartArt (Illustrations)
 - `insert.screenshot` Screenshot (Illustrations)
 - `insert.map` Maps (Charts)
-- `insert.slicer` Slicer (Filters)
 - `insert.timeline` Timeline (Filters)
 - `insert.wordArt` WordArt (Text)
 - `insert.signatureLine` Signature Line (Text)
@@ -332,7 +332,7 @@ Implemented:
 - `automate.allScripts` All Scripts (Scripting Tools)
 - `automate.recordActions` Record Actions (Scripting Tools)
 
-## Table Design (12 / 13, 92%)
+## Table Design (13 / 13, 100%)
 
 Implemented:
 
@@ -341,6 +341,7 @@ Implemented:
 - `table.summarizePivot` Summarize with PivotTable (Tools)
 - `table.removeDuplicates` Remove Duplicates (Tools)
 - `table.convertToRange` Convert to Range (Tools)
+- `table.insertSlicer` Insert Slicer (Tools)
 - `table.headerRow` Header Row (Table Style Options)
 - `table.totalRow` Total Row (Table Style Options)
 - `table.bandedRows` Banded Rows (Table Style Options)
@@ -348,10 +349,6 @@ Implemented:
 - `table.lastColumn` Last Column (Table Style Options)
 - `table.bandedColumns` Banded Columns (Table Style Options)
 - `table.style` Table Styles (Table Styles)
-
-Missing:
-
-- `table.insertSlicer` Insert Slicer (Tools)
 
 ## Chart Design (8 / 8, 100%)
 

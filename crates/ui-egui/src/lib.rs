@@ -14,6 +14,7 @@ pub mod control;
 pub mod credits;
 pub mod dialogs;
 pub mod editor;
+pub mod fonts;
 pub mod formula_bar;
 mod formula_locale;
 pub mod grid;
@@ -39,6 +40,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, json};
 
 pub use control::{ControlRequest, ControlResponse};
+pub mod desktop_theme;
 
 /// Persisted UI preferences.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -131,6 +133,23 @@ pub struct SheetView {
     pub scroll: egui::Vec2,
 }
 
+/// Severity of a notice shown in the info bar under the ribbon.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoticeKind {
+    Info,
+    Warning,
+}
+
+/// A dismissible bar under the ribbon, in the spirit of Excel's message bar. Used to tell the
+/// user what an opened file carried that GridCraft handled differently (e.g. preserved macros).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Notice {
+    pub text: String,
+    pub kind: NoticeKind,
+    /// Optional button: `(label, dialog name)` — opens that dialog when clicked.
+    pub action: Option<(String, String)>,
+}
+
 /// Host services the platform shell provides (file pickers, opening URLs).
 #[derive(Default)]
 pub struct Services {
@@ -155,6 +174,9 @@ pub struct Services {
     pub open_async: Option<Box<dyn Fn()>>,
     /// Files delivered asynchronously (name, bytes), opened on the next frame.
     pub inbox: Option<Inbox>,
+    /// Web: hand PDF bytes to the browser's print flow directly (no download,
+    /// no intermediate file) — opens the system print dialog on that PDF.
+    pub print: Option<Box<dyn Fn(&[u8])>>,
 }
 
 /// Shared queue of files read asynchronously (browser file picker, drag and drop).
@@ -179,6 +201,8 @@ pub struct SheetApp {
     pub backstage: Option<backstage::Backstage>,
     pub message: Option<(String, String)>,
     pub toast: Option<(String, f64)>,
+    /// Dismissible info bar under the ribbon (open-time notices).
+    pub notice: Option<Notice>,
     pub services: Services,
     /// Synthetic input from agents, one batch per frame (drags need several frames).
     pub synthetic: std::collections::VecDeque<Vec<egui::Event>>,
@@ -187,10 +211,22 @@ pub struct SheetApp {
     pub perf: Perf,
     pub fonts_ready: bool,
     fonts_set: bool,
+    /// Workbook fonts bound into the current font set; a change rebinds (installed fonts only).
+    fonts_bound: Vec<String>,
+    /// The (doc uid, revision) `fonts_bound` was computed for, so the style table is walked only
+    /// when the workbook changes.
+    fonts_seen: (u64, u64),
+    /// Set while a font-set change is pending activation: skip this frame's paint, like the
+    /// startup `fonts_ready` gate (egui applies new definitions at the next pass).
+    fonts_rebind: bool,
     /// Han face order the installed fonts were built with; a language switch rebuilds the fonts
     /// only when it changes this (see `theme::HanOrder`).
     fonts_han: Option<theme::HanOrder>,
     effective_dark: bool,
+    /// The desktop's light/dark choice, watched while the app runs (Linux has no winit answer).
+    desktop_theme: desktop_theme::DesktopTheme,
+    /// The last answer [`desktop_theme`] gave, so a frame that asks costs nothing.
+    desktop_dark: Option<bool>,
     pub name_box: Option<String>,
     /// Transient ribbon keyboard navigation; never saved with UI preferences.
     pub keytips: keytips::KeyTips,
@@ -212,6 +248,7 @@ impl SheetApp {
             backstage: None,
             message: None,
             toast: None,
+            notice: None,
             services,
             synthetic: Default::default(),
             control_rx: None,
@@ -224,8 +261,13 @@ impl SheetApp {
             perf: Perf::default(),
             fonts_ready: false,
             fonts_set: false,
+            fonts_bound: Vec::new(),
+            fonts_seen: (0, 0),
+            fonts_rebind: false,
             fonts_han: None,
             effective_dark: false,
+            desktop_theme: desktop_theme::DesktopTheme::default(),
+            desktop_dark: None,
             name_box: None,
             keytips: keytips::KeyTips::default(),
             shots: control::Shots::default(),
@@ -234,8 +276,12 @@ impl SheetApp {
         }
     }
 
-    /// One-time context setup: fonts and visuals (default Han order; never reads the host locale).
+    /// One-time context setup: start cataloging the machine's fonts, then install the fonts and
+    /// visuals. Workbook-specific fonts are bound later, once the scan is done (see [`logic`]).
+    ///
+    /// [`logic`]: SheetApp::logic
     pub fn setup_context(ctx: &egui::Context, dark: bool) {
+        fonts::start_scan();
         Self::setup_context_for_language(ctx, dark, i18n::Language::En);
     }
 
@@ -245,8 +291,23 @@ impl SheetApp {
         theme::apply(ctx, dark);
     }
 
+    /// The font names the active workbook uses: every style's font plus the theme's heading/body
+    /// fonts. These are the families [`fonts`] binds an installed file for.
+    pub fn used_fonts(&self) -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        if let Some(d) = self.session.active() {
+            names.extend(d.wb.styles.iter().map(|(_, s)| s.font.name.clone()));
+            names.push(d.wb.theme.major_font.clone());
+            names.push(d.wb.theme.minor_font.clone());
+        }
+        names
+    }
+
     /// Runs an engine command (or a UI command) and handles UI requests it makes.
     pub fn run(&mut self, id: &str, params: Json) -> Result<Json, String> {
+        if matches!(id, "file.save" | "file.saveAs" | "file.saveBytes") {
+            self.store_view_state();
+        }
         if id.starts_with("file.")
             || matches!(
                 id,
@@ -328,7 +389,17 @@ impl SheetApp {
     }
 
     /// Runs a command and shows its error in a message box (for menu/ribbon clicks).
+    /// Follow the desktop's light/dark choice while the app runs (Linux; the desktop app calls
+    /// this once — tests and embedders don't start the watcher thread).
+    pub fn watch_desktop_theme(&mut self) {
+        self.desktop_theme = desktop_theme::DesktopTheme::start();
+    }
+
     pub fn run_or_alert(&mut self, id: &str, params: Json) {
+        // Printing from the UI also hands the PDF to the host's print flow (web).
+        if id == "file.print" {
+            return self.print_now(params);
+        }
         if let Err(e) = self.run(id, params) {
             self.alert(e);
         }
@@ -340,6 +411,26 @@ impl SheetApp {
             self.toast = Some((e, now_ms()));
         } else {
             self.message = Some(("GridCraft".into(), clean_error(&e)));
+        }
+    }
+
+    /// Runs `file.print`, builds the PDF and (where the host provides the hook — the web
+    /// build) hands the bytes straight to the browser's print flow; errors show the usual
+    /// alert. Desktop builds have no `services.print`, so this falls back to `run_or_alert`
+    /// (which still produces the PDF — just without a UI to act on the result yet).
+    pub fn print_now(&mut self, params: Json) {
+        match self.run("file.print", params) {
+            Ok(r) => {
+                let Some(b64) = r.get("base64").and_then(Json::as_str) else { return };
+                let Some(bytes) = gridcraft_engine::io::base64_decode(b64) else {
+                    self.message = Some(("GridCraft".into(), "Couldn't decode the generated PDF.".into()));
+                    return;
+                };
+                if let Some(print) = &self.services.print {
+                    print(&bytes);
+                }
+            }
+            Err(e) => self.alert(e),
         }
     }
 
@@ -434,6 +525,18 @@ impl SheetApp {
                 self.message = None;
                 Ok(Json::Null)
             }
+            "ui.notice" => Ok(match &self.notice {
+                Some(n) => json!({
+                    "text": n.text,
+                    "kind": match n.kind { NoticeKind::Warning => "warning", NoticeKind::Info => "info" },
+                    "action": n.action,
+                }),
+                None => Json::Null,
+            }),
+            "ui.notice.dismiss" => {
+                self.notice = None;
+                Ok(Json::Null)
+            }
             _ => return None,
         };
         Some(r)
@@ -485,8 +588,9 @@ impl SheetApp {
                         let path = if std::path::Path::new(&path).extension().is_none() { format!("{path}.xlsx") } else { path };
                         self.run_or_alert("file.save", json!({"path": path}));
                     }
-                } else if let Some(dl) = &self.services.download
-                    && let Ok(r) = self.session.run("file.saveBytes", json!({"format": "xlsx"}))
+                } else if self.services.download.is_some()
+                    && let Ok(r) = self.run("file.saveBytes", json!({"format": "xlsx"}))
+                    && let Some(dl) = &self.services.download
                     && let Some(b) = r.get("base64").and_then(Json::as_str).and_then(gridcraft_engine::io::base64_decode)
                 {
                     let name = r.get("name").and_then(Json::as_str).unwrap_or("Book.xlsx").to_string();
@@ -517,14 +621,46 @@ impl SheetApp {
 
     pub fn open_path(&mut self, path: &str) {
         match self.run("file.open", json!({"path": path})) {
-            Ok(_) => {
+            Ok(r) => {
                 self.ui.recent.retain(|p| p != path);
                 self.ui.recent.insert(0, path.to_string());
                 self.ui.recent.truncate(20);
+                self.show_open_warnings(&r);
             }
             Err(e) => self.message = Some(("GridCraft".into(), clean_error(&e))),
         }
         self.after_engine();
+    }
+
+    /// Turns the `warnings` a `file.open` result carries into an info-bar notice, choosing the
+    /// most important one (a preserved VBA project outranks, say, a skipped optional part).
+    /// Kept deliberately generic: any open-time warning can reach the user this way.
+    pub fn show_open_warnings(&mut self, r: &Json) {
+        let Some(list) = r.get("warnings").and_then(Json::as_array) else {
+            self.notice = None;
+            return;
+        };
+        let msgs: Vec<&str> = list.iter().filter_map(Json::as_str).collect();
+        if msgs.is_empty() {
+            // A clean open clears any notice left over from the previous document.
+            self.notice = None;
+            return;
+        }
+        let vba: Vec<&str> = msgs.iter().copied().filter(|m| m.to_lowercase().contains("macro") || m.contains("VBA")).collect();
+        if !vba.is_empty() {
+            self.notice = Some(Notice {
+                text: "This workbook contains VBA macros. GridCraft keeps them intact when you save, but does not run them.".into(),
+                kind: NoticeKind::Warning,
+                action: Some(("What this means".into(), "macros".into())),
+            });
+        } else {
+            let text = if msgs.len() == 1 {
+                msgs[0].to_string()
+            } else {
+                format!("{} items in this file were handled differently. First: {}", msgs.len(), msgs[0])
+            };
+            self.notice = Some(Notice { text, kind: NoticeKind::Info, action: None });
+        }
     }
 
     pub fn view_key(&self) -> Option<(u64, usize)> {
@@ -532,12 +668,45 @@ impl SheetApp {
     }
 
     pub fn view(&self) -> SheetView {
-        self.view_key().and_then(|k| self.views.get(&k).copied()).unwrap_or_default()
+        self.view_key().and_then(|k| self.views.get(&k).copied()).unwrap_or_else(|| self.saved_view())
     }
 
     pub fn view_mut(&mut self) -> Option<&mut SheetView> {
         let k = self.view_key()?;
-        Some(self.views.entry(k).or_default())
+        let saved = self.saved_view();
+        Some(self.views.entry(k).or_insert(saved))
+    }
+
+    /// The view a sheet opens with: scrolled to the file's saved first visible cell (`topLeftCell`).
+    fn saved_view(&self) -> SheetView {
+        let Some(sh) = self.session.active().and_then(|d| d.wb.active()) else { return SheetView::default() };
+        if sh.view != gridcraft_engine::model::SheetViewMode::Normal {
+            return SheetView::default();
+        }
+        let (fr, fc) = sh.freeze.unwrap_or((0, 0));
+        let top = sh.view_top_left;
+        let y = sh.row_top(top.row.max(fr)) - sh.row_top(fr);
+        let x = sh.col_left(top.col.max(fc)) - sh.col_left(fc);
+        SheetView { scroll: egui::vec2(x.max(0.0) as f32, y.max(0.0) as f32) }
+    }
+
+    /// Hands the active document's scroll positions (first visible cell per sheet) and active
+    /// cell to the engine so a save writes them (`sheetView topLeftCell`). Normal view only:
+    /// Page Layout view scrolls over pages, not cells.
+    pub fn store_view_state(&mut self) {
+        let Some(d) = self.session.active_mut() else { return };
+        let mut tops = Vec::new();
+        for (&(uid, si), v) in &self.views {
+            let Some(sh) = d.wb.sheets.get(si).filter(|sh| uid == d.uid && sh.view == gridcraft_engine::model::SheetViewMode::Normal) else {
+                continue;
+            };
+            let (fr, fc) = sh.freeze.unwrap_or((0, 0));
+            // A hair past the edge so a row that starts exactly at the scroll offset is the one found.
+            let row = sh.row_at(sh.row_top(fr) + v.scroll.y.max(0.0) as f64 + 0.01);
+            let col = sh.col_at(sh.col_left(fc) + v.scroll.x.max(0.0) as f64 + 0.01);
+            tops.push((si, CellRef::new(row, col)));
+        }
+        d.store_view(&tops);
     }
 
     /// Starts editing the active cell. `text` replaces the content (typing) or pre-fills it.
@@ -660,11 +829,42 @@ impl SheetApp {
             } else {
                 SheetApp::setup_context_for_language(ctx, self.ui.dark, self.ui.language);
                 self.fonts_set = true;
+                // The rebuilt set has no workbook fonts yet: bind them again once it is active.
+                self.fonts_bound.clear();
+                self.fonts_seen = (0, 0);
                 self.fonts_han = Some(theme::HanOrder::of(self.ui.language));
                 ctx.request_repaint();
             }
+        } else if self.fonts_rebind {
+            // A font-set change made last frame is active now.
+            self.fonts_rebind = false;
+        } else if fonts::scan_done() {
+            // Bind the workbook's installed fonts once the background scan has finished. Adding
+            // fonts re-applies the font set, which egui activates at the next pass, so skip this
+            // frame's paint (same one-frame cost as startup). Only when the workbook changed.
+            let seen = self.session.active().map(|d| (d.uid, d.revision)).unwrap_or((0, 0));
+            if seen != self.fonts_seen {
+                let used = self.used_fonts();
+                self.fonts_seen = seen;
+                if used != self.fonts_bound {
+                    ctx.set_fonts(theme::font_definitions_with(self.ui.language, &used));
+                    self.fonts_bound = used;
+                    self.fonts_rebind = true;
+                    ctx.request_repaint();
+                }
+            }
         }
-        let preference = self.ui.theme_preference();
+        if let Some(answer) = self.desktop_theme.take_change() {
+            self.desktop_dark = Some(answer);
+        }
+        let preference = match (
+            self.ui.system_theme,
+            ctx.system_theme().or_else(|| self.desktop_dark.map(|d| if d { egui::Theme::Dark } else { egui::Theme::Light })),
+        ) {
+            (true, Some(egui::Theme::Dark)) => egui::ThemePreference::Dark,
+            (true, Some(egui::Theme::Light)) => egui::ThemePreference::Light,
+            _ => self.ui.theme_preference(),
+        };
         if ctx.options(|o| o.theme_preference) != preference {
             ctx.set_theme(preference);
             ctx.request_repaint();
@@ -692,7 +892,10 @@ impl SheetApp {
             let b64 = gridcraft_engine::io::base64_encode(&bytes);
             match self.run("file.open", json!({"name": name, "base64": b64})) {
                 // A file picked from File › Open (web) arrives here: show it, not the Backstage.
-                Ok(_) => self.backstage = None,
+                Ok(r) => {
+                    self.backstage = None;
+                    self.show_open_warnings(&r);
+                }
                 Err(e) => self.message = Some(("GridCraft".into(), clean_error(&e))),
             }
             self.after_engine();
@@ -711,7 +914,7 @@ impl SheetApp {
     /// Lays out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
-        if !self.fonts_ready {
+        if !self.fonts_ready || self.fonts_rebind {
             ctx.request_repaint();
             return;
         }
@@ -729,6 +932,7 @@ impl SheetApp {
             backstage::show(self, ui);
         } else {
             ribbon::show(self, ui);
+            widgets::notice_bar(self, ui);
             if self.session.prefs.formula_bar {
                 formula_bar::show(self, ui);
             }
@@ -769,6 +973,7 @@ impl SheetApp {
             && self.session.active().is_some_and(|d| d.is_dirty() && d.path.as_deref().is_some_and(|p| p.ends_with(".xlsx")))
         {
             self.grid.last_autosave = now;
+            self.store_view_state();
             let _ = self.session.run("file.save", json!({}));
         }
         // Window title.

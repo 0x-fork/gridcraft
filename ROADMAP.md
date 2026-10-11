@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~25 points of "ready for real work" and ~160–240 h away
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (community merges: worksheet functions 513 / 523, catalog 272 / 290) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-11 · **Change:** minor (community merges: worksheet functions 513 / 523, catalog 274 / 290) · **Target:** Microsoft Excel (Microsoft 365)
 
 GridCraft aims at full Microsoft Excel parity, and at being better in places: faster, open (XLSX
 is the native format), fully scriptable by agents (MCP, control channel, CLI), and on the web.
@@ -21,7 +21,7 @@ This page is the summary. The detail is in:
 
 | Number | Value | Kind |
 |---|---|---|
-| **Feature breadth** (weighted) | **~75%** | estimated, anchored on two measurements: ribbon catalog 272 / 290 (93.8%), worksheet functions 513 / 523 (98.1%; 504 working, 96.4%) |
+| **Feature breadth** (weighted) | **~75%** | estimated, anchored on two measurements: ribbon catalog 274 / 290 (94.5%), worksheet functions 513 / 523 (98.1%; 504 working, 96.4%) |
 | **Ready for real work** | **~50%** | estimated from written weights (51.6); [target-app-parity.md](docs/target-app-parity.md) |
 | **Mainstream practitioner** | **~50%** | estimated: typical analyst/finance user, weekly features, × 0.90 interaction × 0.92 stability × 0.88 file exchange; [method](docs/target-app-parity.md#mainstream-practitioner) |
 | **Essentials user** | **~63%** | estimated: core features only, × 0.92 launch/stability × 0.95 clarity × 0.90 opening sent files; [method](docs/target-app-parity.md#essentials-user) |
@@ -132,6 +132,13 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-10-11 | Windows: DirectX 12 shaders compile with FXC, so a missing or stray `dxcompiler.dll` no longer stops the app at start (#339, #354) |
+| 2026-10-11 | Merged cells draw their whole outline: right and bottom edges come from the last column's and last row's cells (#376) |
+| 2026-10-11 | Shrink to fit draws too-wide text and numbers in a smaller font inside the cell or merged area (#375) |
+| 2026-10-11 | Shift+Space and Ctrl+Space select the row / column without starting an edit; Control+Space on Mac (#338) |
+| 2026-10-11 | Workbooks reopen at their saved scroll position (`topLeftCell`, also with frozen panes) and save the current one back (#378) |
+| 2026-10-11 | Protect Sheet passwords use Excel-compatible hashes and round-trip in XLSX `sheetProtection` (imported passwords verify instead of being dropped) |
+| 2026-10-11 | Review › Protect Workbook opens a dialog with an optional password (Excel-compatible hash, kept in XLSX `workbookProtection`); unprotecting verifies it (#345) |
 | 2026-10-11 | Legacy Excel 97-2003 `.xls` (BIFF8) import with formulas, number formats, merges, sizes and names (#121) |
 | 2026-10-11 | XLSX pass-through: custom XML, external links, connections, query tables, printer settings, form/ActiveX controls and OLE objects are kept on save (#330, #324) |
 | 2026-10-11 | Data › Forecast › Forecast Sheet: a new sheet with the history, FORECAST.ETS forecast, confidence bounds, statistics and a chart (#322) |

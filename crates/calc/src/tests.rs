@@ -133,6 +133,24 @@ fn long_chain() {
 }
 
 #[test]
+fn index_with_arrays_of_positions() {
+    let mut t = T::new();
+    for (i, row) in [[1, 2, 3], [4, 5, 6], [7, 8, 9]].iter().enumerate() {
+        for (j, v) in row.iter().enumerate() {
+            t.set(&format!("{}{}", ["A", "B", "C"][j], i + 1), &v.to_string());
+        }
+    }
+    t.set("E1", "=INDEX(A1:C3,{1;3},{1,3})");
+    assert_eq!([t.num("E1"), t.num("F1"), t.num("E2"), t.num("F2")], [1.0, 3.0, 7.0, 9.0]);
+    t.set("E4", "=SUM(INDEX(A1:C3,{1,2,3},2))");
+    assert_eq!(t.num("E4"), 15.0);
+    t.set("E5", "=INDEX({10,20,30},{3,1})");
+    assert_eq!([t.num("E5"), t.num("F5")], [30.0, 10.0]);
+    t.set("E7", "=INDEX(A1:C3,2,3)");
+    assert_eq!(t.num("E7"), 6.0);
+}
+
+#[test]
 fn errors_and_cycles() {
     let mut t = T::new();
     t.set("A1", "=1/0");
@@ -285,6 +303,32 @@ fn references_functions() {
     t.set("A2", "25");
     assert_eq!(t.num("B3"), 55.0);
     assert_eq!(t.num("B6"), 105.0);
+}
+
+#[test]
+fn relative_names() {
+    let mut t = T::new();
+    // As files store them: relative to A1. `Left` is the cell to the left, `Above3` the three
+    // cells above, `Mixed` column A of the same row.
+    for (name, formula) in [("Left", "Sheet1!XFD1"), ("Above3", "Sheet1!A1048574:A1048576"), ("Mixed", "Sheet1!$A1")] {
+        t.wb.names.push(gridcraft_model::DefinedName {
+            name: name.into(),
+            scope: None,
+            formula: formula.into(),
+            comment: String::new(),
+            hidden: false,
+        });
+    }
+    t.calc.rebuild(&t.wb);
+    for r in 1..=5 {
+        t.set(&format!("A{r}"), &(r * 10).to_string());
+    }
+    t.set("B2", "=Left");
+    assert_eq!(t.num("B2"), 20.0);
+    t.set("B4", "=Left+Mixed");
+    assert_eq!(t.num("B4"), 80.0);
+    t.set("A6", "=SUM(Above3)");
+    assert_eq!(t.num("A6"), 120.0);
 }
 
 #[test]

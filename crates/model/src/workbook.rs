@@ -67,10 +67,18 @@ pub struct Workbook {
     pub props: DocProps,
     /// Workbook structure protection.
     pub protected_structure: bool,
+    /// Password of the structure protection (XLSX `workbookProtection`), never the password.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structure_password: Option<crate::PasswordHash>,
     /// Custom fill lists (Options › Custom Lists) beyond the built-in ones.
     pub custom_lists: Vec<Vec<String>>,
     /// Named cell styles (Cell Styles gallery): name → style.
     pub cell_styles: Vec<(String, crate::style::Style)>,
+    /// VBA project (`xl/vbaProject.bin`) carried through unchanged. GridCraft does not run
+    /// macros; the blob is preserved so that saving a macro-enabled workbook never destroys the
+    /// macros it arrived with. base64 in JSON. `None` = the workbook has no macros.
+    #[serde(default, with = "crate::b64::opt")]
+    pub vba_project: Option<Vec<u8>>,
     /// Unmodelled file content kept for saving (package root and workbook level). Not in JSON.
     #[serde(skip)]
     pub preserved: Option<Arc<crate::preserved::Preserved>>,
@@ -95,8 +103,10 @@ impl Workbook {
             active_sheet: 0,
             props: DocProps::default(),
             protected_structure: false,
+            structure_password: None,
             custom_lists: vec![],
             cell_styles: vec![],
+            vba_project: None,
             preserved: None,
         }
     }
@@ -218,6 +228,9 @@ impl Workbook {
                 m = m.max(c.id);
             }
             for c in &s.tables {
+                m = m.max(c.id);
+            }
+            for c in &s.slicers {
                 m = m.max(c.id);
             }
         }

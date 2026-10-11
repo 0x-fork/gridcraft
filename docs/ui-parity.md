@@ -1,10 +1,10 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (Forecast Sheet dialog) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (selected columns can be reordered by dragging their headers) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Interaction, controls and feel, against Excel. Part of [target-app-parity.md](target-app-parity.md).
 **UI/UX fidelity: ~55% ready, 50–80 h** (estimated). Ribbon command coverage is measured
-separately in [parity-checklist.md](parity-checklist.md) (272 / 290).
+separately in [parity-checklist.md](parity-checklist.md) (274 / 290).
 
 Sources: `crates/ui-egui/src` (ribbon, grid, editor, formula bar, dialogs, panes),
 `crates/engine/src/cmd` (shortcuts in command specs), the owner's black-box notes
@@ -43,6 +43,7 @@ Sources: `crates/ui-egui/src` (ribbon, grid, editor, formula bar, dialogs, panes
 | Point mode (click/drag/arrow references), reference colouring, F4 | done |
 | AutoComplete in columns, function autocomplete and argument tips | done; cell helpers clip to the worksheet and hide when the editor scrolls out (#200) |
 | Header resize and double-click AutoFit | done (#42, #88 for header dividers) |
+| Reorder selected whole columns by dragging their headers | done (10-11) |
 | Freeze panes, split panes | freeze done; split to verify |
 | Copy as HTML table for other apps | done (#36, 10-10) |
 | Context menu on cells | 16 items (Cut, Copy, Paste, Paste Special, Insert, Delete, Clear Contents, Filter by value, Sort, New Comment, New Note, Format Cells, Pick From Drop-down List, Define Name, Link). Insert Copied Cells (Insert Cut Cells for whole rows/columns) while the clipboard holds a copy (#21). Missing: Insert Cut Cells for a cell block, paste-option icons, Quick Analysis, Get Data from Table, Show Changes, Smart Lookup |
@@ -149,6 +150,8 @@ scrollbar bugs 2–4 · pixel/feel pass against observed Excel 7–12.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Shift+Space / Ctrl+Space no longer start an edit; Control+Space selects the column on Mac (#338) |
+| 2026-10-11 | minor | Selected whole columns can be reordered by dragging their headers to an insertion point |
 | 2026-10-11 | minor | Page Layout view with rulers and in-place headers and footers (#329) |
 | 2026-10-11 | minor | Forecast Sheet dialog (#322) |
 | 2026-10-11 | minor | Delete and Backspace now remove the selected chart, picture or shape (#213) |
