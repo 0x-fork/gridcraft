@@ -457,6 +457,47 @@ fn control_keytips_open_dropdowns_and_run_handlers() {
 }
 
 #[test]
+fn editable_combos_filter_by_typing_and_move_by_arrows() {
+    // Open the font dropdown (HFF), type to filter, then Enter to apply.
+    let mut h = harness(blank());
+    sequence(&mut h, &[Key::H, Key::F, Key::F], false);
+    h.run_steps(3); // let the filter field gain focus
+    events(&mut h, [Event::Text("arial".into())]);
+    h.run_steps(3);
+    // "arial" matches Arial only — Georgia must be filtered out of the list.
+    assert_eq!(h.query_all_by_label("Georgia").count(), 0, "typing must narrow the list");
+    assert!(h.query_all_by_label("Arial").count() >= 1, "the match must stay visible");
+    key(&mut h, Key::Enter);
+    h.run_steps(3);
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "applying must not raise an error");
+    // The popup closed and the combo button now shows the applied font.
+    assert_eq!(h.query_all_by_label("Arial").count(), 1, "Enter must apply Arial and close the popup");
+    assert_eq!(h.query_all_by_label("Georgia").count(), 0);
+
+    // Arrows alone move through the full list: Calibri -> Cambria -> Candara -> Consolas.
+    let mut h = harness(blank());
+    sequence(&mut h, &[Key::H, Key::F, Key::F], false);
+    h.run_steps(3);
+    for _ in 0..3 {
+        key(&mut h, Key::ArrowDown);
+    }
+    key(&mut h, Key::Enter);
+    h.run_steps(3);
+    assert!(h.state().message.is_none() && h.state().toast.is_none());
+    assert_eq!(h.query_all_by_label("Consolas").count(), 1, "Down x3 from Calibri must land on Consolas");
+
+    // Size combo: type a custom size not in the list, Enter applies it.
+    let mut h = harness(blank());
+    sequence(&mut h, &[Key::H, Key::F, Key::S], false);
+    h.run_steps(3);
+    events(&mut h, [Event::Text("13.5".into())]);
+    key(&mut h, Key::Enter);
+    h.run_steps(3);
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "custom sizes must apply");
+    assert_eq!(h.query_all_by_label("13.5").count(), 1, "the button must show the custom size");
+}
+
+#[test]
 fn every_sequence_terminates_without_panicking() {
     use gridcraft_ui_egui::keytips::keytip_table::SEQUENCES;
     for (seq, _entry) in SEQUENCES {

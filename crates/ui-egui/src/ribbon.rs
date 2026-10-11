@@ -358,6 +358,101 @@ fn popup_command(forced: bool, clicked: bool) -> Option<egui::SetOpenCommand> {
     if forced { Some(egui::SetOpenCommand::Bool(true)) } else { clicked.then_some(egui::SetOpenCommand::Toggle) }
 }
 
+/// Per-control state of an [`editable_combo`]: the filter text and highlighted row.
+#[derive(Clone, Default)]
+struct ComboState {
+    text: String,
+    sel: i32,
+    was_open: bool,
+}
+
+/// What the user did with an [`editable_combo`].
+enum ComboResult {
+    None,
+    /// A row was applied: clicked or Enter on the highlighted row.
+    Picked(String),
+    /// Enter with free text that matches no row (e.g. a custom font size).
+    Entered(String),
+}
+
+/// Excel-style dropdown: a filter field (type to narrow the list) plus arrow/Enter selection.
+/// `items` are `(value, display)`; the value is what comes back. When `forced` (keytip invoke)
+/// or clicked, the popup opens, focuses the filter field, and selects its text.
+fn editable_combo(
+    ui: &mut Ui,
+    anchor: &egui::Response,
+    salt: &'static str,
+    current_value: &str,
+    items: &[(&str, String)],
+    forced: bool,
+) -> ComboResult {
+    let popup_id = anchor.id.with("popup");
+    let state_id = anchor.id.with(salt).with("__combo_state");
+    let mut st = ui.data_mut(|d| d.get_temp::<ComboState>(state_id)).unwrap_or_default();
+    let open_now = egui::Popup::is_id_open(ui.ctx(), popup_id);
+    if open_now && !st.was_open {
+        st.text = String::new();
+        st.sel = items.iter().position(|(v, _)| *v == current_value).map(|i| i as i32).unwrap_or(0);
+    }
+    st.was_open = open_now;
+    let mut result = ComboResult::None;
+    egui::Popup::menu(anchor).open_memory(popup_command(forced, anchor.clicked())).show(|ui| {
+        let text_id = anchor.id.with(salt).with("__combo_text");
+        let te = ui.add(egui::TextEdit::singleline(&mut st.text).id(text_id).desired_width(220.0).hint_text("Type to filter…"));
+        if open_now && !te.has_focus() {
+            ui.ctx().memory_mut(|m| m.request_focus(text_id));
+            // Select all once focus lands so typing replaces the filter.
+            if let Some(mut s) = egui::text_edit::TextEditState::load(ui.ctx(), text_id) {
+                let len = st.text.chars().count();
+                s.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(len))));
+                s.store(ui.ctx(), text_id);
+            }
+        }
+        let lower = st.text.to_lowercase();
+        let filtered: Vec<usize> = items.iter().enumerate().filter(|(_, (_, d))| d.to_lowercase().contains(&lower)).map(|(i, _)| i).collect();
+        ui.input(|i| {
+            if !filtered.is_empty() {
+                let n = filtered.len() as i32;
+                if i.key_pressed(egui::Key::ArrowDown) {
+                    st.sel = (st.sel + 1).rem_euclid(n);
+                }
+                if i.key_pressed(egui::Key::ArrowUp) {
+                    st.sel = (st.sel - 1).rem_euclid(n);
+                }
+            }
+            if i.key_pressed(egui::Key::Enter) {
+                if filtered.is_empty() {
+                    let t = st.text.trim().to_string();
+                    if !t.is_empty() {
+                        result = ComboResult::Entered(t);
+                    }
+                } else {
+                    let idx = filtered[st.sel.clamp(0, filtered.len() as i32 - 1) as usize];
+                    result = ComboResult::Picked(items[idx].0.to_string());
+                }
+            }
+        });
+        ui.separator();
+        egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+            for i in &filtered {
+                let (value, disp) = &items[*i];
+                let row = ui.add(egui::Button::selectable(*i as i32 == st.sel, egui::RichText::new(disp)).min_size(vec2(220.0, 20.0)));
+                if row.clicked() {
+                    result = ComboResult::Picked(value.to_string());
+                }
+                if row.hovered() {
+                    st.sel = *i as i32;
+                }
+            }
+        });
+        if !matches!(result, ComboResult::None) {
+            ui.close();
+        }
+    });
+    ui.data_mut(|d| d.insert_temp(state_id, st));
+    result
+}
+
 fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[(&str, &str, serde_json::Value)]) {
     for (label, id, p) in items {
         if *label == "-" {
@@ -594,10 +689,9 @@ fn home(app: &mut SheetApp, ui: &mut Ui) {
                 }
             }
             let o = small_button(ui, Icon::Orientation, "", "Orientation", true);
-            for sequence in keytip_table::group_extension(app.keytips.prefix().unwrap_or_default(), &["home.orientation", "dialog:formatCells"]) {
-                keytip(app, ui, sequence, o.rect.center_bottom());
-            }
-            egui::Popup::menu(&o).show(|ui| {
+            control_keytip(app, ui, &o, "home.orientation");
+            let forced_o = invoke(app, "home.orientation");
+            egui::Popup::menu(&o).open_memory(popup_command(forced_o, o.clicked())).show(|ui| {
                 menu_items(
                     app,
                     ui,
@@ -944,19 +1038,13 @@ fn home(app: &mut SheetApp, ui: &mut Ui) {
 }
 
 fn font_combo(app: &mut SheetApp, ui: &mut Ui, st: &Style) {
-    let mut name = st.font.name.clone();
-    let before = name.clone();
+    let name = st.font.name.clone();
     let resp = ui.add_sized([150.0, 24.0], egui::Button::new(egui::RichText::new(&name).font(theme::ui_font(12.5))));
     control_keytip(app, ui, &resp, "home.fontName");
     let forced = invoke(app, "home.fontName");
-    egui::Popup::menu(&resp).open_memory(popup_command(forced, resp.clicked())).show(|ui| {
-        for f in FONTS {
-            let fam = theme::cell_family(f, false, false);
-            ui.selectable_value(&mut name, f.to_string(), egui::RichText::new(*f).font(egui::FontId::new(14.0, fam)));
-        }
-    });
-    if name != before {
-        act(app, "home.fontName", json!({"name": name}));
+    let items: Vec<(&str, String)> = FONTS.iter().map(|f| (*f, f.to_string())).collect();
+    if let ComboResult::Picked(value) = editable_combo(ui, &resp, "font", &name, &items, forced) {
+        act(app, "home.fontName", json!({"name": value}));
     }
 }
 
@@ -981,19 +1069,24 @@ pub const FONTS: &[&str] = &[
 ];
 
 fn size_combo(app: &mut SheetApp, ui: &mut Ui, st: &Style) {
-    let mut size = st.font.size;
-    let before = size;
+    let size = st.font.size;
     let label = if size.fract() == 0.0 { format!("{}", size as i32) } else { format!("{size}") };
-    let resp = ui.add_sized([52.0, 24.0], egui::Button::new(egui::RichText::new(label).font(theme::ui_font(12.5))));
+    let resp = ui.add_sized([52.0, 24.0], egui::Button::new(egui::RichText::new(&label).font(theme::ui_font(12.5))));
     control_keytip(app, ui, &resp, "home.fontSize");
     let forced = invoke(app, "home.fontSize");
-    egui::Popup::menu(&resp).open_memory(popup_command(forced, resp.clicked())).show(|ui| {
-        for s in [8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 36.0, 48.0, 72.0] {
-            ui.selectable_value(&mut size, s, format!("{}", s as i32));
+    let sizes = [8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 36.0, 48.0, 72.0];
+    let labels: Vec<String> = sizes.iter().map(|s| format!("{}", *s as i32)).collect();
+    let items: Vec<(&str, String)> = labels.iter().map(|s| (s.as_str(), s.clone())).collect();
+    let current = if size.fract() == 0.0 { format!("{}", size as i32) } else { format!("{size}") };
+    let mut apply = |s: &str| {
+        if let Ok(v) = s.parse::<f32>() {
+            act(app, "home.fontSize", json!({"size": v}));
         }
-    });
-    if size != before {
-        act(app, "home.fontSize", json!({"size": size}));
+    };
+    match editable_combo(ui, &resp, "size", &current, &items, forced) {
+        ComboResult::Picked(value) => apply(&value),
+        ComboResult::Entered(text) => apply(&text),
+        _ => {}
     }
 }
 
@@ -1003,29 +1096,24 @@ fn number_combo(app: &mut SheetApp, ui: &mut Ui, st: &Style) {
     let current = format!("{kind:?}");
     let lang = app.ui.language;
     let sample = app.session.active().and_then(|d| d.wb.active().map(|sh| sh.value(d.selection.active))).unwrap_or_default();
-    let mut picked: Option<&str> = None;
     let resp = ui.add_sized([150.0, 24.0], egui::Button::new(egui::RichText::new(lang.tr(&current)).font(theme::ui_font(12.5))));
     control_keytip(app, ui, &resp, "home.numberFormat");
     let forced = invoke(app, "home.numberFormat");
-    egui::Popup::menu(&resp).open_memory(popup_command(forced, resp.clicked())).show(|ui| {
-        for name in ["General", "Number", "Currency", "Accounting", "Short Date", "Long Date", "Time", "Percentage", "Fraction", "Scientific", "Text"]
-        {
-            let code = gridcraft_engine::cmd::format::format_code_for(name);
+    let names = ["General", "Number", "Currency", "Accounting", "Short Date", "Long Date", "Time", "Percentage", "Fraction", "Scientific", "Text"];
+    let items: Vec<(&str, String)> = names
+        .iter()
+        .map(|n| {
+            let code = gridcraft_engine::cmd::format::format_code_for(n);
             let preview = app.session.active().map(|d| gridcraft_engine::display::format(&sample, code, &d.wb).text).unwrap_or_default();
-            let r = ui.add(egui::Button::selectable(current == name, format!("{:<12}   {preview}", lang.tr(name))).min_size(vec2(240.0, 22.0)));
-            if r.clicked() {
-                picked = Some(name);
-            }
+            (*n, format!("{:<12}   {preview}", lang.tr(n)))
+        })
+        .chain(std::iter::once(("__more", format!("{:>12}", lang.tr("More Number Formats…")))))
+        .collect();
+    if let ComboResult::Picked(value) = editable_combo(ui, &resp, "number", &current, &items, forced) {
+        match value.as_str() {
+            "__more" => app.open_dialog("formatCells", json!({"tab": "Number"})),
+            n => act(app, "home.numberFormat", json!({"format": n})),
         }
-        ui.separator();
-        if ui.button(lang.tr("More Number Formats…")).clicked() {
-            picked = Some("__more");
-        }
-    });
-    match picked {
-        Some("__more") => app.open_dialog("formatCells", json!({"tab": "Number"})),
-        Some(n) => act(app, "home.numberFormat", json!({"format": n})),
-        None => {}
     }
 }
 
@@ -1326,11 +1414,11 @@ fn insert(app: &mut SheetApp, ui: &mut Ui) {
     }
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
-            for (icon, tip, kind, subs) in [
+            for (icon, tip, cid, subs) in [
                 (
                     Icon::ChartBar,
                     "Column or Bar",
-                    "column",
+                    "insert.chart.column",
                     vec![
                         ("Clustered Column", "column", ""),
                         ("Stacked Column", "column", "stacked"),
@@ -1342,7 +1430,7 @@ fn insert(app: &mut SheetApp, ui: &mut Ui) {
                 (
                     Icon::ChartLine,
                     "Line or Area",
-                    "line",
+                    "insert.chart.line",
                     vec![
                         ("Line", "line", ""),
                         ("Line with Markers", "line", "markers"),
@@ -1351,11 +1439,12 @@ fn insert(app: &mut SheetApp, ui: &mut Ui) {
                         ("Stacked Area", "area", "stacked"),
                     ],
                 ),
-                (Icon::ChartPie, "Pie or Doughnut", "pie", vec![("Pie", "pie", ""), ("Doughnut", "doughnut", "")]),
+                (Icon::ChartPie, "Pie or Doughnut", "insert.chart.pie", vec![("Pie", "pie", ""), ("Doughnut", "doughnut", "")]),
             ] {
                 let r = small_button(ui, icon, "", tip, true);
-                let _ = kind;
-                egui::Popup::menu(&r).show(|ui| {
+                control_keytip(app, ui, &r, cid);
+                let forced_c = invoke(app, cid);
+                egui::Popup::menu(&r).open_memory(popup_command(forced_c, r.clicked())).show(|ui| {
                     for (label, k, s) in &subs {
                         if ui.button(*label).clicked() {
                             act(app, "insert.chart", json!({"type": k, "subtype": s}));
@@ -1365,16 +1454,18 @@ fn insert(app: &mut SheetApp, ui: &mut Ui) {
             }
         });
         ui.horizontal(|ui| {
-            for (icon, tip, subs) in [
+            for (icon, tip, cid, subs) in [
                 (
                     Icon::ChartScatter,
                     "Scatter or Bubble",
+                    "insert.chart.scatter",
                     vec![("Scatter", "scatter", ""), ("Scatter with Lines", "scatter", "lines"), ("Bubble", "bubble", "")],
                 ),
-                (Icon::Chart, "Statistic", vec![("Histogram", "histogram", ""), ("Box & Whisker", "boxWhisker", "")]),
+                (Icon::Chart, "Statistic", "insert.chart.statistic", vec![("Histogram", "histogram", ""), ("Box & Whisker", "boxWhisker", "")]),
                 (
                     Icon::Theme,
                     "Hierarchy & more",
+                    "insert.chart.hierarchy",
                     vec![
                         ("Treemap", "treemap", ""),
                         ("Sunburst", "sunburst", ""),
@@ -1387,7 +1478,9 @@ fn insert(app: &mut SheetApp, ui: &mut Ui) {
                 ),
             ] {
                 let r = small_button(ui, icon, "", tip, true);
-                egui::Popup::menu(&r).show(|ui| {
+                control_keytip(app, ui, &r, cid);
+                let forced_c = invoke(app, cid);
+                egui::Popup::menu(&r).open_memory(popup_command(forced_c, r.clicked())).show(|ui| {
                     for (label, k, s) in &subs {
                         if ui.button(*label).clicked() {
                             act(app, "insert.chart", json!({"type": k, "subtype": s}));
@@ -1403,7 +1496,7 @@ fn insert(app: &mut SheetApp, ui: &mut Ui) {
     }
     sep(ui);
     let sp = big_button(ui, Icon::Sparkline, "Sparklines", "Sparklines", true);
-    anchor_keytip(app, ui, &sp, &["insert.sparkline"]);
+    anchor_keytip(app, ui, &sp, &["dialog:sparkline"]);
     egui::Popup::menu(&sp).show(|ui| {
         for (label, kind) in [("Line", "line"), ("Column", "column"), ("Win/Loss", "winLoss")] {
             if ui.button(label).clicked() {
@@ -1418,12 +1511,12 @@ fn insert(app: &mut SheetApp, ui: &mut Ui) {
     }
     sep(ui);
     let __k = big_button(ui, Icon::Link, "Link", "Insert Link (⌘K)", false);
-    control_keytip(app, ui, &__k, "insertLink");
+    control_keytip(app, ui, &__k, "dialog:insertLink");
     if __k.clicked() {
         app.open_dialog("insertLink", json!({}));
     }
     let __k = big_button(ui, Icon::Comment, "Comment", "New Comment", false);
-    control_keytip(app, ui, &__k, "comment");
+    control_keytip(app, ui, &__k, "dialog:comment");
     if __k.clicked() {
         app.open_dialog("comment", json!({"threaded": true}));
     }
@@ -1434,7 +1527,7 @@ fn insert(app: &mut SheetApp, ui: &mut Ui) {
         act(app, "insert.textBox", json!({}));
     }
     let __k = big_button(ui, Icon::PageLayout, "Header &\nFooter", "Header & Footer", false);
-    control_keytip(app, ui, &__k, "headerFooter");
+    control_keytip(app, ui, &__k, "dialog:headerFooter");
     if __k.clicked() {
         // As in Excel: Page Layout view, editing the header in place (the dialog is under Page Setup).
         crate::paper_view::start_editing(app);
@@ -1618,7 +1711,7 @@ fn page_layout(app: &mut SheetApp, ui: &mut Ui) {
 
 fn formulas(app: &mut SheetApp, ui: &mut Ui) {
     let __k = big_button(ui, Icon::Function, "Insert\nFunction", "Insert Function (⇧F3)", false);
-    control_keytip(app, ui, &__k, "insertFunction");
+    control_keytip(app, ui, &__k, "dialog:insertFunction");
     if __k.clicked() {
         app.open_dialog("insertFunction", json!({}));
     }
@@ -1627,17 +1720,19 @@ fn formulas(app: &mut SheetApp, ui: &mut Ui) {
     if s.clicked() {
         act(app, "formulas.autoSum", json!({}));
     }
-    for (label, cat) in [
-        ("Financial", "Financial"),
-        ("Logical", "Logical"),
-        ("Text", "Text"),
-        ("Date &\nTime", "DateTime"),
-        ("Lookup &\nReference", "Lookup"),
-        ("Math &\nTrig", "MathTrig"),
-        ("More\nFunctions", "Statistical"),
+    for (label, cat, cid) in [
+        ("Financial", "Financial", "formulas.financial"),
+        ("Logical", "Logical", "formulas.logical"),
+        ("Text", "Text", "formulas.text"),
+        ("Date &\nTime", "DateTime", "formulas.dateTime"),
+        ("Lookup &\nReference", "Lookup", "formulas.lookup"),
+        ("Math &\nTrig", "MathTrig", "formulas.mathTrig"),
+        ("More\nFunctions", "Statistical", "formulas.moreFunctions"),
     ] {
         let r = big_button(ui, Icon::Book, label, label, true);
-        egui::Popup::menu(&r).show(|ui| {
+        control_keytip(app, ui, &r, cid);
+        let forced_c = invoke(app, cid);
+        egui::Popup::menu(&r).open_memory(popup_command(forced_c, r.clicked())).show(|ui| {
             ui.set_max_height(420.0);
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for f in gridcraft_engine::cmd::formulas::function_list() {
@@ -1659,18 +1754,18 @@ fn formulas(app: &mut SheetApp, ui: &mut Ui) {
     }
     sep(ui);
     let __k = big_button(ui, Icon::Name, "Name\nManager", "Name Manager", false);
-    control_keytip(app, ui, &__k, "nameManager");
+    control_keytip(app, ui, &__k, "dialog:nameManager");
     if __k.clicked() {
         app.open_dialog("nameManager", json!({}));
     }
     ui.vertical(|ui| {
         let __k = small_button(ui, Icon::Name, "Define Name", "Define Name", false);
-        control_keytip(app, ui, &__k, "defineName");
+        control_keytip(app, ui, &__k, "dialog:defineName");
         if __k.clicked() {
             app.open_dialog("defineName", json!({}));
         }
         let use_in = small_button(ui, Icon::Function, "Use in Formula", "Use in Formula", true);
-        anchor_keytip(app, ui, &use_in, &["formulas.useInFormula"]);
+        anchor_keytip(app, ui, &use_in, &["formulas.pasteName"]);
         egui::Popup::menu(&use_in).show(|ui| {
             let names: Vec<String> = app.session.active().map(|d| d.wb.names.iter().map(|n| n.name.clone()).collect()).unwrap_or_default();
             for n in names {
@@ -1709,12 +1804,12 @@ fn formulas(app: &mut SheetApp, ui: &mut Ui) {
             act(app, "formulas.showFormulas", json!({}));
         }
         let __k = small_button(ui, Icon::Validation, "Error Checking", "Error Checking", false);
-        control_keytip(app, ui, &__k, "errorChecking");
+        control_keytip(app, ui, &__k, "dialog:errorChecking");
         if __k.clicked() {
             app.open_dialog("errorChecking", json!({}));
         }
         let __k = small_button(ui, Icon::Calc, "Evaluate Formula", "Evaluate Formula", false);
-        control_keytip(app, ui, &__k, "evaluateFormula");
+        control_keytip(app, ui, &__k, "dialog:evaluateFormula");
         if __k.clicked() {
             app.open_dialog("evaluateFormula", json!({}));
         }
@@ -1772,7 +1867,7 @@ fn data(app: &mut SheetApp, ui: &mut Ui) {
         }
     });
     let __k = big_button(ui, Icon::SortFilter, "Sort", "Custom Sort", false);
-    control_keytip(app, ui, &__k, "sort");
+    control_keytip(app, ui, &__k, "dialog:sort");
     if __k.clicked() {
         app.open_dialog("sort", json!({}));
     }
@@ -1795,7 +1890,7 @@ fn data(app: &mut SheetApp, ui: &mut Ui) {
     });
     sep(ui);
     let __k = big_button(ui, Icon::TextColumns, "Text to\nColumns", "Text to Columns", false);
-    control_keytip(app, ui, &__k, "textToColumns");
+    control_keytip(app, ui, &__k, "dialog:textToColumns");
     if __k.clicked() {
         app.open_dialog("textToColumns", json!({}));
     }
@@ -1805,14 +1900,12 @@ fn data(app: &mut SheetApp, ui: &mut Ui) {
         act(app, "edit.flashFill", json!({}));
     }
     let __k = big_button(ui, Icon::Duplicates, "Remove\nDuplicates", "Remove Duplicates", false);
-    control_keytip(app, ui, &__k, "removeDuplicates");
+    control_keytip(app, ui, &__k, "dialog:removeDuplicates");
     if __k.clicked() {
         app.open_dialog("removeDuplicates", json!({}));
     }
     let dv = big_button(ui, Icon::Validation, "Data\nValidation", "Data Validation", true);
-    for sequence in
-        keytip_table::group_extension(app.keytips.prefix().unwrap_or_default(), &["dialog:dataValidation", "data.circleInvalid", "data.validation"])
-    {
+    for sequence in keytip_table::group_extension(app.keytips.prefix().unwrap_or_default(), &["data.validation", "data.circleInvalid"]) {
         keytip(app, ui, sequence, dv.rect.center_bottom());
     }
     egui::Popup::menu(&dv).show(|ui| {
@@ -1860,7 +1953,7 @@ fn data(app: &mut SheetApp, ui: &mut Ui) {
             act(app, "data.ungroup", json!({}));
         }
         let __k = small_button(ui, Icon::Subtotal, "Subtotal", "Subtotal", false);
-        control_keytip(app, ui, &__k, "subtotal");
+        control_keytip(app, ui, &__k, "dialog:subtotal");
         if __k.clicked() {
             app.open_dialog("subtotal", json!({}));
         }
@@ -1885,7 +1978,7 @@ fn data(app: &mut SheetApp, ui: &mut Ui) {
 
 fn review(app: &mut SheetApp, ui: &mut Ui) {
     let __k = big_button(ui, Icon::Spell, "Spelling", "Spelling (F7)", false);
-    control_keytip(app, ui, &__k, "spelling");
+    control_keytip(app, ui, &__k, "dialog:spelling");
     if __k.clicked() {
         app.open_dialog("spelling", json!({}));
     }
@@ -1895,13 +1988,13 @@ fn review(app: &mut SheetApp, ui: &mut Ui) {
         app.open_dialog("statistics", json!({}));
     }
     let __k = big_button(ui, Icon::Validation, "Check\nAccessibility", "Check Accessibility", false);
-    control_keytip(app, ui, &__k, "accessibility");
+    control_keytip(app, ui, &__k, "dialog:accessibility");
     if __k.clicked() {
         app.open_dialog("accessibility", json!({}));
     }
     sep(ui);
     let __k = big_button(ui, Icon::Comment, "New\nComment", "New Comment", false);
-    control_keytip(app, ui, &__k, "comment");
+    control_keytip(app, ui, &__k, "dialog:comment");
     if __k.clicked() {
         app.open_dialog("comment", json!({"threaded": true}));
     }
@@ -1935,7 +2028,7 @@ fn review(app: &mut SheetApp, ui: &mut Ui) {
         }
     }
     let notes = big_button(ui, Icon::Note, "Notes", "Notes", true);
-    anchor_keytip(app, ui, &notes, &["review.newNote"]);
+    anchor_keytip(app, ui, &notes, &["review.nextComment"]);
     egui::Popup::menu(&notes).show(|ui| {
         menu_items(
             app,
@@ -1952,7 +2045,7 @@ fn review(app: &mut SheetApp, ui: &mut Ui) {
     sep(ui);
     let protected = app.session.active().and_then(|d| d.wb.active().map(|s| s.is_protected())).unwrap_or(false);
     let __k = big_button(ui, Icon::Lock, if protected { "Unprotect\nSheet" } else { "Protect\nSheet" }, "Protect Sheet", false);
-    control_keytip(app, ui, &__k, "review.protectSheet");
+    control_keytip(app, ui, &__k, "dialog:protectSheet");
     if __k.clicked() {
         if protected {
             app.open_dialog("unprotectSheet", json!({}));
@@ -2018,7 +2111,7 @@ fn view(app: &mut SheetApp, ui: &mut Ui) {
     });
     sep(ui);
     let __k = big_button(ui, Icon::Zoom, "Zoom", "Zoom…", false);
-    control_keytip(app, ui, &__k, "zoom");
+    control_keytip(app, ui, &__k, "dialog:zoom");
     if __k.clicked() {
         app.open_dialog("zoom", json!({}));
     }
@@ -2035,10 +2128,9 @@ fn view(app: &mut SheetApp, ui: &mut Ui) {
     }
     sep(ui);
     let fp = big_button(ui, Icon::Freeze, "Freeze\nPanes", "Freeze Panes", true);
-    for sequence in keytip_table::group_extension(
-        app.keytips.prefix().unwrap_or_default(),
-        &["view.freezePanes", "view.freezeTopRow", "view.freezeFirstColumn", "view.unfreezePanes"],
-    ) {
+    for sequence in
+        keytip_table::group_extension(app.keytips.prefix().unwrap_or_default(), &["view.freezePanes", "view.freezeTopRow", "view.freezeFirstColumn"])
+    {
         keytip(app, ui, sequence, fp.rect.center_bottom());
     }
     egui::Popup::menu(&fp).show(|ui| {

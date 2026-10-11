@@ -389,8 +389,8 @@
     },
     {
       "seq": "HDD",
-      "kind": "command",
-      "target": "home.deleteCells",
+      "kind": "dialog",
+      "target": "deleteCells",
       "excel": "Delete Cells",
       "note": ""
     },
@@ -502,8 +502,8 @@
     },
     {
       "seq": "HFDS",
-      "kind": "command",
-      "target": "edit.goToSpecial",
+      "kind": "dialog",
+      "target": "goToSpecial",
       "excel": "Go To Special",
       "note": ""
     },
@@ -572,8 +572,8 @@
     },
     {
       "seq": "HFIS",
-      "kind": "command",
-      "target": "edit.fillSeries",
+      "kind": "dialog",
+      "target": "series",
       "excel": "Fill Series",
       "note": "containment(Series)"
     },
@@ -607,25 +607,10 @@
     },
     {
       "seq": "HFQ",
-      "kind": "continue",
+      "kind": "control",
       "excel": "Orientation Menu",
-      "note": "group level: containment(Orientation)"
-    },
-    {
-      "seq": "HFQL",
-      "kind": "command",
-      "target": "home.angleClockwise",
-      "pending": true,
-      "excel": "Angle Clockwise",
-      "note": "Angle Clockwise; reserved until the command lands"
-    },
-    {
-      "seq": "HFQO",
-      "kind": "command",
-      "target": "home.angleCounterclockwise",
-      "pending": true,
-      "excel": "Angle Counterclockwise",
-      "note": "Angle Counterclockwise; reserved until the command lands"
+      "note": "group level: containment(Orientation)",
+      "target": "home.orientation"
     },
     {
       "seq": "HFS",
@@ -650,15 +635,15 @@
     },
     {
       "seq": "HIE",
-      "kind": "command",
-      "target": "home.insertCells",
+      "kind": "dialog",
+      "target": "insertCells",
       "excel": "Insert Copied Cells",
       "note": "Insert Cells (copied cells TBD)"
     },
     {
       "seq": "HII",
-      "kind": "command",
-      "target": "home.insertCells",
+      "kind": "dialog",
+      "target": "insertCells",
       "excel": "Insert Cells",
       "note": ""
     },
@@ -849,8 +834,8 @@
     },
     {
       "seq": "HOP",
-      "kind": "command",
-      "target": "review.protectSheet",
+      "kind": "dialog",
+      "target": "protectSheet",
       "excel": "Protect Sheet",
       "note": ""
     },
@@ -1047,8 +1032,8 @@
     },
     {
       "seq": "NC1",
-      "kind": "command",
-      "target": "insert.chart",
+      "kind": "control",
+      "target": "insert.chart.column",
       "excel": "Column Chart",
       "note": "Column chart (kind TBD)"
     },
@@ -1061,8 +1046,8 @@
     },
     {
       "seq": "NCM",
-      "kind": "command",
-      "target": "review.newComment",
+      "kind": "dialog",
+      "target": "comment",
       "excel": "Excel: New Comment (modern)"
     },
     {
@@ -1074,8 +1059,8 @@
     },
     {
       "seq": "ND",
-      "kind": "command",
-      "target": "insert.chart",
+      "kind": "control",
+      "target": "insert.chart.scatter",
       "excel": "Scatter Chart",
       "note": "Scatter (kind TBD)"
     },
@@ -1108,8 +1093,8 @@
     },
     {
       "seq": "NH1",
-      "kind": "command",
-      "target": "pageLayout.headerFooter",
+      "kind": "dialog",
+      "target": "headerFooter",
       "excel": "Header & Footer",
       "note": ""
     },
@@ -1122,8 +1107,8 @@
     },
     {
       "seq": "NHI",
-      "kind": "command",
-      "target": "insert.chart",
+      "kind": "control",
+      "target": "insert.chart.hierarchy",
       "excel": "Hierarchy Chart",
       "note": "Hierarchy (kind TBD)"
     },
@@ -1136,8 +1121,8 @@
     },
     {
       "seq": "NI2",
-      "kind": "command",
-      "target": "insert.link",
+      "kind": "dialog",
+      "target": "insertLink",
       "excel": "Link",
       "note": ""
     },
@@ -1165,8 +1150,8 @@
     },
     {
       "seq": "NN1",
-      "kind": "command",
-      "target": "insert.chart",
+      "kind": "control",
+      "target": "insert.chart.line",
       "excel": "Line Chart",
       "note": "Line chart (kind TBD)"
     },
@@ -1213,8 +1198,8 @@
     },
     {
       "seq": "NQ",
-      "kind": "command",
-      "target": "insert.chart",
+      "kind": "control",
+      "target": "insert.chart.pie",
       "excel": "Pie Chart",
       "note": "Pie (kind TBD)"
     },
@@ -1227,8 +1212,8 @@
     },
     {
       "seq": "NSA",
-      "kind": "command",
-      "target": "insert.chart",
+      "kind": "control",
+      "target": "insert.chart.statistic",
       "excel": "Statistical Chart",
       "note": "Statistical chart (kind TBD)"
     },
@@ -1464,8 +1449,8 @@
     },
     {
       "seq": "PSP",
-      "kind": "command",
-      "target": "pageLayout.pageSetup",
+      "kind": "dialog",
+      "target": "pageSetup",
       "excel": "Page Setup",
       "note": ""
     },
@@ -1568,36 +1553,24 @@
     },
     {
       "seq": "ME",
-      "kind": "continue",
+      "kind": "control",
       "excel": "Date & Time Menu",
-      "note": "group level: containment(Date & Time)"
-    },
-    {
-      "seq": "MEF",
-      "kind": "command",
-      "target": "formulas.insertFunction",
-      "excel": "Date & Time - Insert Function",
-      "note": "containment(Insert Function)"
+      "note": "group level: containment(Date & Time)",
+      "target": "formulas.dateTime"
     },
     {
       "seq": "MF",
-      "kind": "command",
-      "target": "formulas.insertFunction",
+      "kind": "dialog",
+      "target": "insertFunction",
       "excel": "Insert Function",
       "note": ""
     },
     {
       "seq": "MG",
-      "kind": "continue",
+      "kind": "control",
       "excel": "Math & Trig Menu",
-      "note": "group level: containment(Math & Trig)"
-    },
-    {
-      "seq": "MGF",
-      "kind": "command",
-      "target": "formulas.insertFunction",
-      "excel": "Math & Trig - Insert Function",
-      "note": "containment(Insert Function)"
+      "note": "group level: containment(Math & Trig)",
+      "target": "formulas.mathTrig"
     },
     {
       "seq": "MH",
@@ -1614,16 +1587,9 @@
     },
     {
       "seq": "MI1",
-      "kind": "command",
-      "target": "formulas.insertFunction",
+      "kind": "control",
+      "target": "formulas.financial",
       "excel": "Excel: Financial; first item of the dropdown"
-    },
-    {
-      "seq": "MIF",
-      "kind": "command",
-      "target": "formulas.insertFunction",
-      "excel": "Financial - Insert Function",
-      "note": "containment(Insert Function)"
     },
     {
       "seq": "MJ",
@@ -1640,50 +1606,38 @@
     },
     {
       "seq": "MKK",
-      "kind": "command",
-      "target": "formulas.errorChecking",
+      "kind": "dialog",
+      "target": "errorChecking",
       "excel": "Error Checking",
       "note": ""
     },
     {
       "seq": "ML",
-      "kind": "continue",
+      "kind": "control",
       "excel": "Logical Menu",
-      "note": "group level: containment(Logical)"
-    },
-    {
-      "seq": "MLF",
-      "kind": "command",
-      "target": "formulas.insertFunction",
-      "excel": "Logical - Insert Function",
-      "note": "containment(Insert Function)"
+      "note": "group level: containment(Logical)",
+      "target": "formulas.logical"
     },
     {
       "seq": "MM",
-      "kind": "command",
-      "target": "formulas.defineName",
+      "kind": "dialog",
+      "target": "defineName",
       "excel": "Define Name",
       "note": ""
     },
     {
       "seq": "MN",
-      "kind": "command",
-      "target": "formulas.nameManager",
+      "kind": "dialog",
+      "target": "nameManager",
       "excel": "Name Manager",
       "note": ""
     },
     {
       "seq": "MO",
-      "kind": "continue",
+      "kind": "control",
       "excel": "Lookup & Reference Menu",
-      "note": "group level: containment(Lookup & Reference)"
-    },
-    {
-      "seq": "MOF",
-      "kind": "command",
-      "target": "formulas.lookupReference",
-      "excel": "Lookup & Reference - Insert Function",
-      "note": "containment(Lookup & Reference)"
+      "note": "group level: containment(Lookup & Reference)",
+      "target": "formulas.lookup"
     },
     {
       "seq": "MP",
@@ -1694,64 +1648,10 @@
     },
     {
       "seq": "MQ",
-      "kind": "continue",
+      "kind": "control",
       "excel": "More Functions Menu",
-      "note": "group level: containment(More Functions)"
-    },
-    {
-      "seq": "MQCF",
-      "kind": "command",
-      "target": "formulas.insertFunction",
-      "excel": "Cube - Insert Function",
-      "note": "containment(Insert Function)"
-    },
-    {
-      "seq": "MQEF",
-      "kind": "command",
-      "target": "formulas.insertFunction",
-      "excel": "Engineering - Insert Function",
-      "note": "containment(Insert Function)"
-    },
-    {
-      "seq": "MQIF",
-      "kind": "command",
-      "target": "formulas.insertFunction",
-      "excel": "Information - Insert Function",
-      "note": "containment(Insert Function)"
-    },
-    {
-      "seq": "MQOF",
-      "kind": "command",
-      "target": "formulas.insertFunction",
-      "excel": "Compatibility - Insert Function",
-      "note": "containment(Insert Function)"
-    },
-    {
-      "seq": "MQSF",
-      "kind": "command",
-      "target": "formulas.insertFunction",
-      "excel": "Statistical - Insert Function",
-      "note": "containment(Insert Function)"
-    },
-    {
-      "seq": "MQWF",
-      "kind": "command",
-      "target": "formulas.insertFunction",
-      "excel": "Web - Insert Function",
-      "note": "containment(Insert Function)"
-    },
-    {
-      "seq": "MR",
-      "kind": "continue",
-      "excel": "Recently Used Menu",
-      "note": "group level: containment(Recently Used)"
-    },
-    {
-      "seq": "MRF",
-      "kind": "command",
-      "target": "formulas.insertFunction",
-      "excel": "Recently Used - Insert Function",
-      "note": "containment(Insert Function)"
+      "note": "group level: containment(More Functions)",
+      "target": "formulas.moreFunctions"
     },
     {
       "seq": "MS",
@@ -1769,16 +1669,10 @@
     },
     {
       "seq": "MT",
-      "kind": "continue",
+      "kind": "control",
       "excel": "Text Menu",
-      "note": "group level: containment(Text)"
-    },
-    {
-      "seq": "MTF",
-      "kind": "command",
-      "target": "formulas.insertFunction",
-      "excel": "Text - Insert Function",
-      "note": "containment(Insert Function)"
+      "note": "group level: containment(Text)",
+      "target": "formulas.text"
     },
     {
       "seq": "MU",
@@ -1871,8 +1765,8 @@
     },
     {
       "seq": "AB",
-      "kind": "command",
-      "target": "data.subtotal",
+      "kind": "dialog",
+      "target": "subtotal",
       "excel": "Subtotal",
       "note": ""
     },
@@ -1892,8 +1786,8 @@
     },
     {
       "seq": "AE",
-      "kind": "command",
-      "target": "data.textToColumns",
+      "kind": "dialog",
+      "target": "textToColumns",
       "excel": "Text to Columns",
       "note": ""
     },
@@ -2014,8 +1908,8 @@
     },
     {
       "seq": "AM",
-      "kind": "command",
-      "target": "data.removeDuplicates",
+      "kind": "dialog",
+      "target": "removeDuplicates",
       "excel": "Remove Duplicates",
       "note": ""
     },
@@ -2183,8 +2077,8 @@
     },
     {
       "seq": "ASS",
-      "kind": "command",
-      "target": "data.sort",
+      "kind": "dialog",
+      "target": "sort",
       "excel": "Sort",
       "note": ""
     },
@@ -2287,8 +2181,8 @@
     },
     {
       "seq": "RA1",
-      "kind": "command",
-      "target": "review.checkAccessibility",
+      "kind": "dialog",
+      "target": "accessibility",
       "excel": "Check Accessibility",
       "note": ""
     },
@@ -2302,8 +2196,8 @@
     },
     {
       "seq": "RC",
-      "kind": "command",
-      "target": "review.newComment",
+      "kind": "dialog",
+      "target": "comment",
       "excel": "New Comment",
       "note": ""
     },
@@ -2346,8 +2240,8 @@
     },
     {
       "seq": "RPS",
-      "kind": "command",
-      "target": "review.protectSheet",
+      "kind": "dialog",
+      "target": "protectSheet",
       "excel": "Protect Sheet",
       "note": ""
     },
@@ -2368,8 +2262,8 @@
     },
     {
       "seq": "RS",
-      "kind": "command",
-      "target": "review.spelling",
+      "kind": "dialog",
+      "target": "spelling",
       "excel": "Spelling",
       "note": ""
     },

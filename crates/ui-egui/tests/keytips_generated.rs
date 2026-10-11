@@ -487,7 +487,7 @@ fn keytip_hdc_() {
 fn keytip_hdd_() {
     let mut h = harness(blank());
     sequence(&mut h, "HDD", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "home.deleteCells"), "HDD must journal home.deleteCells");
+    assert!(h.state().dialog.is_some(), "HDD must open the deleteCells dialog");
 }
 
 #[test]
@@ -603,7 +603,7 @@ fn keytip_hfdr_() {
 fn keytip_hfds_() {
     let mut h = harness(blank());
     sequence(&mut h, "HFDS", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "edit.goToSpecial"), "HFDS must journal edit.goToSpecial");
+    assert!(h.state().dialog.is_some(), "HFDS must open the goToSpecial dialog");
 }
 
 #[test]
@@ -677,7 +677,7 @@ fn keytip_hfir_() {
 fn keytip_hfis_() {
     let mut h = harness(blank());
     sequence(&mut h, "HFIS", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "edit.fillSeries"), "HFIS must journal edit.fillSeries");
+    assert!(h.state().dialog.is_some(), "HFIS must open the series dialog");
 }
 
 #[test]
@@ -712,27 +712,8 @@ fn keytip_hfp_() {
 fn keytip_hfq_() {
     let mut h = harness(blank());
     sequence(&mut h, "HFQ", false);
-    assert_eq!(h.state().keytips.prefix(), Some("HFQ"), "HFQ must stay armed waiting for more input");
-}
-
-#[test]
-fn keytip_hfql_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "HFQL", false);
-    assert!(h.state().dialog.is_none(), "HFQL must not open a dialog");
-    assert!(h.state().message.is_none(), "HFQL must not open a message box");
-    assert!(h.state().toast.is_none(), "HFQL must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "HFQL must not journal");
-}
-
-#[test]
-fn keytip_hfqo_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "HFQO", false);
-    assert!(h.state().dialog.is_none(), "HFQO must not open a dialog");
-    assert!(h.state().message.is_none(), "HFQO must not open a message box");
-    assert!(h.state().toast.is_none(), "HFQO must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "HFQO must not journal");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "HFQ must route to its control without an error box");
+    assert_eq!(h.state().keytips.prefix(), None);
 }
 
 #[test]
@@ -762,14 +743,14 @@ fn keytip_hic_() {
 fn keytip_hie_() {
     let mut h = harness(blank());
     sequence(&mut h, "HIE", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "home.insertCells"), "HIE must journal home.insertCells");
+    assert!(h.state().dialog.is_some(), "HIE must open the insertCells dialog");
 }
 
 #[test]
 fn keytip_hii_() {
     let mut h = harness(blank());
     sequence(&mut h, "HII", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "home.insertCells"), "HII must journal home.insertCells");
+    assert!(h.state().dialog.is_some(), "HII must open the insertCells dialog");
 }
 
 #[test]
@@ -966,7 +947,7 @@ fn keytip_hom_() {
 fn keytip_hop_() {
     let mut h = harness(blank());
     sequence(&mut h, "HOP", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "review.protectSheet"), "HOP must journal review.protectSheet");
+    assert!(h.state().dialog.is_some(), "HOP must open the protectSheet dialog");
 }
 
 #[test]
@@ -1169,7 +1150,8 @@ fn keytip_hx_() {
 fn keytip_nc1_() {
     let mut h = harness(blank());
     sequence(&mut h, "NC1", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "insert.chart"), "NC1 must journal insert.chart");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "NC1 must route to its control without an error box");
+    assert_eq!(h.state().keytips.prefix(), None);
 }
 
 #[test]
@@ -1183,7 +1165,7 @@ fn keytip_nc2_() {
 fn keytip_ncm_() {
     let mut h = harness(blank());
     sequence(&mut h, "NCM", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "review.newComment"), "NCM must journal review.newComment");
+    assert!(h.state().dialog.is_some(), "NCM must open the comment dialog");
 }
 
 #[test]
@@ -1197,7 +1179,8 @@ fn keytip_ncb_() {
 fn keytip_nd_() {
     let mut h = harness(blank());
     sequence(&mut h, "ND", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "insert.chart"), "ND must journal insert.chart");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "ND must route to its control without an error box");
+    assert_eq!(h.state().keytips.prefix(), None);
 }
 
 #[test]
@@ -1235,7 +1218,7 @@ fn keytip_nfpf_() {
 fn keytip_nh1_() {
     let mut h = harness(blank());
     sequence(&mut h, "NH1", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "pageLayout.headerFooter"), "NH1 must journal pageLayout.headerFooter");
+    assert!(h.state().dialog.is_some(), "NH1 must open the headerFooter dialog");
 }
 
 #[test]
@@ -1249,7 +1232,8 @@ fn keytip_nhf_() {
 fn keytip_nhi_() {
     let mut h = harness(blank());
     sequence(&mut h, "NHI", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "insert.chart"), "NHI must journal insert.chart");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "NHI must route to its control without an error box");
+    assert_eq!(h.state().keytips.prefix(), None);
 }
 
 #[test]
@@ -1263,7 +1247,7 @@ fn keytip_ni1_() {
 fn keytip_ni2_() {
     let mut h = harness(blank());
     sequence(&mut h, "NI2", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "insert.link"), "NI2 must journal insert.link");
+    assert!(h.state().dialog.is_some(), "NI2 must open the insertLink dialog");
 }
 
 #[test]
@@ -1294,7 +1278,8 @@ fn keytip_nm2_() {
 fn keytip_nn1_() {
     let mut h = harness(blank());
     sequence(&mut h, "NN1", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "insert.chart"), "NN1 must journal insert.chart");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "NN1 must route to its control without an error box");
+    assert_eq!(h.state().keytips.prefix(), None);
 }
 
 #[test]
@@ -1343,7 +1328,8 @@ fn keytip_npo_() {
 fn keytip_nq_() {
     let mut h = harness(blank());
     sequence(&mut h, "NQ", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "insert.chart"), "NQ must journal insert.chart");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "NQ must route to its control without an error box");
+    assert_eq!(h.state().keytips.prefix(), None);
 }
 
 #[test]
@@ -1357,7 +1343,8 @@ fn keytip_nr_() {
 fn keytip_nsa_() {
     let mut h = harness(blank());
     sequence(&mut h, "NSA", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "insert.chart"), "NSA must journal insert.chart");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "NSA must route to its control without an error box");
+    assert_eq!(h.state().keytips.prefix(), None);
 }
 
 #[test]
@@ -1613,7 +1600,7 @@ fn keytip_prs_() {
 fn keytip_psp_() {
     let mut h = harness(blank());
     sequence(&mut h, "PSP", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "pageLayout.pageSetup"), "PSP must journal pageLayout.pageSetup");
+    assert!(h.state().dialog.is_some(), "PSP must open the pageSetup dialog");
 }
 
 #[test]
@@ -1721,35 +1708,23 @@ fn keytip_md_() {
 fn keytip_me_() {
     let mut h = harness(blank());
     sequence(&mut h, "ME", false);
-    assert_eq!(h.state().keytips.prefix(), Some("ME"), "ME must stay armed waiting for more input");
-}
-
-#[test]
-fn keytip_mef_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "MEF", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "formulas.insertFunction"), "MEF must journal formulas.insertFunction");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "ME must route to its control without an error box");
+    assert_eq!(h.state().keytips.prefix(), None);
 }
 
 #[test]
 fn keytip_mf_() {
     let mut h = harness(blank());
     sequence(&mut h, "MF", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "formulas.insertFunction"), "MF must journal formulas.insertFunction");
+    assert!(h.state().dialog.is_some(), "MF must open the insertFunction dialog");
 }
 
 #[test]
 fn keytip_mg_() {
     let mut h = harness(blank());
     sequence(&mut h, "MG", false);
-    assert_eq!(h.state().keytips.prefix(), Some("MG"), "MG must stay armed waiting for more input");
-}
-
-#[test]
-fn keytip_mgf_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "MGF", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "formulas.insertFunction"), "MGF must journal formulas.insertFunction");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "MG must route to its control without an error box");
+    assert_eq!(h.state().keytips.prefix(), None);
 }
 
 #[test]
@@ -1770,14 +1745,8 @@ fn keytip_mi_() {
 fn keytip_mi1_() {
     let mut h = harness(blank());
     sequence(&mut h, "MI1", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "formulas.insertFunction"), "MI1 must journal formulas.insertFunction");
-}
-
-#[test]
-fn keytip_mif_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "MIF", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "formulas.insertFunction"), "MIF must journal formulas.insertFunction");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "MI1 must route to its control without an error box");
+    assert_eq!(h.state().keytips.prefix(), None);
 }
 
 #[test]
@@ -1798,49 +1767,37 @@ fn keytip_mk_() {
 fn keytip_mkk_() {
     let mut h = harness(blank());
     sequence(&mut h, "MKK", false);
-    assert!(h.state().message.is_none() && h.state().toast.is_none(), "MKK must run formulas.errorChecking cleanly");
+    assert!(h.state().dialog.is_some(), "MKK must open the errorChecking dialog");
 }
 
 #[test]
 fn keytip_ml_() {
     let mut h = harness(blank());
     sequence(&mut h, "ML", false);
-    assert_eq!(h.state().keytips.prefix(), Some("ML"), "ML must stay armed waiting for more input");
-}
-
-#[test]
-fn keytip_mlf_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "MLF", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "formulas.insertFunction"), "MLF must journal formulas.insertFunction");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "ML must route to its control without an error box");
+    assert_eq!(h.state().keytips.prefix(), None);
 }
 
 #[test]
 fn keytip_mm_() {
     let mut h = harness(blank());
     sequence(&mut h, "MM", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "formulas.defineName"), "MM must journal formulas.defineName");
+    assert!(h.state().dialog.is_some(), "MM must open the defineName dialog");
 }
 
 #[test]
 fn keytip_mn_() {
     let mut h = harness(blank());
     sequence(&mut h, "MN", false);
-    assert!(h.state().message.is_none() && h.state().toast.is_none(), "MN must run formulas.nameManager cleanly");
+    assert!(h.state().dialog.is_some(), "MN must open the nameManager dialog");
 }
 
 #[test]
 fn keytip_mo_() {
     let mut h = harness(blank());
     sequence(&mut h, "MO", false);
-    assert_eq!(h.state().keytips.prefix(), Some("MO"), "MO must stay armed waiting for more input");
-}
-
-#[test]
-fn keytip_mof_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "MOF", false);
-    assert!(h.state().message.is_none() && h.state().toast.is_none(), "MOF must run formulas.lookupReference cleanly");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "MO must route to its control without an error box");
+    assert_eq!(h.state().keytips.prefix(), None);
 }
 
 #[test]
@@ -1854,63 +1811,8 @@ fn keytip_mp_() {
 fn keytip_mq_() {
     let mut h = harness(blank());
     sequence(&mut h, "MQ", false);
-    assert_eq!(h.state().keytips.prefix(), Some("MQ"), "MQ must stay armed waiting for more input");
-}
-
-#[test]
-fn keytip_mqcf_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "MQCF", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "formulas.insertFunction"), "MQCF must journal formulas.insertFunction");
-}
-
-#[test]
-fn keytip_mqef_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "MQEF", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "formulas.insertFunction"), "MQEF must journal formulas.insertFunction");
-}
-
-#[test]
-fn keytip_mqif_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "MQIF", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "formulas.insertFunction"), "MQIF must journal formulas.insertFunction");
-}
-
-#[test]
-fn keytip_mqof_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "MQOF", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "formulas.insertFunction"), "MQOF must journal formulas.insertFunction");
-}
-
-#[test]
-fn keytip_mqsf_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "MQSF", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "formulas.insertFunction"), "MQSF must journal formulas.insertFunction");
-}
-
-#[test]
-fn keytip_mqwf_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "MQWF", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "formulas.insertFunction"), "MQWF must journal formulas.insertFunction");
-}
-
-#[test]
-fn keytip_mr_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "MR", false);
-    assert_eq!(h.state().keytips.prefix(), Some("MR"), "MR must stay armed waiting for more input");
-}
-
-#[test]
-fn keytip_mrf_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "MRF", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "formulas.insertFunction"), "MRF must journal formulas.insertFunction");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "MQ must route to its control without an error box");
+    assert_eq!(h.state().keytips.prefix(), None);
 }
 
 #[test]
@@ -1934,14 +1836,8 @@ fn keytip_msp_() {
 fn keytip_mt_() {
     let mut h = harness(blank());
     sequence(&mut h, "MT", false);
-    assert_eq!(h.state().keytips.prefix(), Some("MT"), "MT must stay armed waiting for more input");
-}
-
-#[test]
-fn keytip_mtf_() {
-    let mut h = harness(blank());
-    sequence(&mut h, "MTF", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "formulas.insertFunction"), "MTF must journal formulas.insertFunction");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "MT must route to its control without an error box");
+    assert_eq!(h.state().keytips.prefix(), None);
 }
 
 #[test]
@@ -2039,7 +1935,7 @@ fn keytip_mxp_() {
 fn keytip_ab_() {
     let mut h = harness(blank());
     sequence(&mut h, "AB", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "data.subtotal"), "AB must journal data.subtotal");
+    assert!(h.state().dialog.is_some(), "AB must open the subtotal dialog");
 }
 
 #[test]
@@ -2060,7 +1956,7 @@ fn keytip_ad_() {
 fn keytip_ae_() {
     let mut h = harness(blank());
     sequence(&mut h, "AE", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "data.textToColumns"), "AE must journal data.textToColumns");
+    assert!(h.state().dialog.is_some(), "AE must open the textToColumns dialog");
 }
 
 #[test]
@@ -2200,7 +2096,7 @@ fn keytip_ak_() {
 fn keytip_am_() {
     let mut h = harness(blank());
     sequence(&mut h, "AM", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "data.removeDuplicates"), "AM must journal data.removeDuplicates");
+    assert!(h.state().dialog.is_some(), "AM must open the removeDuplicates dialog");
 }
 
 #[test]
@@ -2394,7 +2290,7 @@ fn keytip_asd_() {
 fn keytip_ass_() {
     let mut h = harness(blank());
     sequence(&mut h, "ASS", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "data.sort"), "ASS must journal data.sort");
+    assert!(h.state().dialog.is_some(), "ASS must open the sort dialog");
 }
 
 #[test]
@@ -2508,7 +2404,7 @@ fn keytip_ay_() {
 fn keytip_ra1_() {
     let mut h = harness(blank());
     sequence(&mut h, "RA1", false);
-    assert!(h.state().message.is_none() && h.state().toast.is_none(), "RA1 must run review.checkAccessibility cleanly");
+    assert!(h.state().dialog.is_some(), "RA1 must open the accessibility dialog");
 }
 
 #[test]
@@ -2525,7 +2421,7 @@ fn keytip_ra2_() {
 fn keytip_rc_() {
     let mut h = harness(blank());
     sequence(&mut h, "RC", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "review.newComment"), "RC must journal review.newComment");
+    assert!(h.state().dialog.is_some(), "RC must open the comment dialog");
 }
 
 #[test]
@@ -2576,7 +2472,7 @@ fn keytip_ro_() {
 fn keytip_rps_() {
     let mut h = harness(blank());
     sequence(&mut h, "RPS", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "review.protectSheet"), "RPS must journal review.protectSheet");
+    assert!(h.state().dialog.is_some(), "RPS must open the protectSheet dialog");
 }
 
 #[test]
@@ -2600,7 +2496,7 @@ fn keytip_rrs_() {
 fn keytip_rs_() {
     let mut h = harness(blank());
     sequence(&mut h, "RS", false);
-    assert!(h.state().message.is_some() || h.state().toast.is_some(), "RS must invoke review.spelling and surface its missing-params error");
+    assert!(h.state().dialog.is_some(), "RS must open the spelling dialog");
 }
 
 #[test]
@@ -3033,7 +2929,7 @@ fn keytip_9_() {
 
 #[test]
 fn generated_test_count_matches_the_table() {
-    const EXPECTED: usize = 397;
+    const EXPECTED: usize = 381;
     assert_eq!(gridcraft_ui_egui::keytips::keytip_table::SEQUENCES.len(), EXPECTED);
 }
 
