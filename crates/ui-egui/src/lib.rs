@@ -234,7 +234,7 @@ impl SheetApp {
             fonts_set: false,
             fonts_han: None,
             effective_dark: false,
-            desktop_theme: desktop_theme::DesktopTheme::start(),
+            desktop_theme: desktop_theme::DesktopTheme::default(),
             desktop_dark: None,
             name_box: None,
             keytips: keytips::KeyTips::default(),
@@ -338,6 +338,12 @@ impl SheetApp {
     }
 
     /// Runs a command and shows its error in a message box (for menu/ribbon clicks).
+    /// Follow the desktop's light/dark choice while the app runs (Linux; the desktop app calls
+    /// this once — tests and embedders don't start the watcher thread).
+    pub fn watch_desktop_theme(&mut self) {
+        self.desktop_theme = desktop_theme::DesktopTheme::start();
+    }
+
     pub fn run_or_alert(&mut self, id: &str, params: Json) {
         // Printing from the UI also hands the PDF to the host's print flow (web).
         if id == "file.print" {

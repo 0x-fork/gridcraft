@@ -272,6 +272,7 @@ fn main() -> eframe::Result<()> {
         session.new_workbook();
     }
     let mut app = SheetApp::new(session, services());
+    app.watch_desktop_theme();
     app.after_engine(); // Show warnings from files opened on the command line.
     let control_port = control_port;
     load_prefs(&mut app);
