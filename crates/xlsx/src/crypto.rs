@@ -53,19 +53,54 @@ fn malformed(m: impl Into<String>) -> DecryptError {
 
 /// The plain OOXML package (a zip) inside an encrypted workbook.
 pub fn decrypt(bytes: &[u8], password: &str) -> Result<Vec<u8>, DecryptError> {
-    let cf = Compound::open(bytes).map_err(malformed)?;
-    let info = cf.root_stream("EncryptionInfo").map_err(malformed)?.ok_or_else(|| malformed("no EncryptionInfo stream"))?;
-    let package = cf.root_stream("EncryptedPackage").map_err(malformed)?.ok_or_else(|| malformed("no EncryptedPackage stream"))?;
+    let (info, package) = streams(bytes)?;
     decrypt_streams(&info, &package, password)
+}
+
+/// Whether the right password could decrypt this encrypted workbook, checked without one. An
+/// error names a scheme no password opens (RC4, rights management…) or damage, so callers can
+/// say so instead of asking for a password first.
+pub fn check_encryption(bytes: &[u8]) -> Result<(), DecryptError> {
+    let (info, _) = streams(bytes)?;
+    match scheme(&info)? {
+        Scheme::Agile(xml) => agile_descriptor(xml).map(|_| ()),
+        Scheme::Standard(info) => standard_header(info).map(|_| ()),
+    }
+}
+
+/// The `EncryptionInfo` and `EncryptedPackage` streams. Rights management (IRM) keeps the
+/// package but describes its encryption elsewhere, with no `EncryptionInfo`.
+fn streams(bytes: &[u8]) -> Result<(Vec<u8>, Vec<u8>), DecryptError> {
+    let cf = Compound::open(bytes).map_err(malformed)?;
+    let info = cf.root_stream("EncryptionInfo").map_err(malformed)?;
+    let package = cf.root_stream("EncryptedPackage").map_err(malformed)?.ok_or_else(|| malformed("no EncryptedPackage stream"))?;
+    let info = info.ok_or_else(|| DecryptError::Unsupported("rights-management".into()))?;
+    Ok((info, package))
 }
 
 /// Decrypts from the two streams' contents.
 pub(crate) fn decrypt_streams(info: &[u8], package: &[u8], password: &str) -> Result<Vec<u8>, DecryptError> {
-    let major = u16_at(info, 0).ok_or_else(|| malformed("truncated EncryptionInfo"))?;
-    let minor = u16_at(info, 2).ok_or_else(|| malformed("truncated EncryptionInfo"))?;
+    match scheme(info)? {
+        Scheme::Agile(xml) => agile(xml, package, password),
+        Scheme::Standard(info) => standard(info, package, password),
+    }
+}
+
+/// The two schemes read, with the part of `EncryptionInfo` each one parses.
+enum Scheme<'a> {
+    /// The XML descriptor after the version and reserved field.
+    Agile(&'a [u8]),
+    /// Everything after the version.
+    Standard(&'a [u8]),
+}
+
+fn scheme(info: &[u8]) -> Result<Scheme<'_>, DecryptError> {
+    let short = || malformed("truncated EncryptionInfo");
+    let major = u16_at(info, 0).ok_or_else(short)?;
+    let minor = u16_at(info, 2).ok_or_else(short)?;
     match (major, minor) {
-        (4, 4) => agile(info.get(8..).ok_or_else(|| malformed("truncated EncryptionInfo"))?, package, password),
-        (2..=4, 2) => standard(info.get(4..).ok_or_else(|| malformed("truncated EncryptionInfo"))?, package, password),
+        (4, 4) => Ok(Scheme::Agile(info.get(8..).ok_or_else(short)?)),
+        (2..=4, 2) => Ok(Scheme::Standard(info.get(4..).ok_or_else(short)?)),
         (3 | 4, 3) => Err(DecryptError::Unsupported("Extensible".into())),
         _ => Err(DecryptError::Unsupported(format!("version {major}.{minor}"))),
     }
@@ -224,8 +259,16 @@ impl Aes {
 
 // ---- Standard encryption -------------------------------------------------------------------
 
+/// What a Standard `EncryptionInfo` holds: the key size and the password verifier.
+struct StandardHeader<'a> {
+    key_len: usize,
+    salt: &'a [u8],
+    verifier: &'a [u8],
+    verifier_hash: &'a [u8],
+}
+
 /// `info` starts after the version: flags, header size, header, verifier.
-fn standard(info: &[u8], package: &[u8], password: &str) -> Result<Vec<u8>, DecryptError> {
+fn standard_header(info: &[u8]) -> Result<StandardHeader<'_>, DecryptError> {
     let short = || malformed("truncated Standard encryption header");
     let flags = u32_at(info, 0).ok_or_else(short)?;
     if flags & F_EXTERNAL != 0 {
@@ -255,9 +298,15 @@ fn standard(info: &[u8], package: &[u8], password: &str) -> Result<Vec<u8>, Decr
         return Err(malformed("a Standard salt that isn't 16 bytes"));
     }
     let salt = v.get(4..20).ok_or_else(short)?;
-    let mut verifier = v.get(20..36).ok_or_else(short)?.to_vec();
-    let mut verifier_hash = v.get(40..72).ok_or_else(short)?.to_vec();
-    let aes = Aes::new(&standard_key(password, salt, key_len))?;
+    let verifier = v.get(20..36).ok_or_else(short)?;
+    let verifier_hash = v.get(40..72).ok_or_else(short)?;
+    Ok(StandardHeader { key_len, salt, verifier, verifier_hash })
+}
+
+fn standard(info: &[u8], package: &[u8], password: &str) -> Result<Vec<u8>, DecryptError> {
+    let h = standard_header(info)?;
+    let (mut verifier, mut verifier_hash) = (h.verifier.to_vec(), h.verifier_hash.to_vec());
+    let aes = Aes::new(&standard_key(password, h.salt, h.key_len))?;
     aes.decrypt_ecb(&mut verifier)?;
     aes.decrypt_ecb(&mut verifier_hash)?;
     if verifier_hash.get(..20) != Some(Hash::Sha1.digest(&[&verifier]).as_slice()) {
@@ -319,8 +368,19 @@ impl Params {
     }
 }
 
+/// What an Agile descriptor holds: the package's cipher, and the password key encryptor with its
+/// three encrypted values (verifier input, verifier hash, package key).
+struct AgileDescriptor {
+    key_data: Params,
+    key: Params,
+    spin: u32,
+    verifier_input: Vec<u8>,
+    verifier_hash: Vec<u8>,
+    key_value: Vec<u8>,
+}
+
 /// `xml` is the XML encryption descriptor after the 8-byte version and reserved field.
-fn agile(xml: &[u8], package: &[u8], password: &str) -> Result<Vec<u8>, DecryptError> {
+fn agile_descriptor(xml: &[u8]) -> Result<AgileDescriptor, DecryptError> {
     let root = crate::xml::parse(xml).map_err(|e| malformed(e.to_string()))?;
     let key_data = Params::read(root.child("keyData").ok_or_else(|| malformed("no keyData"))?)?;
     let encryptor = root
@@ -334,21 +394,34 @@ fn agile(xml: &[u8], package: &[u8], password: &str) -> Result<Vec<u8>, DecryptE
     if spin > MAX_SPIN_COUNT {
         return Err(malformed(format!("a spin count of {spin}, more than the {MAX_SPIN_COUNT} allowed")));
     }
+    let field = |name: &str| base64(encryptor.attr(name).ok_or_else(|| malformed(format!("no {name}")))?);
+    Ok(AgileDescriptor {
+        key_data,
+        key,
+        spin,
+        verifier_input: field("encryptedVerifierHashInput")?,
+        verifier_hash: field("encryptedVerifierHashValue")?,
+        key_value: field("encryptedKeyValue")?,
+    })
+}
+
+fn agile(xml: &[u8], package: &[u8], password: &str) -> Result<Vec<u8>, DecryptError> {
+    let AgileDescriptor { key_data, key, spin, verifier_input, verifier_hash, key_value } = agile_descriptor(xml)?;
     let h = iterated_hash(key.hash, password, &key.salt, spin);
     let iv = key.iv(None);
-    let field = |name: &str, block_key: &[u8]| -> Result<Vec<u8>, DecryptError> {
-        let mut data = base64(encryptor.attr(name).ok_or_else(|| malformed(format!("no {name}")))?)?;
+    let field = |data: &[u8], block_key: &[u8]| -> Result<Vec<u8>, DecryptError> {
+        let mut data = data.to_vec();
         Aes::new(&derive(key.hash, &h, block_key, key.key_len))?.decrypt_cbc(&iv, &mut data)?;
         Ok(data)
     };
-    let input = field("encryptedVerifierHashInput", &BLOCK_VERIFIER_INPUT)?;
-    let expected = field("encryptedVerifierHashValue", &BLOCK_VERIFIER_HASH)?;
+    let input = field(&verifier_input, &BLOCK_VERIFIER_INPUT)?;
+    let expected = field(&verifier_hash, &BLOCK_VERIFIER_HASH)?;
     let input = input.get(..key.salt.len()).unwrap_or(&input);
     let actual = key.hash.digest(&[input]);
     if expected.get(..actual.len()) != Some(actual.as_slice()) {
         return Err(DecryptError::WrongPassword);
     }
-    let secret = field("encryptedKeyValue", &BLOCK_KEY)?;
+    let secret = field(&key_value, &BLOCK_KEY)?;
     let aes = Aes::new(secret.get(..key_data.key_len).ok_or_else(|| malformed("a short encryptedKeyValue"))?)?;
     let (size, data) = package_parts(package)?;
     let mut out = Vec::with_capacity(size);
