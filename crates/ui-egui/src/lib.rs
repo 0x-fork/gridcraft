@@ -115,6 +115,10 @@ pub struct Services {
     /// Publish HTML and its plain-text alternative together. `Ok` means the host owns the
     /// write (including any asynchronous fallback); an immediate error uses egui's text path.
     pub copy_html: Option<Box<dyn FnMut(&str, &str) -> Result<(), String>>>,
+    /// Read the HTML flavour of the system clipboard when the user pastes text, so cells the
+    /// source spreadsheet recorded as numbers stay numbers ("Rp10,000.00" → 10000). `None` from
+    /// the host pastes the plain text alone.
+    pub paste_html: Option<Box<dyn FnMut() -> Option<String>>>,
     /// Web: deliver a file to the user (name, bytes).
     pub download: Option<Box<dyn Fn(&str, &[u8])>>,
     /// Web: start an asynchronous file pick; the bytes arrive later in `inbox`.
@@ -261,6 +265,17 @@ impl SheetApp {
             }
         }
         ctx.copy_text(text.to_string());
+    }
+
+    /// Paste text that came from the system clipboard, with the clipboard's HTML flavour when the
+    /// host can read it.
+    pub fn paste_external(&mut self, text: String) {
+        let html = self.services.paste_html.as_mut().and_then(|read| read());
+        let params = match html {
+            Some(html) => json!({"text": text, "html": html}),
+            None => json!({"text": text}),
+        };
+        self.run_or_alert("edit.paste", params);
     }
 
     /// Web: `file.exportPdf` without a path returns the PDF as base64; hand it to the browser as a download.

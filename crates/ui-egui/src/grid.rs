@@ -1657,7 +1657,7 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
             egui::Event::Cut => {
                 app.copy_to_clipboard(ctx, "edit.cut");
             }
-            egui::Event::Paste(text) => app.run_or_alert("edit.paste", json!({"text": text})),
+            egui::Event::Paste(text) => app.paste_external(text),
             egui::Event::Text(text) => {
                 if text.chars().all(|c| !c.is_control()) && !text.is_empty() {
                     app.begin_edit(Some(text), false);

@@ -53,6 +53,32 @@ fn entering_empty_cells_preserves_whole_sheet_formatting() {
 }
 
 #[test]
+fn pasted_currency_text_keeps_the_number_from_the_clipboard_html() {
+    // #257: "Rp10,000.00" copied from Excel for the web / LibreOffice Calc pasted as text. Their
+    // clipboard HTML records the number (x:num, sdval); paste keeps it and shows the same text.
+    let mut s = s();
+    let text = "Rp10,000.00\tRp2,500.50\tLabel\n";
+    let html =
+        r#"<table><tr><td x:num="10000">Rp10,000.00</td><td sdval="2500.5" sdnum="1033;0;x"><font>Rp2,500.50</font></td><td>Label</td></tr></table>"#;
+    s.execute("edit.paste", json!({"at": "A1", "text": text, "html": html})).unwrap();
+    assert_eq!(v(&s, "A1"), Value::number(10000.0));
+    assert_eq!(v(&s, "B1"), Value::number(2500.5));
+    assert_eq!(v(&s, "C1"), Value::text("Label"));
+    let d = s.doc().unwrap();
+    let sh = d.wb.active().unwrap();
+    assert_eq!(crate::display::cell_text(&d.wb, sh, CellRef::parse("A1").unwrap()), "Rp10,000.00");
+    assert_eq!(crate::display::cell_text(&d.wb, sh, CellRef::parse("B1").unwrap()), "Rp2,500.50");
+
+    // HTML that doesn't show the same text (left over from another copy) changes nothing; without
+    // HTML the text stays text, as typing it would in an en-US locale.
+    let stale = r#"<table><tr><td x:num="7">Rp7.00</td></tr></table>"#;
+    s.execute("edit.paste", json!({"at": "A3", "text": "Rp10,000.00", "html": stale})).unwrap();
+    s.execute("edit.paste", json!({"at": "A4", "text": "Rp10,000.00"})).unwrap();
+    assert_eq!(v(&s, "A3"), Value::text("Rp10,000.00"));
+    assert_eq!(v(&s, "A4"), Value::text("Rp10,000.00"));
+}
+
+#[test]
 fn entry_and_text_paste_use_inherited_formats_and_cell_overrides() {
     let mut s = s();
     s.execute("home.bold", json!({"range": "B:B", "on": true})).unwrap();
