@@ -78,18 +78,28 @@ fn auto_sum(s: &mut Session, p: &Json) -> Result<Json> {
     };
     if !sel.is_single() {
         // A block: totals below each column (and to the right when a blank column is included).
-        let num_end = sel.end;
-        let below = CellRef::new(num_end.row + 1, 0);
-        let mut writes = Vec::new();
-        let last_row_blank = (sel.start.col..=sel.end.col).all(|c| sh.value(CellRef::new(sel.end.row, c)).is_empty());
-        let (data_end_row, out_row) = if last_row_blank { (sel.end.row.saturating_sub(1), sel.end.row) } else { (sel.end.row, below.row) };
-        for c in sel.start.col..=sel.end.col {
-            let r = RangeRef::new(CellRef::new(sel.start.row, c), CellRef::new(data_end_row, c));
-            writes.push((CellRef::new(out_row, c), format!("={func}({})", r.a1())));
+        // Columns past the sheet's data get no total (a whole-row selection doesn't write 16,384
+        // formulas), and all totals are one edit (one undo step).
+        let Some(last_col) = sh.cells.used_range().map(|u| u.end.col.min(sel.end.col)) else { return ok() };
+        let last_row_blank = (sel.start.col..=last_col).all(|c| sh.value(CellRef::new(sel.end.row, c)).is_empty());
+        let (data_end_row, out_row) = if last_row_blank { (sel.end.row.saturating_sub(1), sel.end.row) } else { (sel.end.row, sel.end.row + 1) };
+        if out_row >= gridcraft_core::MAX_ROWS {
+            return Err(EngineError::Other("There's no room below the selection for the totals.".into()));
         }
-        for (c, f) in writes {
-            s.execute("cell.set", json!({"cell": c.a1(), "input": f}))?;
-        }
+        let writes: Vec<(CellRef, String)> = (sel.start.col..=last_col)
+            .map(|c| {
+                (CellRef::new(out_row, c), format!("={func}({})", RangeRef::new(CellRef::new(sel.start.row, c), CellRef::new(data_end_row, c)).a1()))
+            })
+            .collect();
+        let sheet = d.wb.active_sheet;
+        edit(s, |cx| {
+            for (c, f) in &writes {
+                let cell = super::edit::input_to_cell(f, sheet, *c, &mut cx.wb)?.unwrap_or_default();
+                cx.sheet_mut(sheet)?.set_cell(*c, cell);
+                cx.touch(sheet, *c);
+            }
+            Ok(())
+        })?;
         return ok();
     }
     // Single cell: guess the range above, else to the left.

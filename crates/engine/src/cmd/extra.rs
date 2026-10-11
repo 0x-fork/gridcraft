@@ -708,6 +708,19 @@ fn stash_set(wb: &mut Workbook, key: &str, v: &Json) {
     wb.names.push(DefinedName { name: key.into(), scope: None, formula, comment: String::new(), hidden: true });
 }
 
+/// The Watch Window list isn't an edit (Excel doesn't undo it): undo and redo keep the current
+/// list when they swap in another snapshot of the workbook.
+pub(crate) fn keep_watch_list(from: &Workbook, to: &mut std::sync::Arc<Workbook>) {
+    let find = |wb: &Workbook| wb.names.iter().find(|n| n.name == WATCH_NAME).cloned();
+    let keep = find(from);
+    if keep == find(to) {
+        return;
+    }
+    let wb = std::sync::Arc::make_mut(to);
+    wb.names.retain(|n| n.name != WATCH_NAME);
+    wb.names.extend(keep);
+}
+
 fn custom_views(s: &mut Session, p: &Json) -> Result<Json> {
     let d = s.doc()?;
     let mut views = stash_get(&d.wb, VIEWS_NAME);

@@ -167,27 +167,8 @@ fn shift_sheet_features(sh: &mut Sheet, axis: Axis, at: u32, count: u32, insert:
     sh.validations.retain(|dv| !dv.ranges.is_empty());
     for t in sh.tables.iter_mut() {
         if let Some(r) = map_range(t.range) {
-            // Columns inserted inside a table become new table columns.
-            if axis == Axis::Cols && insert && at > t.range.start.col && at <= t.range.end.col {
-                let idx = (at - t.range.start.col) as usize;
-                for k in 0..count {
-                    let name = format!("Column{}", t.columns.len() + 1);
-                    t.columns.insert(
-                        (idx + k as usize).min(t.columns.len()),
-                        gridcraft_model::TableColumn { name, totals: Default::default(), totals_label: None, formula: None },
-                    );
-                }
-            }
-            if axis == Axis::Cols && !insert {
-                let lo = at.max(t.range.start.col);
-                let hi = (at + count).min(t.range.end.col + 1);
-                if hi > lo {
-                    let a = (lo - t.range.start.col) as usize;
-                    let b = (hi - t.range.start.col) as usize;
-                    if b <= t.columns.len() {
-                        t.columns.drain(a..b);
-                    }
-                }
+            if axis == Axis::Cols {
+                shift_table_columns(t, at, count, insert);
             }
             t.range = r;
         } else {
@@ -444,6 +425,9 @@ fn insert_cells(s: &mut Session, p: &Json) -> Result<Json> {
     }
     let e = Edit::InsertCells { axis: if shift == "right" { Axis::Cols } else { Axis::Rows }, range: r };
     let sheet = target_sheet(s, p)?;
+    if let Some(sh) = s.doc()?.wb.sheet(sheet) {
+        check_table_shift(sh, &e)?;
+    }
     let right = shift == "right";
     let out = edit(s, |cx| {
         let sh = cx.sheet_mut(sheet)?;
@@ -472,6 +456,9 @@ fn delete_cells(s: &mut Session, p: &Json) -> Result<Json> {
     }
     let e = Edit::DeleteCells { axis: if shift == "left" { Axis::Cols } else { Axis::Rows }, range: r };
     let sheet = target_sheet(s, p)?;
+    if let Some(sh) = s.doc()?.wb.sheet(sheet) {
+        check_table_shift(sh, &e)?;
+    }
     let left = shift == "left";
     let out = edit(s, |cx| {
         let name = cx.wb.sheet(sheet).map(|s| s.name.clone()).unwrap_or_default();
@@ -798,8 +785,16 @@ fn move_sheet(s: &mut Session, p: &Json) -> Result<Json> {
         if copy {
             let mut sh = (*src).clone();
             let base = sh.name.clone();
-            let name = (2..).map(|k| format!("{base} ({k})")).find(|nm| cx.wb.sheet_index(nm).is_none()).unwrap_or(base.clone());
-            sh.name = name.chars().take(31).collect();
+            // `Name (2)`: the name is shortened so the suffix fits in Excel's 31 characters.
+            let name = (2..)
+                .map(|k| {
+                    let suffix = format!(" ({k})");
+                    let keep = 31usize.saturating_sub(suffix.chars().count());
+                    format!("{}{suffix}", base.chars().take(keep).collect::<String>().trim_end())
+                })
+                .find(|nm| cx.wb.sheet_index(nm).is_none())
+                .unwrap_or(base.clone());
+            sh.name = name;
             sh.tables.clear(); // table names must be unique
             sh.preserved = None; // kept file content (form controls, OLE objects…) stays with the original
             let at = to.min(n);
@@ -910,7 +905,7 @@ fn step_sheet(s: &mut Session, dir: i64) -> Result<Json> {
 }
 
 /// Where a range of the edited sheet goes after a structural edit (`None` = deleted).
-fn map_range(r: RangeRef, e: &Edit) -> Option<RangeRef> {
+pub(crate) fn map_range(r: RangeRef, e: &Edit) -> Option<RangeRef> {
     let expr = gridcraft_formula::Expr::Ref(gridcraft_formula::Reference {
         sheet: gridcraft_formula::SheetSel::Current,
         kind: gridcraft_formula::RefKind::Range(
@@ -942,9 +937,16 @@ fn shift_cell_features(sh: &mut Sheet, e: &Edit) {
     }
     sh.validations.retain(|dv| !dv.ranges.is_empty());
     for t in sh.tables.iter_mut() {
+        // Cells inserted or deleted across a table's full height add or remove table columns.
+        if let Edit::InsertCells { axis: Axis::Cols, range } | Edit::DeleteCells { axis: Axis::Cols, range } = *e
+            && range.start.row <= t.range.start.row
+            && range.end.row >= t.range.end.row
+        {
+            shift_table_columns(t, range.start.col, range.width(), matches!(e, Edit::InsertCells { .. }));
+        }
         t.range = map_range(t.range, e).unwrap_or_default();
     }
-    sh.tables.retain(|t| t.range != RangeRef::default());
+    sh.tables.retain(|t| t.range != RangeRef::default() && !t.columns.is_empty());
     if let Some(af) = sh.autofilter.as_mut() {
         match map_range(af.range, e) {
             Some(r) => af.range = r,
@@ -963,4 +965,65 @@ fn shift_cell_features(sh: &mut Sheet, e: &Edit) {
     if let Some(pa) = sh.print.print_area {
         sh.print.print_area = map_range(pa, e);
     }
+}
+
+/// Columns inserted inside a table become new table columns (with names no other column has);
+/// deleted ones leave it.
+fn shift_table_columns(t: &mut gridcraft_model::Table, at: u32, count: u32, insert: bool) {
+    if insert {
+        if at > t.range.start.col && at <= t.range.end.col {
+            let idx = (at - t.range.start.col) as usize;
+            let mut n = t.columns.len();
+            for k in 0..count as usize {
+                let name = loop {
+                    n += 1;
+                    let name = format!("Column{n}");
+                    if !t.columns.iter().any(|c| c.name.eq_ignore_ascii_case(&name)) {
+                        break name;
+                    }
+                };
+                let col = gridcraft_model::TableColumn { name, totals: Default::default(), totals_label: None, formula: None };
+                t.columns.insert((idx + k).min(t.columns.len()), col);
+            }
+        }
+        return;
+    }
+    let lo = at.max(t.range.start.col);
+    let hi = at.saturating_add(count).min(t.range.end.col + 1);
+    if hi > lo {
+        let a = (lo - t.range.start.col) as usize;
+        let b = (hi - t.range.start.col) as usize;
+        if b <= t.columns.len() {
+            t.columns.drain(a..b);
+        }
+    }
+}
+
+/// Like Excel, Insert/Delete Cells never shifts part of a table: cells shifted up or down must
+/// hold whole table columns, cells shifted left or right whole table rows, and deleting cells
+/// never takes a table's header row without the whole table.
+pub(crate) fn check_table_shift(sh: &Sheet, e: &Edit) -> Result<()> {
+    let (axis, r, delete) = match *e {
+        Edit::InsertCells { axis, range } => (axis, range, false),
+        Edit::DeleteCells { axis, range } => (axis, range, true),
+        _ => return Ok(()),
+    };
+    for t in &sh.tables {
+        let tr = t.range;
+        let ok = match axis {
+            Axis::Rows => {
+                let moves = tr.end.row >= r.start.row && tr.start.col <= r.end.col && tr.end.col >= r.start.col;
+                let header_alone = delete && t.header_row && r.start.row <= tr.start.row && r.end.row >= tr.start.row && r.end.row < tr.end.row;
+                !moves || (r.start.col <= tr.start.col && r.end.col >= tr.end.col && !header_alone)
+            }
+            Axis::Cols => {
+                let moves = tr.end.col >= r.start.col && tr.start.row <= r.end.row && tr.end.row >= r.start.row;
+                !moves || (r.start.row <= tr.start.row && r.end.row >= tr.end.row)
+            }
+        };
+        if !ok {
+            return Err(EngineError::Other("This operation isn't allowed: it would shift cells in a table on your worksheet.".into()));
+        }
+    }
+    Ok(())
 }

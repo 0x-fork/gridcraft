@@ -132,6 +132,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-10-11 | Command-sequence fuzzing: random command sequences checked against undo/redo, XLSX round-trip and full recalculation; fixes for the table, legacy-array, spill, AutoSum, Watch Window and sheet-copy bugs it found |
 | 2026-10-11 | Text boxes keep their formatting: run size, bold, italic, typeface, text colour and outline, alignment, vertical anchor and "no outline" (#377) |
 | 2026-10-11 | Desktop printing opens the print PDF in the system viewer; Save As offers CSV, web page and PDF; macOS File › Properties opens File › Info (#370, #343) |
 | 2026-10-11 | Windows: DirectX 12 shaders compile with FXC, so a missing or stray `dxcompiler.dll` no longer stops the app at start (#339, #354) |
