@@ -16,9 +16,25 @@ use crate::selection::current_region;
 
 const CMD: &str = "data.forecastSheet";
 /// Most history rows a forecast sheet copies.
-const MAX_HISTORY: u64 = 100_000;
+const MAX_HISTORY: u64 = 10_000;
 /// Most forecast rows.
 const MAX_PERIODS: u32 = 10_000;
+/// Most history rows × forecast rows. Every forecast row holds three ETS formulas that each refit
+/// the model over the whole history (about 3 µs per history point in a release build), so this
+/// bounds a sheet's recalculation to a few seconds: 10,000 rows of history get 50 forecast rows,
+/// 50 rows of history the full 10,000.
+const MAX_WORK: u64 = 500_000;
+
+/// Forecast rows by default: a third of the history, within [`max_periods`].
+fn default_periods(history: usize) -> u32 {
+    u32::try_from(history.div_ceil(3)).unwrap_or(u32::MAX).clamp(1, max_periods(history))
+}
+
+/// Most forecast rows for `history` rows of history.
+fn max_periods(history: usize) -> u32 {
+    let h = u64::try_from(history).unwrap_or(u64::MAX).max(1);
+    u32::try_from(MAX_WORK / h).unwrap_or(u32::MAX).clamp(1, MAX_PERIODS)
+}
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![cmd!(
@@ -26,7 +42,7 @@ pub fn specs() -> Vec<CommandSpec> {
         "Forecast Sheet",
         ["Data", "Forecast"],
         None,
-        "{timeline?: \"A2:A25\", values?: \"B2:B25\" (default: the first two columns of `range`, the selection or the current region; a text first cell is the header), end?: timeline value or date text | periods?: n (default: a third of the history, at least 1; ≤10,000), confidenceInterval?: bool (default true), confidence?: 0.95 or 95, seasonality?: \"auto\" | 0 (none) | 2–8,760, fillMissing?: interpolate|zeros, aggregate?: average|count|counta|max|median|min|sum, statistics?: bool, chart?: line|column} → {sheet, table, chart, history, periods}. Inserts a sheet before the active one: timeline, values, Forecast (FORECAST.ETS), Lower/Upper Confidence Bound (FORECAST.ETS.CONFINT), optional FORECAST.ETS.STAT table, and a chart.",
+        "{timeline?: \"A2:A25\", values?: \"B2:B25\" (default: the first two columns of `range`, the selection or the current region; a text first cell is the header), end?: timeline value or date text | periods?: n (default: a third of the history, at least 1; ≤10,000 and history × periods ≤ 500,000; history ≤ 10,000 rows), confidenceInterval?: bool (default true), confidence?: 0.95 or 95, seasonality?: \"auto\" | 0 (none) | 2–8,760, fillMissing?: interpolate|zeros, aggregate?: average|count|counta|max|median|min|sum, statistics?: bool, chart?: line|column} → {sheet, table, chart, history, periods}. Inserts a sheet before the active one: timeline, values, Forecast (FORECAST.ETS), Lower/Upper Confidence Bound (FORECAST.ETS.CONFINT), optional FORECAST.ETS.STAT table, and a chart.",
         has_doc,
         forecast_sheet
     )]
@@ -215,12 +231,13 @@ fn forecast_sheet(s: &mut Session, p: &Json) -> Result<Json> {
         },
         _ => None,
     };
+    let cap = max_periods(rows.len());
     let periods = match end {
-        Some(end) => steps_to(&timeline, end)?,
+        Some(end) => steps_to(&timeline, end, cap)?,
         None => match number(p, "periods")? {
-            Some(n) if n >= 1.0 && n <= f64::from(MAX_PERIODS) => n.ceil() as u32,
-            Some(_) => return Err(bad(CMD, format!("`periods` is from 1 to {MAX_PERIODS}"))),
-            None => (rows.len() as u32).div_ceil(3).max(1),
+            Some(n) if n >= 1.0 && n.ceil() <= f64::from(cap) => n.ceil() as u32,
+            Some(_) => return Err(bad(CMD, format!("`periods` is from 1 to {cap} for {} rows of history", rows.len()))),
+            None => default_periods(rows.len()),
         },
     };
     let future: Vec<f64> =
@@ -392,14 +409,14 @@ fn forecast_sheet(s: &mut Session, p: &Json) -> Result<Json> {
 }
 
 /// Forecast rows needed to reach `end` (rounded up to whole steps).
-fn steps_to(timeline: &Timeline, end: f64) -> Result<u32> {
+fn steps_to(timeline: &Timeline, end: f64, cap: u32) -> Result<u32> {
     let steps = timeline.steps_after_last(end).ok_or_else(|| bad(CMD, "`end` is not on the timeline"))?;
     if steps < 1e-9 {
         return Err(EngineError::Other("The forecast end must be after the last point of the timeline.".into()));
     }
     let steps = steps.ceil();
-    if steps > f64::from(MAX_PERIODS) {
-        return Err(bad(CMD, format!("at most {MAX_PERIODS} forecast steps")));
+    if steps > f64::from(cap) {
+        return Err(bad(CMD, format!("at most {cap} forecast steps for this much history")));
     }
     Ok(steps as u32)
 }
@@ -467,6 +484,40 @@ mod tests {
         let sheets = s.doc().unwrap().wb.sheets.len();
         s.execute("edit.undo", json!({})).unwrap();
         assert_eq!(s.doc().unwrap().wb.sheets.len(), sheets - 1);
+    }
+
+    #[test]
+    fn history_and_periods_are_capped() {
+        use super::{MAX_HISTORY, MAX_PERIODS, MAX_WORK, default_periods, max_periods};
+        // The default (a third of the history) never exceeds the caps.
+        assert_eq!(default_periods(16), 6);
+        assert_eq!(default_periods(1_200), 400);
+        assert_eq!(default_periods(3_000), 166);
+        assert_eq!(default_periods(100_000), 5);
+        assert_eq!(max_periods(10), MAX_PERIODS);
+        assert_eq!(max_periods(0), MAX_PERIODS);
+        for h in [1usize, 2, 3, 50, 51, 1_000, 1_300, 3_000, 10_000, 100_000, usize::MAX] {
+            let (d, m) = (default_periods(h), max_periods(h));
+            assert!(d >= 1 && d <= m && m <= MAX_PERIODS, "{h}: {d} {m}");
+            assert!(u64::try_from(h).unwrap_or(u64::MAX).saturating_mul(u64::from(m)) <= MAX_WORK.max(u64::try_from(h).unwrap_or(u64::MAX)), "{h}");
+        }
+        // Explicit periods or an end past the cap are refused before anything is built.
+        let mut s = Session::new();
+        s.new_workbook();
+        let mut rows = vec![json!(["t", "y"])];
+        rows.extend((1..=1_300).map(|t| json!([t, (t % 7) as f64 + t as f64 * 0.5])));
+        s.execute("range.setValues", json!({"range": "A1", "values": rows})).unwrap();
+        let sheets = s.doc().unwrap().wb.sheets.len();
+        let cap = max_periods(1_300); // 384
+        let err = |r: crate::Result<serde_json::Value>| r.err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(err(s.execute("data.forecastSheet", json!({"range": "A1:B1301", "periods": cap + 1}))).contains("from 1 to 384"));
+        assert!(err(s.execute("data.forecastSheet", json!({"range": "A1:B1301", "end": 1_300 + cap + 1}))).contains("at most 384"));
+        assert!(s.execute("data.forecastSheet", json!({"range": "A1:B1301", "periods": 10_000})).is_err());
+        assert_eq!(s.doc().unwrap().wb.sheets.len(), sheets);
+        // More history rows than MAX_HISTORY are refused.
+        let big = MAX_HISTORY + 2;
+        let r = s.execute("data.forecastSheet", json!({"timeline": format!("A1:A{big}"), "values": format!("B1:B{big}")}));
+        assert!(r.is_err());
     }
 
     #[test]
