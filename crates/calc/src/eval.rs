@@ -688,6 +688,7 @@ impl<'h> Evaluator<'h> {
             "OFFSET" => self.offset(args),
             "INDIRECT" => self.indirect(args),
             "INDEX" => self.index(args),
+            "XLOOKUP" => self.xlookup(args),
             "CELL" => self.cell_info(args),
             "TRIMRANGE" => self.trimrange(args),
             "SUBTOTAL" | "AGGREGATE" => self.subtotal(name, args),
@@ -1181,6 +1182,66 @@ impl<'h> Evaluator<'h> {
             }
             Ev::L(_) => err(CellError::Value),
         }
+    }
+
+    /// XLOOKUP whose result range is a reference returns a reference, as in Excel, so that it can
+    /// end a range (`SUM(XLOOKUP(a,…):XLOOKUP(b,…))`) or feed CELL. Everything else (arrays of
+    /// lookup values, array arguments, errors) goes to the library function.
+    fn xlookup(&mut self, args: &[Expr]) -> Ev {
+        if (3..=6).contains(&args.len())
+            && let (Ev::R(look), Ev::R(ret)) = (self.eval(&args[1]), self.eval(&args[2]))
+            && let ([l], [r]) = (look.as_slice(), ret.as_slice())
+            && let Some(spec) = gridcraft_functions::lookup("XMATCH")
+        {
+            let key = self.value(&args[0]);
+            let (l, r) = (*l, *r);
+            let vertical = l.range.width() == 1 && l.range.height() > 1;
+            let horizontal = l.range.height() == 1 && l.range.width() > 1;
+            let same_len = if vertical { r.range.height() == l.range.height() } else { r.range.width() == l.range.width() };
+            if !matches!(key, Value::Array(_)) && (vertical || horizontal) && same_len {
+                let mut xargs = vec![Arg { value: key, from_ref: false }, Arg { value: self.area_value(&l), from_ref: true }];
+                // An empty match_mode before a given search_mode is the default (0), not the end.
+                let given = |i: usize| args.get(i).is_some_and(|e| !matches!(e, Expr::Missing));
+                let last = if given(5) {
+                    5
+                } else if given(4) {
+                    4
+                } else {
+                    3
+                };
+                for i in 4..=last {
+                    match args.get(i) {
+                        Some(Expr::Missing) | None => xargs.push(Arg { value: Value::Number(0.0), from_ref: false }),
+                        Some(e) => {
+                            let value = self.value(e);
+                            xargs.push(Arg { value, from_ref: false });
+                        }
+                    }
+                }
+                let mut ctx = FnCtx { ev: self };
+                return match gridcraft_functions::call(spec, &xargs, &mut ctx) {
+                    Value::Number(p) if p >= 1.0 => {
+                        let k = p as u32 - 1;
+                        let range = if vertical {
+                            RangeRef::new(
+                                CellRef::new(r.range.start.row + k, r.range.start.col),
+                                CellRef::new(r.range.start.row + k, r.range.end.col),
+                            )
+                        } else {
+                            RangeRef::new(
+                                CellRef::new(r.range.start.row, r.range.start.col + k),
+                                CellRef::new(r.range.end.row, r.range.start.col + k),
+                            )
+                        };
+                        Ev::R(vec![Area { sheet: r.sheet, range }])
+                    }
+                    Value::Error(CellError::NA) if args.get(3).is_some_and(|e| !matches!(e, Expr::Missing)) => self.eval(&args[3]),
+                    Value::Error(e) => err(e),
+                    _ => err(CellError::Value),
+                };
+            }
+        }
+        self.builtin("XLOOKUP", args)
     }
 
     fn cell_info(&mut self, args: &[Expr]) -> Ev {

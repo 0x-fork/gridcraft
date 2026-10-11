@@ -95,6 +95,39 @@ fn chains_out_of_order() {
 }
 
 #[test]
+fn xlookup_returns_a_reference() {
+    let mut t = T::new();
+    for (i, (k, v)) in [("a", 1), ("b", 2), ("c", 3), ("d", 4)].iter().enumerate() {
+        t.set(&format!("A{}", i + 1), k);
+        t.set(&format!("B{}", i + 1), &v.to_string());
+    }
+    t.set("D1", "=SUM(XLOOKUP(\"b\",A1:A4,B1:B4):XLOOKUP(\"d\",A1:A4,B1:B4))");
+    assert_eq!(t.num("D1"), 9.0);
+    t.set("D2", "=SUM(B1:XLOOKUP(\"c\",A1:A4,B1:B4))");
+    assert_eq!(t.num("D2"), 6.0);
+    t.set("D3", "=CELL(\"address\",XLOOKUP(\"c\",A1:A4,B1:B4))");
+    assert_eq!(t.get("D3"), Value::from("$B$3"));
+    // Not found: if_not_found, else #N/A, as before.
+    t.set("D4", "=XLOOKUP(\"z\",A1:A4,B1:B4,\"none\")");
+    assert_eq!(t.get("D4"), Value::from("none"));
+    t.set("D5", "=XLOOKUP(\"z\",A1:A4,B1:B4)");
+    assert_eq!(t.get("D5"), Value::Error(CellError::NA));
+    // A match on an empty cell is a blank reference: ISBLANK is TRUE and & adds nothing (#374).
+    t.set("A5", "e");
+    t.set("D6", "=ISBLANK(XLOOKUP(\"e\",A1:A5,B1:B5))");
+    assert_eq!(t.get("D6"), Value::Bool(true));
+    t.set("D7", "=\"x\"&XLOOKUP(\"e\",A1:A5,B1:B5)&\"y\"");
+    assert_eq!(t.get("D7"), Value::from("xy"));
+    // An empty match_mode keeps the search_mode after it: search last to first.
+    t.set("A6", "b");
+    t.set("B6", "20");
+    t.set("D8", "=XLOOKUP(\"b\",A1:A6,B1:B6,,,-1)");
+    assert_eq!(t.num("D8"), 20.0);
+    t.set("D9", "=XLOOKUP(\"b\",A1:A6,B1:B6)");
+    assert_eq!(t.num("D9"), 2.0);
+}
+
+#[test]
 fn long_chain() {
     let mut t = T::new();
     t.set("A1", "1");
