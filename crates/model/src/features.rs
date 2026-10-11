@@ -543,10 +543,98 @@ pub struct PrintSettings {
     pub headings: bool,
     pub center_h: bool,
     pub center_v: bool,
+    /// The header and footer of odd pages, and of every page unless the variants below apply.
     pub header: String,
     pub footer: String,
     pub row_breaks: Vec<u32>,
     pub col_breaks: Vec<u32>,
+    /// Different First Page: the sheet's first printed page uses `first_header`/`first_footer`.
+    #[serde(default)]
+    pub different_first: bool,
+    /// Different Odd & Even Pages: even-numbered pages use `even_header`/`even_footer`.
+    #[serde(default)]
+    pub different_odd_even: bool,
+    #[serde(default)]
+    pub first_header: String,
+    #[serde(default)]
+    pub first_footer: String,
+    #[serde(default)]
+    pub even_header: String,
+    #[serde(default)]
+    pub even_footer: String,
+    /// Scale with Document / Align with Page Margins (both on unless a file turned them off).
+    #[serde(default = "yes")]
+    pub hf_scale_with_doc: bool,
+    #[serde(default = "yes")]
+    pub hf_align_with_margins: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// Which header/footer pair a printed page uses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HfPage {
+    Odd,
+    Even,
+    First,
+}
+
+impl HfPage {
+    pub fn id(self) -> &'static str {
+        match self {
+            HfPage::Odd => "odd",
+            HfPage::Even => "even",
+            HfPage::First => "first",
+        }
+    }
+    pub fn parse(id: &str) -> Option<HfPage> {
+        match id {
+            "odd" | "all" => Some(HfPage::Odd),
+            "even" => Some(HfPage::Even),
+            "first" => Some(HfPage::First),
+            _ => None,
+        }
+    }
+}
+
+impl PrintSettings {
+    /// The pair used by page `number` (1-based, as `&P` prints it); `first` is the sheet's first page.
+    pub fn hf_page(&self, first: bool, number: usize) -> HfPage {
+        if self.different_first && first {
+            HfPage::First
+        } else if self.different_odd_even && number.is_multiple_of(2) {
+            HfPage::Even
+        } else {
+            HfPage::Odd
+        }
+    }
+    /// The header (`footer` false) or footer of a page kind.
+    pub fn hf(&self, page: HfPage, footer: bool) -> &String {
+        match (page, footer) {
+            (HfPage::Odd, false) => &self.header,
+            (HfPage::Odd, true) => &self.footer,
+            (HfPage::Even, false) => &self.even_header,
+            (HfPage::Even, true) => &self.even_footer,
+            (HfPage::First, false) => &self.first_header,
+            (HfPage::First, true) => &self.first_footer,
+        }
+    }
+    pub fn hf_mut(&mut self, page: HfPage, footer: bool) -> &mut String {
+        match (page, footer) {
+            (HfPage::Odd, false) => &mut self.header,
+            (HfPage::Odd, true) => &mut self.footer,
+            (HfPage::Even, false) => &mut self.even_header,
+            (HfPage::Even, true) => &mut self.even_footer,
+            (HfPage::First, false) => &mut self.first_header,
+            (HfPage::First, true) => &mut self.first_footer,
+        }
+    }
+    /// Any header or footer text at all (on any kind of page).
+    pub fn has_header_footer(&self) -> bool {
+        [&self.header, &self.footer, &self.first_header, &self.first_footer, &self.even_header, &self.even_footer].iter().any(|t| !t.is_empty())
+    }
 }
 
 impl Default for PrintSettings {
@@ -568,6 +656,14 @@ impl Default for PrintSettings {
             footer: String::new(),
             row_breaks: vec![],
             col_breaks: vec![],
+            different_first: false,
+            different_odd_even: false,
+            first_header: String::new(),
+            first_footer: String::new(),
+            even_header: String::new(),
+            even_footer: String::new(),
+            hf_scale_with_doc: true,
+            hf_align_with_margins: true,
         }
     }
 }

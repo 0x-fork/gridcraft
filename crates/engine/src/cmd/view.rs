@@ -96,7 +96,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Header & Footer",
             ["Insert", "Text"],
             None,
-            "{sheet?, header?: \"&C&P\", footer?: \"&CPage &P of &N\"} or one section: {sheet?, part: header|footer, section: left|center|right, text: \"Page &[Page] of &[Pages]\"} (field names or codes) → {header, footer}",
+            "{sheet?, header?: \"&C&P\", footer?: \"&CPage &P of &N\", differentFirst?: bool, differentOddEven?: bool, firstHeader?, firstFooter?, evenHeader?, evenFooter?} or one section: {sheet?, page?: odd|even|first, part: header|footer, section: left|center|right, text: \"Page &[Page] of &[Pages]\"} (field names or codes) → {header, footer, differentFirst, differentOddEven, firstHeader, firstFooter, evenHeader, evenFooter}",
             has_doc,
             header_footer
         ),
@@ -308,7 +308,11 @@ fn header_footer(s: &mut Session, p: &Json) -> Result<Json> {
                 "right" => 2,
                 other => return Err(bad(CMD, format!("`section` must be left, center or right, not `{other}`"))),
             };
-            Some((footer, idx, super::print::fields_to_codes(str_param(p, "text").unwrap_or(""))))
+            let page = match str_param(p, "page") {
+                None => gridcraft_model::HfPage::Odd,
+                Some(id) => gridcraft_model::HfPage::parse(id).ok_or_else(|| bad(CMD, format!("`page` must be odd, even or first, not `{id}`")))?,
+            };
+            Some((page, footer, idx, super::print::fields_to_codes(str_param(p, "text").unwrap_or(""))))
         }
     };
     edit(s, |cx| {
@@ -319,15 +323,40 @@ fn header_footer(s: &mut Session, p: &Json) -> Result<Json> {
         if let Some(f) = str_param(p, "footer") {
             pr.footer = cap(f);
         }
-        if let Some((footer, idx, text)) = &section {
-            let spec = if *footer { &mut pr.footer } else { &mut pr.header };
+        for (key, slot) in [
+            ("firstHeader", &mut pr.first_header),
+            ("firstFooter", &mut pr.first_footer),
+            ("evenHeader", &mut pr.even_header),
+            ("evenFooter", &mut pr.even_footer),
+        ] {
+            if let Some(t) = str_param(p, key) {
+                *slot = cap(t);
+            }
+        }
+        if let Some(on) = bool_param(p, "differentFirst") {
+            pr.different_first = on;
+        }
+        if let Some(on) = bool_param(p, "differentOddEven") {
+            pr.different_odd_even = on;
+        }
+        if let Some((page, footer, idx, text)) = &section {
+            let spec = pr.hf_mut(*page, *footer);
             let mut parts = super::print::split_header_footer(spec);
             if let Some(slot) = parts.get_mut(*idx) {
                 *slot = text.clone();
             }
             *spec = cap(&super::print::join_header_footer(&parts));
         }
-        Ok(json!({"header": pr.header, "footer": pr.footer}))
+        Ok(json!({
+            "header": pr.header,
+            "footer": pr.footer,
+            "differentFirst": pr.different_first,
+            "differentOddEven": pr.different_odd_even,
+            "firstHeader": pr.first_header,
+            "firstFooter": pr.first_footer,
+            "evenHeader": pr.even_header,
+            "evenFooter": pr.even_footer,
+        }))
     })
 }
 

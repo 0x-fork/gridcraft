@@ -321,6 +321,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "File Name" => "파일 이름",
         "Sheet Name" => "시트 이름",
         "Go to Header" => "머리글로 이동",
+        "Different First Page" => "첫 페이지를 다르게 지정",
+        "Different Odd & Even Pages" => "짝수와 홀수 페이지를 다르게 지정",
         "Go to Footer" => "바닥글로 이동",
         "Ruler" => "눈금자",
         // File › Backstage view.

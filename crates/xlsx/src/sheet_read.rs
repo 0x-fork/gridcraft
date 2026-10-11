@@ -137,8 +137,22 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
                 }
             }
             "headerFooter" => {
-                sheet.print.header = e.child("oddHeader").map(|h| h.text.clone()).unwrap_or_default();
-                sheet.print.footer = e.child("oddFooter").map(|h| h.text.clone()).unwrap_or_default();
+                let pr = &mut sheet.print;
+                for (tag, slot) in [
+                    ("oddHeader", &mut pr.header),
+                    ("oddFooter", &mut pr.footer),
+                    ("evenHeader", &mut pr.even_header),
+                    ("evenFooter", &mut pr.even_footer),
+                    ("firstHeader", &mut pr.first_header),
+                    ("firstFooter", &mut pr.first_footer),
+                ] {
+                    // Excel caps each at 255 characters; a hostile file can't make them huge.
+                    *slot = e.child(tag).map(|h| h.text.chars().take(255).collect()).unwrap_or_default();
+                }
+                pr.different_first = e.flag("differentFirst", false);
+                pr.different_odd_even = e.flag("differentOddEven", false);
+                pr.hf_scale_with_doc = e.flag("scaleWithDoc", true);
+                pr.hf_align_with_margins = e.flag("alignWithMargins", true);
             }
             "rowBreaks" => sheet.print.row_breaks = e.kids("brk").filter_map(|b| b.attr_u32("id")).filter(|&r| r > 0 && r < MAX_ROWS).collect(),
             "colBreaks" => sheet.print.col_breaks = e.kids("brk").filter_map(|b| b.attr_u32("id")).filter(|&c| c > 0 && c < MAX_COLS).collect(),

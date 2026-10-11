@@ -197,6 +197,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "File\nPath" => "Datei-\npfad",
         "File Path" => "Dateipfad",
         "Footer" => "Fußzeile",
+        "Different First Page" => "Erste Seite anders",
+        "Different Odd & Even Pages" => "Gerade und ungerade Seiten anders",
         "Go to Footer" => "Zur Fußzeile wechseln",
         "Go to Header" => "Zur Kopfzeile wechseln",
         "Go to\nFooter" => "Zur\nFußzeile",

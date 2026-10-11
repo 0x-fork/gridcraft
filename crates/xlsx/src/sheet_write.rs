@@ -442,13 +442,31 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
         let _ = write!(s, " r:id=\"{id}\"");
     }
     s.push_str("/>");
-    if !p.header.is_empty() || !p.footer.is_empty() {
-        s.push_str("<headerFooter>");
-        if !p.header.is_empty() {
-            let _ = write!(s, "<oddHeader>{}</oddHeader>", esc(&p.header));
+    if p.has_header_footer() || p.different_first || p.different_odd_even || !p.hf_scale_with_doc || !p.hf_align_with_margins {
+        s.push_str("<headerFooter");
+        for (attr, on, default) in [
+            ("differentOddEven", p.different_odd_even, false),
+            ("differentFirst", p.different_first, false),
+            ("scaleWithDoc", p.hf_scale_with_doc, true),
+            ("alignWithMargins", p.hf_align_with_margins, true),
+        ] {
+            if on != default {
+                let _ = write!(s, " {attr}=\"{}\"", u8::from(on));
+            }
         }
-        if !p.footer.is_empty() {
-            let _ = write!(s, "<oddFooter>{}</oddFooter>", esc(&p.footer));
+        s.push('>');
+        // CT_HeaderFooter's element order.
+        for (tag, text) in [
+            ("oddHeader", &p.header),
+            ("oddFooter", &p.footer),
+            ("evenHeader", &p.even_header),
+            ("evenFooter", &p.even_footer),
+            ("firstHeader", &p.first_header),
+            ("firstFooter", &p.first_footer),
+        ] {
+            if !text.is_empty() {
+                let _ = write!(s, "<{tag}>{}</{tag}>", esc(text));
+            }
         }
         s.push_str("</headerFooter>");
     }

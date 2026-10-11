@@ -319,6 +319,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "File Name" => "文件名",
         "Sheet Name" => "工作表名",
         "Go to Header" => "转至页眉",
+        "Different First Page" => "首页不同",
+        "Different Odd & Even Pages" => "奇偶页不同",
         "Go to Footer" => "转至页脚",
         "Ruler" => "标尺",
         // File › Backstage view.

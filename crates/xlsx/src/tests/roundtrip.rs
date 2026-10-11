@@ -265,6 +265,14 @@ fn sample() -> Workbook {
         footer: "&C&F".into(),
         row_breaks: vec![15, 30],
         col_breaks: vec![4],
+        different_first: true,
+        different_odd_even: true,
+        first_header: "&CCover".into(),
+        first_footer: String::new(),
+        even_header: "&LEven &P".into(),
+        even_footer: "&R&A".into(),
+        hf_scale_with_doc: false,
+        hf_align_with_margins: true,
     };
     s.sparklines.push(Sparkline { cell: at("J2"), source: "B2:B3".into(), kind: SparklineKind::WinLoss, color: Color::Rgb(0x112233), markers: true });
     s.tables.push(Table {

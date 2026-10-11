@@ -100,6 +100,8 @@ pub struct GridState {
     pub paper: Option<crate::paper_view::PaperCache>,
     /// Header or footer being edited in place (Page Layout view).
     pub hf_edit: Option<crate::paper_view::HfEdit>,
+    /// Insert › Header & Footer: start editing the first page's header once Page Layout view is up.
+    pub hf_start: bool,
     /// The grid geometry of the last frame (hit-testing for agents and tests).
     pub geo: Option<Geo>,
 }
