@@ -345,7 +345,8 @@ fn display_text(
         return (String::new(), None, false, None);
     }
     let code = st.num_fmt.as_str();
-    if code == "checkbox" {
+    // A checkbox cell draws TRUE/FALSE (and empty) as a box; other values show as General.
+    if code == "checkbox" && matches!(v, Value::Bool(_) | Value::Empty) {
         return (String::new(), None, false, None);
     }
     if code == "General"
@@ -706,7 +707,7 @@ fn paint_quadrant(p: &Painter, geo: &Geo, wb: &Workbook, si: usize, sh: &Sheet, 
             paint_cf_icon(p, r, set, *idx);
             text_left += 15.0 * z;
         }
-        if lk.style.num_fmt.as_str() == "checkbox" {
+        if lk.style.num_fmt.as_str() == "checkbox" && matches!(v, Value::Bool(_) | Value::Empty) {
             let s = (11.0 * z * 1.2).clamp(8.0, 24.0);
             let b = Rect::from_center_size(rect.center(), vec2(s, s));
             let on = v == Value::Bool(true);

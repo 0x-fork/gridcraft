@@ -1165,6 +1165,18 @@ pub(crate) fn rewrite_all_formulas(wb: &mut gridcraft_model::Workbook, target: &
 fn clear(s: &mut Session, p: &Json, what: &str) -> Result<Json> {
     let sheet = target_sheet(s, p)?;
     let ranges = target_ranges(s, p)?;
+    // Delete on checkboxes works in two passes (as in Excel): checked boxes are unchecked first,
+    // and only when every box in the selection is unchecked are the boxes removed.
+    let uncheck_only = what == "contents" && {
+        let d = s.doc()?;
+        d.wb.sheet(sheet).is_some_and(|sh| {
+            ranges.iter().any(|r| {
+                r.intersection(&sh.used_range().unwrap_or(RangeRef::cell(r.start))).is_some_and(|r| {
+                    sh.cells.iter_range(r).any(|(c, x)| x.value == Value::Bool(true) && super::extra::is_checkbox_cell(&d.wb, sh, c))
+                })
+            })
+        })
+    };
     edit(s, |cx| {
         for r in &ranges {
             let r = match cx.wb.sheet(sheet).and_then(|sh| sh.used_range()) {
@@ -1176,6 +1188,21 @@ fn clear(s: &mut Session, p: &Json, what: &str) -> Result<Json> {
             };
             let cells: Vec<(CellRef, Cell)> =
                 cx.wb.sheet(sheet).map(|sh| sh.cells.iter_range(r).map(|(c, x)| (c, x.clone())).collect()).unwrap_or_default();
+            let mut cells = cells;
+            if what == "contents" {
+                for (_, cell) in cells.iter_mut() {
+                    let checkbox = cx.wb.styles.get(cell.style).num_fmt.as_str() == "checkbox";
+                    cell.formula = None;
+                    if checkbox && uncheck_only {
+                        cell.value = Value::Bool(false);
+                    } else {
+                        cell.value = Value::Empty;
+                        if checkbox {
+                            cell.style = cx.wb.styles.derive(cell.style, |st| st.num_fmt = gridcraft_model::NumFmt::new("General"));
+                        }
+                    }
+                }
+            }
             let sh = cx.sheet_mut(sheet)?;
             for (c, mut cell) in cells {
                 match what {
@@ -1183,8 +1210,6 @@ fn clear(s: &mut Session, p: &Json, what: &str) -> Result<Json> {
                         sh.remove_cell(c);
                     }
                     "contents" => {
-                        cell.value = Value::Empty;
-                        cell.formula = None;
                         sh.set_cell(c, cell);
                     }
                     "formats" => {

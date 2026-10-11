@@ -1278,6 +1278,11 @@ fn insert(app: &mut SheetApp, ui: &mut Ui) {
         }
     });
     sep(ui);
+    // Cell Controls.
+    if big_button(ui, Icon::Checkbox, "Checkbox", "Insert checkboxes in the selected cells", false).clicked() {
+        act(app, "insert.checkbox", json!({}));
+    }
+    sep(ui);
     if big_button(ui, Icon::Link, "Link", "Insert Link (⌘K)", false).clicked() {
         app.open_dialog("insertLink", json!({}));
     }

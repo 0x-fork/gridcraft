@@ -108,6 +108,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Link" => "링크",
         "Symbol" => "기호",
         "Sparklines" => "스파크라인",
+        "Checkbox" => "확인란",
+        "Insert checkboxes in the selected cells" => "선택한 셀에 확인란 삽입",
         "Header & Footer" => "머리글 및 바닥글",
         "Draw with ink" => "잉크로 그리기",
         "Eraser" => "지우개",

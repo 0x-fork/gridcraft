@@ -108,6 +108,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Link" => "链接",
         "Symbol" => "符号",
         "Sparklines" => "迷你图",
+        "Checkbox" => "复选框",
+        "Insert checkboxes in the selected cells" => "在所选单元格中插入复选框",
         "Header & Footer" => "页眉和页脚",
         "Draw with ink" => "墨迹绘制",
         "Eraser" => "橡皮擦",
