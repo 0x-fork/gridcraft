@@ -299,6 +299,7 @@ fn sample() -> Workbook {
         y_title: Some("Amount".into()),
         source: None,
         by_rows: false,
+        pivot: None,
     };
     for kind in [
         ChartKind::ColumnClustered,

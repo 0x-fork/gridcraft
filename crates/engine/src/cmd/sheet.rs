@@ -538,6 +538,12 @@ fn rename_sheet(s: &mut Session, p: &Json) -> Result<Json> {
                     se.categories = se.categories.as_deref().map(fix);
                     se.name = se.name.as_deref().map(fix);
                 }
+                // A PivotChart follows its PivotTable's sheet.
+                if let Some((sheet, pivot)) = ch.pivot.as_deref().and_then(crate::pivot::parse_chart_link)
+                    && sheet.eq_ignore_ascii_case(&old)
+                {
+                    ch.pivot = Some(crate::pivot::chart_link(&name, &pivot));
+                }
             }
         }
         for n in cx.wb.names.iter_mut() {

@@ -606,6 +606,7 @@ fn insert_chart(s: &mut Session, p: &Json) -> Result<Json> {
         y_title: None,
         source: Some(format!("{}!{}", gridcraft_formula::quote_sheet(&sh.name), r.a1())),
         by_rows,
+        pivot: None,
     };
     edit(s, |cx| {
         cx.sheet_mut(sheet)?.charts.push(chart);

@@ -503,6 +503,12 @@ pub struct Output {
     /// Rows above the body (report filters plus a blank row).
     pub body_offset: u32,
     pub width: u32,
+    /// Grid rows of the innermost (or collapsed) items: a PivotChart's categories.
+    pub chart_rows: Vec<u32>,
+    /// Grid columns of item (not total) values with their series names: a PivotChart's series.
+    pub chart_cols: Vec<(u32, String)>,
+    /// Grid column holding the innermost row labels (`None` without row fields).
+    pub label_col: Option<u32>,
 }
 
 impl Output {
@@ -546,6 +552,8 @@ enum LineKind {
 
 struct Line {
     kind: LineKind,
+    /// A category of a PivotChart: an innermost (or collapsed) item.
+    leaf: bool,
     path: Vec<u32>,
     values: bool,
     /// (column, value, indent, number format)
@@ -587,14 +595,21 @@ impl Ctx<'_> {
             let (col, indent) = if outline { (depth, 0) } else { (0, depth.min(250) as u8) };
             let collapsed = depth + 1 < n && self.rows.get(depth).is_some_and(|f| is_collapsed(f, &label));
             if depth + 1 >= n || collapsed || node.children.is_empty() {
-                out.push(Line { kind: LineKind::Item(depth + 1 < n), path: prefix.clone(), values: true, labels: vec![(col, v, indent, fmt)] });
+                out.push(Line {
+                    kind: LineKind::Item(depth + 1 < n),
+                    leaf: true,
+                    path: prefix.clone(),
+                    values: true,
+                    labels: vec![(col, v, indent, fmt)],
+                });
             } else {
                 let top = self.pt.subtotals && self.pt.subtotals_top;
-                out.push(Line { kind: LineKind::Item(true), path: prefix.clone(), values: top, labels: vec![(col, v, indent, fmt)] });
+                out.push(Line { kind: LineKind::Item(true), leaf: false, path: prefix.clone(), values: top, labels: vec![(col, v, indent, fmt)] });
                 self.flatten(&node.children, depth + 1, prefix, out);
                 if self.pt.subtotals && !self.pt.subtotals_top {
                     out.push(Line {
                         kind: LineKind::Subtotal,
+                        leaf: false,
                         path: prefix.clone(),
                         values: true,
                         labels: vec![(col, Value::text(format!("{label} Total")), indent, None)],
@@ -621,12 +636,13 @@ impl Ctx<'_> {
             labels.push((depth, v, 0, fmt));
             let collapsed = depth + 1 < n && self.rows.get(depth).is_some_and(|f| is_collapsed(f, &label));
             if depth + 1 >= n || collapsed || node.children.is_empty() {
-                out.push(Line { kind: LineKind::Item(false), path: prefix.clone(), values: true, labels });
+                out.push(Line { kind: LineKind::Item(false), leaf: true, path: prefix.clone(), values: true, labels });
             } else {
                 self.flatten_tabular(&node.children, depth + 1, prefix, &labels, out);
                 if self.pt.subtotals {
                     out.push(Line {
                         kind: LineKind::Subtotal,
+                        leaf: false,
                         path: prefix.clone(),
                         values: true,
                         labels: vec![(depth, Value::text(format!("{label} Total")), 0, None)],
@@ -755,7 +771,7 @@ pub fn compute(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Result<Out
     let ctx = Ctx { pt, rows: row_fields.clone(), row_items, row_fmts: row_fmts.clone() };
     let mut lines: Vec<Line> = Vec::new();
     if rows.is_empty() {
-        lines.push(Line { kind: LineKind::Item(false), path: vec![], values: true, labels: vec![] });
+        lines.push(Line { kind: LineKind::Item(false), leaf: true, path: vec![], values: true, labels: vec![] });
     } else {
         if pt.layout == PivotLayout::Tabular {
             ctx.flatten_tabular(&row_tree, 0, &mut Vec::new(), &[], &mut lines);
@@ -763,7 +779,13 @@ pub fn compute(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Result<Out
             ctx.flatten(&row_tree, 0, &mut Vec::new(), &mut lines);
         }
         if pt.grand_totals_cols {
-            lines.push(Line { kind: LineKind::Grand, path: vec![], values: true, labels: vec![(0, Value::text("Grand Total"), 0, None)] });
+            lines.push(Line {
+                kind: LineKind::Grand,
+                leaf: false,
+                path: vec![],
+                values: true,
+                labels: vec![(0, Value::text("Grand Total"), 0, None)],
+            });
         }
     }
     let mut specs: Vec<ColSpec> = Vec::new();
@@ -829,7 +851,15 @@ pub fn compute(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Result<Out
     if empty {
         let r = g.push_row(RowKind::Placeholder)?;
         g.set(r, 0, Value::text(format!("{} — choose fields", pt.name)), CellKind::Placeholder, 0, None);
-        return Ok(Output { width: g.width as u32, grid: g.rows, row_kinds: g.kinds, body_offset });
+        return Ok(Output {
+            width: g.width as u32,
+            grid: g.rows,
+            row_kinds: g.kinds,
+            body_offset,
+            chart_rows: vec![],
+            chart_cols: vec![],
+            label_col: None,
+        });
     }
 
     let val_name = |vi: usize| vals.get(vi).map(|(_, v)| v.name.clone()).unwrap_or_default();
@@ -949,6 +979,33 @@ pub fn compute(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Result<Out
             }),
         })
         .collect();
+    let mut chart_rows: Vec<u32> = Vec::new();
+    let chart_cols: Vec<(u32, String)> = data_cols
+        .iter()
+        .enumerate()
+        .filter_map(|(j, (si, vi))| {
+            let spec = specs.get(*si)?;
+            if spec.kind != ColKind::Leaf {
+                return None;
+            }
+            let mut parts: Vec<String> =
+                spec.path.iter().enumerate().map(|(lv, it)| col_items.get(lv).map(|fi| fi.label(*it)).unwrap_or_default()).collect();
+            if let Some(vi) = vi
+                && (k > 1 || parts.is_empty())
+            {
+                parts.push(val_name(*vi));
+            }
+            Some(((l + j) as u32, parts.join(" - ")))
+        })
+        .filter(|_| k > 0)
+        .collect();
+    let label_col = if rows.is_empty() {
+        None
+    } else if compact {
+        Some(0)
+    } else {
+        Some(rows.len().saturating_sub(1) as u32)
+    };
     for line in &lines {
         let rk = match line.kind {
             LineKind::Item(b) => RowKind::Item(b),
@@ -961,6 +1018,9 @@ pub fn compute(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Result<Out
             LineKind::Grand => (CellKind::GrandTotal, CellKind::GrandTotal),
         };
         let r = g.push_row(rk)?;
+        if line.leaf && k > 0 {
+            chart_rows.push(r as u32);
+        }
         for (c, v, indent, fmt) in &line.labels {
             g.set(r, *c, v.clone(), ck.0, *indent, fmt.clone());
         }
@@ -1015,7 +1075,7 @@ pub fn compute(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Result<Out
             g.set(r, l + j, shown, ck.1, 0, data_fmt.get(*vi).cloned().flatten());
         }
     }
-    Ok(Output { width: g.width as u32, grid: g.rows, row_kinds: g.kinds, body_offset })
+    Ok(Output { width: g.width as u32, grid: g.rows, row_kinds: g.kinds, body_offset, chart_rows, chart_cols, label_col })
 }
 
 // ---------------------------------------------------------------- styling and writing
@@ -1205,7 +1265,103 @@ pub fn refresh(wb: &mut Workbook, sheet: usize, idx: usize, replace: bool) -> Re
     if let Some(p) = shm.pivots.get_mut(idx) {
         p.last_range = Some(area);
     }
+    let sheet_name = shm.name.clone();
+    rebind_charts(wb, &sheet_name, &pt.name, origin, &out);
     Ok(area)
+}
+
+// ---------------------------------------------------------------- PivotCharts
+
+/// The link a PivotChart stores to its PivotTable: `Sheet2!PivotTable1`.
+pub fn chart_link(sheet: &str, pivot: &str) -> String {
+    format!("{}!{pivot}", quote_sheet(sheet))
+}
+
+/// (sheet, PivotTable name) of a PivotChart link; a leading `[Book.xlsx]` is ignored.
+pub fn parse_chart_link(link: &str) -> Option<(String, String)> {
+    let t = link.trim();
+    let t = match t.strip_prefix('[') {
+        Some(rest) => rest.split_once(']').map(|(_, r)| r).unwrap_or(rest),
+        None => t,
+    };
+    let (sheet, name) = t.rsplit_once('!')?;
+    let sheet = sheet.trim();
+    let sheet = sheet.strip_prefix('\'').and_then(|x| x.strip_suffix('\'')).map(|x| x.replace("''", "'")).unwrap_or_else(|| sheet.to_string());
+    let name = name.trim();
+    if sheet.is_empty() || name.is_empty() {
+        return None;
+    }
+    Some((sheet, name.to_string()))
+}
+
+/// Whether a PivotChart link points at `pivot` on `sheet`.
+pub fn links_to(link: &str, sheet: &str, pivot: &str) -> bool {
+    parse_chart_link(link).is_some_and(|(s, n)| s.eq_ignore_ascii_case(sheet) && n.eq_ignore_ascii_case(pivot))
+}
+
+/// An absolute reference to `col` over grid `rows` (contiguous runs joined into a union).
+fn rows_ref(sheet: &str, origin: CellRef, col: u32, rows: &[u32]) -> Option<String> {
+    let q = quote_sheet(sheet);
+    let c = origin.col.checked_add(col)?;
+    let letters = gridcraft_core::col_to_letters(c);
+    let mut parts: Vec<String> = Vec::new();
+    let mut i = 0;
+    while let Some(&start) = rows.get(i) {
+        let mut end = start;
+        while rows.get(i + 1).is_some_and(|n| Some(*n) == end.checked_add(1)) {
+            end += 1;
+            i += 1;
+        }
+        i += 1;
+        let (a, b) = (origin.row.checked_add(start)? + 1, origin.row.checked_add(end)? + 1);
+        parts.push(if a == b { format!("{q}!${letters}${a}") } else { format!("{q}!${letters}${a}:${letters}${b}") });
+    }
+    match parts.len() {
+        0 => None,
+        1 => parts.pop(),
+        _ => Some(format!("({})", parts.join(","))),
+    }
+}
+
+/// Most category rows a PivotChart plots.
+const MAX_CHART_ROWS: usize = 10_000;
+
+/// A PivotChart's series for a report written at `origin`: categories are the innermost row
+/// items, one series per item column (column items × value fields); totals are left out.
+pub fn chart_series(sheet: &str, origin: CellRef, out: &Output) -> Vec<Series> {
+    let rows: Vec<u32> = out.chart_rows.iter().copied().take(MAX_CHART_ROWS).collect();
+    let categories = out.label_col.and_then(|c| rows_ref(sheet, origin, c, &rows));
+    out.chart_cols
+        .iter()
+        .filter_map(|(c, name)| {
+            Some(Series {
+                name: Some(format!("\"{}\"", name.replace('"', "\"\""))),
+                categories: categories.clone(),
+                values: rows_ref(sheet, origin, *c, &rows)?,
+                bubble_sizes: None,
+                color: None,
+                secondary: false,
+                kind: None,
+                smooth: false,
+            })
+        })
+        .collect()
+}
+
+/// Rebuilds the series of every PivotChart of a PivotTable after its report was written.
+fn rebind_charts(wb: &mut Workbook, sheet: &str, pivot: &str, origin: CellRef, out: &Output) {
+    let linked = |ch: &Chart| ch.pivot.as_deref().is_some_and(|l| links_to(l, sheet, pivot));
+    let hits: Vec<usize> = (0..wb.sheets.len()).filter(|i| wb.sheet(*i).is_some_and(|sh| sh.charts.iter().any(linked))).collect();
+    if hits.is_empty() {
+        return;
+    }
+    let series = chart_series(sheet, origin, out);
+    for i in hits {
+        let Some(sh) = wb.sheet_mut(i) else { continue };
+        for ch in sh.charts.iter_mut().filter(|c| linked(c)) {
+            ch.series = series.clone();
+        }
+    }
 }
 
 /// Clears a pivot's last output area.

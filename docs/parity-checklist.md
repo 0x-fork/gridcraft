@@ -4,13 +4,13 @@
 
 Each entry is an Excel ribbon or menu command (feature names only). It counts as implemented when GridCraft registers a command with the same id. This measures breadth only; the overall assessment (depth, fidelity, effort) is in [target-app-parity.md](target-app-parity.md).
 
-**Overall: 258 / 290 commands implemented (89.0%).**
+**Overall: 259 / 290 commands implemented (89.3%).**
 
 | Tab | Implemented | Total | Parity |
 |---|---|---|---|
 | File | 10 | 11 | 91% |
 | Home | 94 | 94 | 100% |
-| Insert | 15 | 25 | 60% |
+| Insert | 16 | 25 | 64% |
 | Draw | 4 | 4 | 100% |
 | Page Layout | 23 | 23 | 100% |
 | Formulas | 23 | 23 | 100% |
@@ -142,7 +142,7 @@ Implemented:
 - `edit.goToSpecial` Go To Special (Editing)
 - `home.addIns` Add-ins (Add-ins)
 
-## Insert (15 / 25, 60%)
+## Insert (16 / 25, 64%)
 
 Implemented:
 
@@ -154,6 +154,7 @@ Implemented:
 - `insert.icons` Icons (Illustrations)
 - `insert.recommendedCharts` Recommended Charts (Charts)
 - `insert.chart` Charts (Charts)
+- `insert.pivotChart` PivotChart (Charts)
 - `insert.sparkline` Sparklines (Sparklines)
 - `insert.link` Link (Links)
 - `review.newComment` Comment (Comments)
@@ -166,7 +167,6 @@ Missing:
 
 - `insert.smartArt` SmartArt (Illustrations)
 - `insert.screenshot` Screenshot (Illustrations)
-- `insert.pivotChart` PivotChart (Charts)
 - `insert.map` Maps (Charts)
 - `insert.slicer` Slicer (Filters)
 - `insert.timeline` Timeline (Filters)
