@@ -400,10 +400,7 @@ fn insert_copied_cells(s: &mut Session, p: &Json) -> Result<Json> {
     let Some(clip) = s.clipboard.clone() else { return Err(EngineError::Other("Nothing to paste.".into())) };
     let sheet = target_sheet(s, p)?;
     let d = s.doc()?;
-    let at = match str_param(p, "at") {
-        Some(t) => cell_param(p, "at").ok_or_else(|| bad("home.insertCopiedCells", format!("not a cell: {t}")))?,
-        None => d.selection.current().start,
-    };
+    let at = cell_param_on(s, p, "at", sheet)?.unwrap_or(d.selection.current().start);
     let shift = str_param(p, "shift").unwrap_or("down");
     if shift != "down" && shift != "right" {
         return Err(bad("home.insertCopiedCells", format!("unknown `shift`: {shift} (down or right)")));

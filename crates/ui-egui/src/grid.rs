@@ -2115,11 +2115,8 @@ fn select_ranges(app: &mut SheetApp, r: RangeRef, add: bool, active: CellRef) {
     let clicked = r.a1();
     let ranges = toggled_ranges(current, clicked.clone(), add);
     // A removed area takes the active cell with it; `selection.set` then puts it at the start of the last area.
-    let params = if ranges.contains(&clicked) {
-        json!({"range": ranges.join(","), "active": active.a1()})
-    } else {
-        json!({"range": ranges.join(",")})
-    };
+    let params =
+        if ranges.contains(&clicked) { json!({"range": ranges.join(","), "active": active.a1()}) } else { json!({"range": ranges.join(",")}) };
     let _ = app.session.run("selection.set", params);
 }
 
