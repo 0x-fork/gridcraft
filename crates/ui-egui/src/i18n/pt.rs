@@ -324,6 +324,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "File Name" => "Nome do Arquivo",
         "Sheet Name" => "Nome da Planilha",
         "Go to Header" => "Ir para o Cabeçalho",
+        "Different First Page" => "Primeira Página Diferente",
+        "Different Odd & Even Pages" => "Páginas Pares e Ímpares Diferentes",
         "Go to Footer" => "Ir para o Rodapé",
         "Ruler" => "Régua",
         // File › Backstage view.

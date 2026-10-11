@@ -12,7 +12,7 @@ use std::sync::Arc;
 use egui::{Align2, Color32, FontId, Key, Painter, Pos2, Rect, Stroke, StrokeKind, TextEdit, pos2, vec2};
 use gridcraft_engine::cf::CfCache;
 use gridcraft_engine::cmd::print::{self, HfContext};
-use gridcraft_engine::model::{Sheet, SheetViewMode, Workbook};
+use gridcraft_engine::model::{HfPage, Sheet, SheetViewMode, Workbook};
 use gridcraft_engine::paper::{self, HfZone, PageGrid};
 use serde_json::json;
 
@@ -40,6 +40,8 @@ pub struct HfEdit {
     /// Page (row band, column band) whose header/footer is shown in edit.
     pub page: (usize, usize),
     pub footer: bool,
+    /// Which header/footer pair the page uses (first page, even pages, the rest).
+    pub kind: HfPage,
     /// 0 left, 1 centre, 2 right.
     pub section: usize,
     /// The three sections as the user sees them (`&[Page]` field names).
@@ -210,14 +212,15 @@ pub(crate) fn paint_headers_footers(app: &SheetApp, ui: &egui::Ui, p: &Painter, 
             (geo.scroll.x as f64 + ((q.x - geo.cells.left()) / geo.z) as f64, geo.scroll.y as f64 + ((q.y - geo.cells.top()) / geo.z) as f64);
         pg.hf_zone_at(x, y)
     });
-    let needs_text = !sh.print.header.is_empty() || !sh.print.footer.is_empty();
+    let needs_text = sh.print.has_header_footer();
     let (date, time) = if needs_text { print::hf_date_time(wb) } else { Default::default() };
     for (i, j) in pages_iter(geo, &pg) {
         let page = screen_rect(geo, pg.page_rect(i, j));
         if !page.intersects(geo.cells) {
             continue;
         }
-        for (spec, footer) in [(&sh.print.header, false), (&sh.print.footer, true)] {
+        let kind = page_kind(sh, &pg, (i, j));
+        for (spec, footer) in [(sh.print.hf(kind, false), false), (sh.print.hf(kind, true), true)] {
             if editing == Some(((i, j), footer)) {
                 continue;
             }
@@ -281,6 +284,9 @@ pub(crate) fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Respo
         commit(app);
     }
     let Some(pg) = geo.paper.clone() else { return };
+    if std::mem::take(&mut app.grid.hf_start) {
+        begin(app, wb.active_sheet, sh, (pg.data_rows.0, pg.data_cols.0), HfZone { footer: false, section: 1 });
+    }
     if resp.clicked_by(egui::PointerButton::Primary)
         && let Some(p) = ui.input(|i| i.pointer.interact_pos())
     {
@@ -297,6 +303,43 @@ pub(crate) fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Respo
         }
     }
     editor(app, ui, geo, &pg);
+}
+
+/// The `pageLayout.headerFooter` parameter holding one kind of page's header or footer.
+fn hf_key(kind: HfPage, footer: bool) -> &'static str {
+    match (kind, footer) {
+        (HfPage::Odd, false) => "header",
+        (HfPage::Odd, true) => "footer",
+        (HfPage::Even, false) => "evenHeader",
+        (HfPage::Even, true) => "evenFooter",
+        (HfPage::First, false) => "firstHeader",
+        (HfPage::First, true) => "firstFooter",
+    }
+}
+
+/// Insert › Header & Footer: switches to Page Layout view and edits the first page's centre header.
+pub fn start_editing(app: &mut SheetApp) {
+    if app.session.active().and_then(|d| d.wb.active()).is_some_and(|sh| sh.view != SheetViewMode::PageLayout) {
+        app.run_or_alert("view.pageLayout", json!({}));
+    }
+    app.grid.hf_start = true;
+}
+
+/// Turns Different First Page / Different Odd & Even Pages on or off, keeping the edit on the
+/// same page (which may now show another header).
+fn set_option(app: &mut SheetApp, key: &str, on: bool) {
+    let Some(e) = app.grid.hf_edit.as_ref() else { return };
+    let (sheet, page, zone) = (e.sheet, e.page, HfZone { footer: e.footer, section: e.section });
+    commit(app);
+    app.run_or_alert("pageLayout.headerFooter", json!({"sheet": sheet, key: on}));
+    let Some(sh) = app.session.active().and_then(|d| d.wb.sheet(sheet)).cloned() else { return };
+    begin(app, sheet, &sh, page, zone);
+}
+
+/// Which header/footer pair a page shows: the first page, an even page, or the rest.
+fn page_kind(sh: &Sheet, pg: &PageGrid, page: (usize, usize)) -> HfPage {
+    let n = pg.page_number(page.0, page.1).map_or(1, |(n, _)| n);
+    sh.print.hf_page(n == 1, n)
 }
 
 /// Starts (or moves) editing a header or footer section.
@@ -321,14 +364,19 @@ pub fn begin(app: &mut SheetApp, sheet: usize, sh: &Sheet, page: (usize, usize),
     if app.editor.is_some() && !app.commit_edit(0, 0, false, false) {
         return;
     }
-    let spec = if zone.footer { &sh.print.footer } else { &sh.print.header };
-    let texts = print::split_header_footer(spec).map(|s| print::codes_to_fields(&s));
+    // Before the view has paginated this sheet, the top-left page is taken as the first.
+    let kind = match app.grid.paper.as_ref().filter(|(key, _)| key.2 == sheet) {
+        Some((_, pg)) => page_kind(sh, pg, page),
+        None => sh.print.hf_page(page == (0, 0), 1),
+    };
+    let texts = print::split_header_footer(sh.print.hf(kind, zone.footer)).map(|s| print::codes_to_fields(&s));
     let caret = texts.get(zone.section).map_or(0, |t| t.chars().count());
     let prev_tab = if app.ui.ribbon_tab == TAB { "Home".to_string() } else { app.ui.ribbon_tab.clone() };
     app.grid.hf_edit = Some(HfEdit {
         sheet,
         page,
         footer: zone.footer,
+        kind,
         section: zone.section.min(2),
         original: texts.clone(),
         texts,
@@ -351,7 +399,7 @@ pub fn commit(app: &mut SheetApp) {
         return;
     }
     let spec = print::join_header_footer(&e.texts.clone().map(|s| print::fields_to_codes(&s)));
-    let key = if e.footer { "footer" } else { "header" };
+    let key = hf_key(e.kind, e.footer);
     app.run_or_alert("pageLayout.headerFooter", json!({"sheet": e.sheet, key: spec}));
 }
 
@@ -550,7 +598,7 @@ pub(crate) fn paint_rulers(app: &SheetApp, p: &Painter, outer: Rect, geo: &Geo, 
 pub fn ribbon_tab(app: &mut SheetApp, ui: &mut egui::Ui) {
     use crate::widgets::big_button;
     let Some(e) = app.grid.hf_edit.as_ref() else { return };
-    let footer = e.footer;
+    let (footer, kind) = (e.footer, e.kind);
     let (sheet_name, file) =
         app.session.active().map(|d| (d.wb.sheet(e.sheet).map(|s| s.name.clone()).unwrap_or_default(), d.display_title())).unwrap_or_default();
     // Header & Footer presets (shown with sample values, as the result will read).
@@ -570,7 +618,7 @@ pub fn ribbon_tab(app: &mut SheetApp, ui: &mut egui::Ui) {
                 if ui.button(text).clicked() {
                     let sheet = app.grid.hf_edit.as_ref().map(|e| e.sheet).unwrap_or(0);
                     cancel(app);
-                    app.run_or_alert("pageLayout.headerFooter", json!({"sheet": sheet, (if part { "footer" } else { "header" }): spec}));
+                    app.run_or_alert("pageLayout.headerFooter", json!({"sheet": sheet, hf_key(kind, part): spec}));
                     ui.close();
                 }
             }
@@ -597,6 +645,21 @@ pub fn ribbon_tab(app: &mut SheetApp, ui: &mut egui::Ui) {
     if big_button(ui, Icon::Footer, "Go to\nFooter", "Go to Footer", false).clicked() && !footer {
         go_to(app, true);
     }
+    sep(ui);
+    let (first, odd_even) = app
+        .session
+        .active()
+        .and_then(|d| d.wb.sheet(app.grid.hf_edit.as_ref().map_or(0, |e| e.sheet)).map(|s| (s.print.different_first, s.print.different_odd_even)))
+        .unwrap_or_default();
+    ui.vertical(|ui| {
+        let (mut f, mut o) = (first, odd_even);
+        if ui.checkbox(&mut f, tr(app, "Different First Page")).changed() {
+            set_option(app, "differentFirst", f);
+        }
+        if ui.checkbox(&mut o, tr(app, "Different Odd & Even Pages")).changed() {
+            set_option(app, "differentOddEven", o);
+        }
+    });
 }
 
 fn sep(ui: &mut egui::Ui) {

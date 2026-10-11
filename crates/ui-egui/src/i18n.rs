@@ -486,6 +486,8 @@ const JAPANESE: &[(&str, &str)] = &[
     ("File Name", "ファイル名"),
     ("Sheet Name", "シート名"),
     ("Go to Header", "ヘッダーに移動"),
+    ("Different First Page", "先頭ページのみ別指定"),
+    ("Different Odd & Even Pages", "奇数/偶数ページ別指定"),
     ("Go to Footer", "フッターに移動"),
     ("Ruler", "ルーラー"),
     // File › Backstage view.

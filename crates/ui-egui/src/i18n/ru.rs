@@ -323,6 +323,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "File Name" => "Имя файла",
         "Sheet Name" => "Имя листа",
         "Go to Header" => "Перейти к верхнему колонтитулу",
+        "Different First Page" => "Особый колонтитул для первой страницы",
+        "Different Odd & Even Pages" => "Разные колонтитулы для четных и нечетных страниц",
         "Go to Footer" => "Перейти к нижнему колонтитулу",
         "Ruler" => "Линейка",
         // File › Backstage view.

@@ -141,6 +141,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 | 2026-10-11 | Protect Sheet passwords use Excel-compatible hashes and round-trip in XLSX `sheetProtection` (imported passwords verify instead of being dropped) |
 | 2026-10-11 | Review › Protect Workbook opens a dialog with an optional password (Excel-compatible hash, kept in XLSX `workbookProtection`); unprotecting verifies it (#345) |
 | 2026-10-11 | Formula bar, name box and dialogs fall back to the cell font: Hebrew (and any script cells can show) no longer turns into boxes there (#349) |
+| 2026-10-11 | Headers and footers: first-page and odd/even variants are read, kept, printed and edited in Page Layout view; Insert › Header & Footer edits the header in place (#344) |
 | 2026-10-11 | Legacy Excel 97-2003 `.xls` (BIFF8) import with formulas, number formats, merges, sizes and names (#121) |
 | 2026-10-11 | XLSX pass-through: custom XML, external links, connections, query tables, printer settings, form/ActiveX controls and OLE objects are kept on save (#330, #324) |
 | 2026-10-11 | Data › Forecast › Forecast Sheet: a new sheet with the history, FORECAST.ETS forecast, confidence bounds, statistics and a chart (#322) |

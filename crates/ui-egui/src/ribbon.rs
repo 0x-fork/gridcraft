@@ -1295,7 +1295,8 @@ fn insert(app: &mut SheetApp, ui: &mut Ui) {
         act(app, "insert.textBox", json!({}));
     }
     if big_button(ui, Icon::PageLayout, "Header &\nFooter", "Header & Footer", false).clicked() {
-        app.open_dialog("headerFooter", json!({}));
+        // As in Excel: Page Layout view, editing the header in place (the dialog is under Page Setup).
+        crate::paper_view::start_editing(app);
     }
     let sym = big_button(ui, Icon::Symbol, "Symbol", "Symbol", true);
     egui::Popup::menu(&sym).show(|ui| {
