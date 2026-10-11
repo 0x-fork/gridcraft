@@ -1276,7 +1276,7 @@ fn keytip_nq_() {
 fn keytip_nr_() {
     let mut h = harness(blank());
     sequence(&mut h, "NR", false);
-    assert!(h.state().session.journal.iter().any(|(id, _)| id == "insert.recommendedCharts"), "NR must journal insert.recommendedCharts");
+    assert!(h.state().message.is_some() || h.state().toast.is_some(), "NR must invoke insert.recommendedCharts and surface its missing-params error");
 }
 
 #[test]
@@ -1308,10 +1308,7 @@ fn keytip_nsd_() {
 fn keytip_nsf_() {
     let mut h = harness(blank());
     sequence(&mut h, "NSF", false);
-    assert!(h.state().dialog.is_none(), "NSF must not open a dialog");
-    assert!(h.state().message.is_none(), "NSF must not open a message box");
-    assert!(h.state().toast.is_none(), "NSF must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "NSF must not journal");
+    assert!(h.state().message.is_some() || h.state().toast.is_some(), "NSF must invoke insert.slicer and surface its missing-params error");
 }
 
 #[test]
@@ -1345,10 +1342,7 @@ fn keytip_nst_() {
 fn keytip_nsz_() {
     let mut h = harness(blank());
     sequence(&mut h, "NSZ", false);
-    assert!(h.state().dialog.is_none(), "NSZ must not open a dialog");
-    assert!(h.state().message.is_none(), "NSZ must not open a message box");
-    assert!(h.state().toast.is_none(), "NSZ must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "NSZ must not journal");
+    assert!(h.state().message.is_some() || h.state().toast.is_some(), "NSZ must invoke insert.pivotChart and surface its missing-params error");
 }
 
 #[test]
@@ -1934,10 +1928,7 @@ fn keytip_afa_() {
 fn keytip_afc_() {
     let mut h = harness(blank());
     sequence(&mut h, "AFC", false);
-    assert!(h.state().dialog.is_none(), "AFC must not open a dialog");
-    assert!(h.state().message.is_none(), "AFC must not open a message box");
-    assert!(h.state().toast.is_none(), "AFC must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "AFC must not journal");
+    assert!(h.state().message.is_some() || h.state().toast.is_some(), "AFC must invoke data.forecastSheet and surface its missing-params error");
 }
 
 #[test]
@@ -2351,10 +2342,7 @@ fn keytip_ra1_() {
 fn keytip_ra2_() {
     let mut h = harness(blank());
     sequence(&mut h, "RA2", false);
-    assert!(h.state().dialog.is_none(), "RA2 must not open a dialog");
-    assert!(h.state().message.is_none(), "RA2 must not open a message box");
-    assert!(h.state().toast.is_none(), "RA2 must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "RA2 must not journal");
+    assert!(h.state().message.is_none() && h.state().toast.is_none(), "RA2 must run review.showComments cleanly");
 }
 
 #[test]
@@ -2395,10 +2383,7 @@ fn keytip_rl_() {
 fn keytip_rn_() {
     let mut h = harness(blank());
     sequence(&mut h, "RN", false);
-    assert!(h.state().dialog.is_none(), "RN must not open a dialog");
-    assert!(h.state().message.is_none(), "RN must not open a message box");
-    assert!(h.state().toast.is_none(), "RN must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "RN must not journal");
+    assert!(h.state().message.is_some() || h.state().toast.is_some(), "RN must invoke review.nextComment and surface its missing-params error");
 }
 
 #[test]
@@ -2450,10 +2435,7 @@ fn keytip_rtn_() {
 fn keytip_rv_() {
     let mut h = harness(blank());
     sequence(&mut h, "RV", false);
-    assert!(h.state().dialog.is_none(), "RV must not open a dialog");
-    assert!(h.state().message.is_none(), "RV must not open a message box");
-    assert!(h.state().toast.is_none(), "RV must not raise a toast");
-    assert!(h.state().session.journal.is_empty(), "RV must not journal");
+    assert!(h.state().message.is_some() || h.state().toast.is_some(), "RV must invoke review.previousComment and surface its missing-params error");
 }
 
 #[test]

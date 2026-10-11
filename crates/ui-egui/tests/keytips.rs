@@ -308,6 +308,7 @@ fn tab_letters_switch_to_their_ribbon_tabs() {
         assert_eq!(h.state().keytips.prefix(), None);
     }
     // A terminal tab unit with no deeper sequences finishes and clears.
+    key(&mut h, Key::F10); // re-arm
     letter(&mut h, Key::J, false);
     assert_eq!(h.state().keytips.prefix(), Some("J"), "J waits for its multi-letter unit");
     letter(&mut h, Key::I, false);
@@ -406,7 +407,7 @@ fn vertical_alignment_keytips_run_their_commands() {
 fn pending_sequences_are_silent_no_ops() {
     let mut h = harness(blank());
     let journal = h.state().session.journal.len();
-    sequence(&mut h, &[Key::N, Key::E], false); // NE -> insert.equation (missing)
+    sequence(&mut h, &[Key::N, Key::W], false); // NW -> insert.wordArt (missing)
     assert!(h.state().dialog.is_none(), "no dialog for a pending sequence");
     assert!(h.state().message.is_none(), "no message box for a pending sequence");
     assert!(h.state().toast.is_none(), "no toast for a pending sequence");
@@ -418,15 +419,15 @@ fn pending_sequences_are_silent_no_ops() {
 fn pending_sequences_go_live_when_the_command_lands() {
     // The command lands in the catalog (here: a test-registered stand-in).
     // The sequence must run it with no table edit.
-    gridcraft_engine::register_test_command("insert.slicer", |s, _| {
+    gridcraft_engine::register_test_command("insert.equation", |s, _| {
         s.execute("cell.set", json!({"cell": "Z9", "input": "live"}))?;
         Ok(json!({}))
     });
     let mut h = harness(blank());
-    sequence(&mut h, &[Key::N, Key::S, Key::F], false); // NSF -> insert.slicer
+    sequence(&mut h, &[Key::N, Key::E], false); // NE -> insert.equation
     assert_eq!(value(&h, "Z9"), Value::from("live"), "the pending sequence ran the landed command");
     assert_eq!(
-        h.state().session.journal.iter().filter(|(id, _)| id == "insert.slicer").count(),
+        h.state().session.journal.iter().filter(|(id, _)| id == "insert.equation").count(),
         1,
         "the landed command is journaled like any live command"
     );
@@ -445,9 +446,9 @@ fn control_keytips_open_dropdowns_and_run_handlers() {
 
     // WVF toggles the formula bar: pure UI state, no engine command exists.
     let mut h = harness(blank());
-    assert!(h.state().ui.formula_bar);
+    assert!(h.state().session.prefs.formula_bar);
     sequence(&mut h, &[Key::W, Key::V, Key::F], false);
-    assert!(!h.state().ui.formula_bar, "WVF must toggle the formula bar off");
+    assert!(!h.state().session.prefs.formula_bar, "WVF must toggle the formula bar off");
 
     // WJ runs the 100% handler with its percent param ({} would raise "missing percent").
     let mut h = harness(blank());

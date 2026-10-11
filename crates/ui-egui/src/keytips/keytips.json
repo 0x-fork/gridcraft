@@ -1188,7 +1188,7 @@
    "seq": "NSF",
    "kind": "command",
    "target": "insert.slicer",
-   "pending": true,
+   "pending": false,
    "excel": "Slicer",
    "note": "insert.slicer missing (gap #8); reserved until the command lands"
   },
@@ -1218,7 +1218,7 @@
    "seq": "NSZ",
    "kind": "command",
    "target": "insert.pivotChart",
-   "pending": true,
+   "pending": false,
    "excel": "PivotChart",
    "note": "PivotChart; reserved until the command lands"
   },
@@ -1773,7 +1773,7 @@
    "seq": "AFC",
    "kind": "command",
    "target": "data.forecastSheet",
-   "pending": true,
+   "pending": false,
    "excel": "Forecast Sheet",
    "note": "IN FLIGHT: vangel76 PR #325; reserved until the command lands"
   },
@@ -2142,7 +2142,7 @@
    "seq": "RA2",
    "kind": "command",
    "target": "review.showComments",
-   "pending": true,
+   "pending": false,
    "excel": "Show All Comments",
    "note": "Show All Comments; reserved until the command lands"
   },
@@ -2180,9 +2180,9 @@
    "seq": "RN",
    "kind": "command",
    "target": "review.nextComment",
-   "pending": true,
+   "pending": false,
    "excel": "Next Comment",
-   "note": "Next Comment; reserved until the command lands"
+   "note": ""
   },
   {
    "seq": "RO",
@@ -2230,9 +2230,9 @@
    "seq": "RV",
    "kind": "command",
    "target": "review.previousComment",
-   "pending": true,
+   "pending": false,
    "excel": "Previous Comment",
-   "note": "Previous Comment; reserved until the command lands"
+   "note": ""
   },
   {
    "seq": "WA",

@@ -180,11 +180,11 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("NSA", Entry::Finish(Action::Control("insert.chart.statistic"))), // Excel: Statistical Chart; Statistical chart (kind TBD)
     ("NSC", Entry::Finish(Action::Pending("insert.screenshot"))), // pending; Excel: Screenshot Menu; Screenshot; reserved until the command lands
     ("NSD", Entry::Finish(Action::Command("insert.chart"))), // Excel: Combo Chart; Combo (kind TBD)
-    ("NSF", Entry::Finish(Action::Pending("insert.slicer"))), // pending; Excel: Slicer; insert.slicer missing (gap #8); reserved until the command lands
-    ("NSH", Entry::Finish(Action::Command("insert.shape"))),  // Excel: Shapes
+    ("NSF", Entry::Finish(Action::Command("insert.slicer"))), // Excel: Slicer; insert.slicer missing (gap #8); reserved until the command lands
+    ("NSH", Entry::Finish(Action::Command("insert.shape"))), // Excel: Shapes
     ("NSP", Entry::Finish(Action::Command("insert.recommendedPivotTables"))), // Excel: Recommended PivotTables
     ("NST", Entry::Finish(Action::Pending("insert.timeline"))), // pending; Excel: Timeline; insert.timeline missing (gap #8); reserved until the command lands
-    ("NSZ", Entry::Finish(Action::Pending("insert.pivotChart"))), // pending; Excel: PivotChart; PivotChart; reserved until the command lands
+    ("NSZ", Entry::Finish(Action::Command("insert.pivotChart"))), // Excel: PivotChart; PivotChart; reserved until the command lands
     ("NT", Entry::Finish(Action::Command("insert.table"))),     // Excel: Table
     ("NU", Entry::Finish(Action::Command("insert.symbol"))),    // Excel: Symbols; containment(Symbol)
     ("NZS", Entry::Finish(Action::Command("insert.symbol"))),   // Excel: Excel: Symbol (modern)
@@ -265,7 +265,7 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("AF1C", Entry::Finish(Action::Command("insert.picture"))), // Excel: Picture from Clipboard (source TBD)
     ("AF1P", Entry::Finish(Action::Command("insert.picture"))), // Excel: Picture from File (source TBD)
     ("AFA", Entry::Finish(Action::Pending("data.fromAccess"))), // pending; Excel: Get External Data: From Access; gap #12 Get & Transform; reserved until the command lands
-    ("AFC", Entry::Finish(Action::Pending("data.forecastSheet"))), // pending; Excel: Forecast Sheet; IN FLIGHT: vangel76 PR #325; reserved until the command lands
+    ("AFC", Entry::Finish(Action::Command("data.forecastSheet"))), // Excel: Forecast Sheet; IN FLIGHT: vangel76 PR #325; reserved until the command lands
     ("AFE", Entry::Finish(Action::Pending("data.analyzeData"))),   // pending; Excel: Analyze Data; AI feature GAP; reserved until the command lands
     ("AFF", Entry::Finish(Action::Command("edit.flashFill"))),     // Excel: Flash Fill
     ("AFO", Entry::Finish(Action::Pending("data.fromOtherSources"))), // pending; Excel: Get External Data: From Other Sources; gap #12; reserved until the command lands
@@ -316,50 +316,50 @@ pub const SEQUENCES: &[(&str, Entry)] = &[
     ("AX", Entry::Finish(Action::Pending("data.existingConnections"))), // pending; Excel: Existing Connections; gap #12; reserved until the command lands
     ("AY", Entry::Finish(Action::Command("data.reapply"))),             // Excel: Reapply Filter; containment(Reapply)
     ("RA1", Entry::Finish(Action::Dialog("accessibility"))),            // Excel: Check Accessibility
-    ("RA2", Entry::Finish(Action::Pending("review.showComments"))), // pending; Excel: Show All Comments; Show All Comments; reserved until the command lands
+    ("RA2", Entry::Finish(Action::Command("review.showComments"))), // Excel: Show All Comments; Show All Comments; reserved until the command lands
     ("RC", Entry::Finish(Action::Dialog("comment"))),               // Excel: New Comment
     ("RD", Entry::Finish(Action::Command("review.deleteComment"))), // Excel: Delete Comment
     ("RG", Entry::Finish(Action::Pending("review.showChanges"))),   // pending; Excel: Track Changes; reserved until the command lands
     ("RL", Entry::Finish(Action::Pending("review.translate"))),     // pending; Excel: Translate; feature gap; reserved until the command lands
-    ("RN", Entry::Finish(Action::Pending("review.nextComment"))),   // pending; Excel: Next Comment; Next Comment; reserved until the command lands
+    ("RN", Entry::Finish(Action::Command("review.nextComment"))),   // Excel: Next Comment
     ("RO", Entry::Finish(Action::Command("review.protectWorkbook"))), // Excel: Protect and Share Workbook
     ("RPS", Entry::Finish(Action::Dialog("protectSheet"))),         // Excel: Protect Sheet
     ("RPW", Entry::Finish(Action::Command("review.protectWorkbook"))), // Excel: Protect Workbook
     ("RRS", Entry::Finish(Action::Pending("review.smartLookup"))),  // pending; Excel: Smart Lookup; feature gap; reserved until the command lands
     ("RS", Entry::Finish(Action::Dialog("spelling"))),              // Excel: Spelling
     ("RTN", Entry::Finish(Action::Command("review.newNote"))),      // Excel: New Note
-    ("RV", Entry::Finish(Action::Pending("review.previousComment"))), // pending; Excel: Previous Comment; Previous Comment; reserved until the command lands
-    ("WA", Entry::Finish(Action::Command("view.arrangeAll"))),        // Excel: Arrange All
-    ("WC", Entry::Finish(Action::Command("view.customViews"))),       // Excel: Custom Views
-    ("WF", Entry::Continue),                                          // Excel: Freeze Panes Menu; group level:
+    ("RV", Entry::Finish(Action::Command("review.previousComment"))), // Excel: Previous Comment
+    ("WA", Entry::Finish(Action::Command("view.arrangeAll"))),      // Excel: Arrange All
+    ("WC", Entry::Finish(Action::Command("view.customViews"))),     // Excel: Custom Views
+    ("WF", Entry::Continue),                                        // Excel: Freeze Panes Menu; group level:
     ("WFC", Entry::Finish(Action::Command("view.freezeFirstColumn"))), // Excel: Freeze First Column
-    ("WFF", Entry::Finish(Action::Command("view.freezePanes"))),      // Excel: Freeze Panes
-    ("WFR", Entry::Finish(Action::Command("view.freezeTopRow"))),     // Excel: Freeze Top Row
-    ("WG", Entry::Finish(Action::Command("view.zoomToSelection"))),   // Excel: Zoom To Selection
-    ("WH", Entry::Finish(Action::Command("view.hideWindow"))),        // Excel: Hide Window
-    ("WI", Entry::Finish(Action::Command("view.pageBreakPreview"))),  // Excel: Page Break Preview
-    ("WJ", Entry::Finish(Action::Control("view.zoom"))),              // Excel: Zoom To 100%; runs the 100% zoom handler (percent param)
-    ("WL", Entry::Finish(Action::Command("view.normal"))),            // Excel: Normal View; containment(Normal)
-    ("WM", Entry::Continue),                                          // Excel: Macros Menu; group level: containment(Macros)
-    ("WMR", Entry::Finish(Action::Command("view.macros"))),           // Excel: Record Macro; Record Macro (macros menu)
-    ("WMV", Entry::Finish(Action::Command("view.macros"))),           // Excel: View Macros; containment(Macros)
-    ("WN", Entry::Finish(Action::Command("view.newWindow"))),         // Excel: New Window
-    ("WP", Entry::Finish(Action::Command("view.pageLayout"))),        // Excel: Page Layout View
-    ("WQ", Entry::Finish(Action::Dialog("zoom"))),                    // Excel: Zoom; opens the Zoom dialog
-    ("WR", Entry::Finish(Action::Command("view.ruler"))),             // Excel: Ruler
-    ("WS", Entry::Finish(Action::Command("view.split"))),             // Excel: Split
+    ("WFF", Entry::Finish(Action::Command("view.freezePanes"))),    // Excel: Freeze Panes
+    ("WFR", Entry::Finish(Action::Command("view.freezeTopRow"))),   // Excel: Freeze Top Row
+    ("WG", Entry::Finish(Action::Command("view.zoomToSelection"))), // Excel: Zoom To Selection
+    ("WH", Entry::Finish(Action::Command("view.hideWindow"))),      // Excel: Hide Window
+    ("WI", Entry::Finish(Action::Command("view.pageBreakPreview"))), // Excel: Page Break Preview
+    ("WJ", Entry::Finish(Action::Control("view.zoom"))),            // Excel: Zoom To 100%; runs the 100% zoom handler (percent param)
+    ("WL", Entry::Finish(Action::Command("view.normal"))),          // Excel: Normal View; containment(Normal)
+    ("WM", Entry::Continue),                                        // Excel: Macros Menu; group level: containment(Macros)
+    ("WMR", Entry::Finish(Action::Command("view.macros"))),         // Excel: Record Macro; Record Macro (macros menu)
+    ("WMV", Entry::Finish(Action::Command("view.macros"))),         // Excel: View Macros; containment(Macros)
+    ("WN", Entry::Finish(Action::Command("view.newWindow"))),       // Excel: New Window
+    ("WP", Entry::Finish(Action::Command("view.pageLayout"))),      // Excel: Page Layout View
+    ("WQ", Entry::Finish(Action::Dialog("zoom"))),                  // Excel: Zoom; opens the Zoom dialog
+    ("WR", Entry::Finish(Action::Command("view.ruler"))),           // Excel: Ruler
+    ("WS", Entry::Finish(Action::Command("view.split"))),           // Excel: Split
     ("WT", Entry::Finish(Action::Pending("view.resetWindowPosition"))), // pending; Excel: Reset Window Position; reserved until the command lands
-    ("WU", Entry::Finish(Action::Command("view.unhideWindow"))),      // Excel: Unhide Window
-    ("WVC", Entry::Finish(Action::Pending("view.focusCell"))),        // pending; Excel: Focus Cell Menu; Focus Cell; reserved until the command lands
-    ("WVF", Entry::Finish(Action::Control("view.formulaBar"))),       // Excel: Toggle Formula Bar; toggles the formula bar
-    ("WVH", Entry::Finish(Action::Command("view.headings"))),         // Excel: Toggle Headings; containment(Headings)
-    ("WVN", Entry::Finish(Action::Pending("view.navigation"))),       // pending; Excel: Navigation; Navigation pane; reserved until the command lands
-    ("WVR", Entry::Finish(Action::Command("view.ruler"))),            // Excel: Ruler
-    ("WW", Entry::Finish(Action::Command("view.switchWindows"))),     // Excel: Switch Windows
+    ("WU", Entry::Finish(Action::Command("view.unhideWindow"))),    // Excel: Unhide Window
+    ("WVC", Entry::Finish(Action::Pending("view.focusCell"))),      // pending; Excel: Focus Cell Menu; Focus Cell; reserved until the command lands
+    ("WVF", Entry::Finish(Action::Control("view.formulaBar"))),     // Excel: Toggle Formula Bar; toggles the formula bar
+    ("WVH", Entry::Finish(Action::Command("view.headings"))),       // Excel: Toggle Headings; containment(Headings)
+    ("WVN", Entry::Finish(Action::Pending("view.navigation"))),     // pending; Excel: Navigation; Navigation pane; reserved until the command lands
+    ("WVR", Entry::Finish(Action::Command("view.ruler"))),          // Excel: Ruler
+    ("WW", Entry::Finish(Action::Command("view.switchWindows"))),   // Excel: Switch Windows
     ("JAM", Entry::Finish(Action::Command("chart.formatSelection"))), // Excel: Chart format: Format Selection pane; containment(Format Selection)
-    ("JCA", Entry::Finish(Action::Command("chart.addElement"))),      // Excel: Chart: Add Chart Element; containment(Add Chart Element)
-    ("JCC", Entry::Finish(Action::Command("chart.changeType"))),      // Excel: Chart: Change Chart Type; containment(Change Chart Type)
-    ("JTS", Entry::Finish(Action::Command("table.style"))),           // Excel: Table: table style
+    ("JCA", Entry::Finish(Action::Command("chart.addElement"))),    // Excel: Chart: Add Chart Element; containment(Add Chart Element)
+    ("JCC", Entry::Finish(Action::Command("chart.changeType"))),    // Excel: Chart: Change Chart Type; containment(Change Chart Type)
+    ("JTS", Entry::Finish(Action::Command("table.style"))),         // Excel: Table: table style
     ("JTV", Entry::Finish(Action::Command("table.summarizePivot"))), // Excel: Table: Summarize with PivotTable; containment(Summarize with PivotTable)
     ("FA", Entry::Finish(Action::Command("file.saveAs"))), // Excel: Save / Save As page; fires immediately in Excel; deeper aliases dropped as unreachable
     ("FC", Entry::Finish(Action::Command("file.close"))),  // Excel: Close workbook
