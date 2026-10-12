@@ -1201,10 +1201,12 @@ fn histogram(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx) {
         bins = 1;
     }
     let width = if bins == 1 && span.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) { 1.0 } else { span / bins as f64 };
+    // Upper edge of each bin, exactly as shown in the labels below. Bins are right-inclusive (the first is closed on both sides), so a value
+    // equal to an edge belongs to the bin that ends there.
+    let edges: Vec<f64> = (0..bins).map(|b| if b + 1 == bins { hi.max(lo + b as f64 * width) } else { lo + (b + 1) as f64 * width }).collect();
     let mut counts = vec![0usize; bins];
     for v in &vals {
-        let b = if width > 0.0 { ((v - lo) / width).floor() } else { 0.0 };
-        let b = if b.is_finite() && b > 0.0 { (b as usize).min(bins - 1) } else { 0 };
+        let b = edges.partition_point(|e| e < v).min(bins - 1);
         if let Some(c) = counts.get_mut(b) {
             *c += 1;
         }
@@ -1213,7 +1215,7 @@ fn histogram(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx) {
     let labels: Vec<String> = (0..bins)
         .map(|b| {
             let a = lo + b as f64 * width;
-            let e = if b + 1 == bins { hi.max(a) } else { a + width };
+            let e = edges.get(b).copied().unwrap_or(a);
             let open = if b == 0 { '[' } else { '(' };
             format!("{open}{}, {}]", f.format(a, Some(width / 10.0)), f.format(e, Some(width / 10.0)))
         })

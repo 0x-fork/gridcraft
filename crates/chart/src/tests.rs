@@ -878,6 +878,28 @@ fn treemap_and_histogram_shapes() {
 }
 
 #[test]
+fn histogram_boundary_values_match_interval_labels() {
+    let heights = |vals: &[f64]| -> Vec<f32> {
+        let d = ChartData { categories: vec![], series: vec![series("h", vals, [10, 20, 30, 255], ChartKind::Histogram)] };
+        let prims = render(&chart(ChartKind::Histogram), &d, 600.0, 400.0, &ApproxMeasure);
+        prims.iter().filter_map(|p| if let Prim::Rect { h, fill: Some([10, 20, 30, 255]), .. } = p { Some(*h) } else { None }).collect()
+    };
+    // Labels are "[0, 7.5]" and "(7.5, 15.0]": 7.5 belongs to the first bar, so the counts are 2 and 1.
+    let h = heights(&[0.0, 7.5, 15.0]);
+    assert_eq!(h.len(), 2);
+    assert!((h[0] / h[1] - 2.0).abs() < 0.01, "{h:?}");
+    let h = heights(&[-15.0, -7.5, 0.0]);
+    assert!((h[0] / h[1] - 2.0).abs() < 0.01, "{h:?}");
+    // A value off the boundary still goes right: [0, 7.5] holds 1, (7.5, 15.0] holds 2.
+    let h = heights(&[0.0, 7.75, 15.0]);
+    assert!((h[1] / h[0] - 2.0).abs() < 0.01, "{h:?}");
+    // Five values, three bins [0,5] (5,10] (10,15]: counts 3, 1, 1.
+    let h = heights(&[0.0, 5.0, 5.0, 10.0, 15.0]);
+    assert_eq!(h.len(), 3);
+    assert!((h[0] / h[1] - 3.0).abs() < 0.01 && (h[1] - h[2]).abs() < 0.01, "{h:?}");
+}
+
+#[test]
 fn union_series_references() {
     let mut wb = Workbook::new();
     {
