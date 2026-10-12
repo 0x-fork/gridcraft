@@ -1861,6 +1861,24 @@ mod tests {
     }
 
     #[test]
+    fn collapsed_item_puts_values_in_the_values_column() {
+        let mut s = sales();
+        s.execute("insert.pivotTable", json!({"rows": ["Region", "Product"], "values": ["Sales", "Units"]})).unwrap();
+        s.execute("pivot.moveField", json!({"field": "Σ Values", "from": "columns", "to": "rows"})).unwrap();
+        s.execute("pivot.collapse", json!({"field": "Region", "items": ["East"]})).unwrap();
+        for layout in ["tabular", "outline"] {
+            s.execute("pivot.layout", json!({"layout": layout})).unwrap();
+            assert_eq!(text(&s, "C3"), "Values", "{layout}");
+            let east = (4..20).find(|r| text(&s, &format!("A{r}")) == "East").unwrap();
+            let first = if layout == "tabular" { east } else { east + 1 };
+            assert_eq!(text(&s, &format!("B{first}")), "", "{layout}");
+            assert_eq!(text(&s, &format!("C{first}")), "Sum of Sales", "{layout}");
+            assert_eq!(val(&s, &format!("D{first}")), Value::Number(415.0), "{layout}");
+            assert_eq!(text(&s, &format!("C{}", first + 1)), "Sum of Units", "{layout}");
+        }
+    }
+
+    #[test]
     fn values_stay_last_in_columns() {
         let mut s = sales();
         s.execute("insert.pivotTable", json!({"rows": ["Product"], "columns": ["Region"], "values": ["Sales", "Units"]})).unwrap();

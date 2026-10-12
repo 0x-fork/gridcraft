@@ -664,7 +664,10 @@ impl Ctx<'_> {
                     labels: vec![(col, v, indent, fmt)],
                     vi,
                 });
-                self.flatten_values(&[], depth + 1, prefix, out);
+                // Outline gives each level its own column, so the captions go in the Values
+                // column even when the levels between are collapsed away.
+                let level = if self.pt.layout == PivotLayout::Outline { self.vpos.unwrap_or(depth + 1) } else { depth + 1 };
+                self.flatten_values(&[], level, prefix, out);
             } else if values_below {
                 // Subtotals per value field, below the group (one line can't hold them all).
                 out.push(Line {
@@ -749,7 +752,7 @@ impl Ctx<'_> {
             let collapsed = depth + 1 < n && self.rows.get(depth).is_some_and(|f| is_collapsed(f, &label));
             if depth + 1 >= n || collapsed || node.children.is_empty() {
                 if values_below {
-                    self.flatten_tabular_values(&[], depth + 1, prefix, &labels, out);
+                    self.flatten_tabular_values(&[], self.vpos.unwrap_or(depth + 1), prefix, &labels, out);
                 } else {
                     out.push(Line { kind: LineKind::Item(false), leaf: true, path: prefix.clone(), values: true, labels, vi });
                 }
