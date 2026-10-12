@@ -106,7 +106,7 @@ fn read_series(s: &El) -> Series {
         color,
         secondary: false,
         kind: None,
-        smooth: s.child("smooth").and_then(|e| e.attr("val")).and_then(|v| v.parse::<u8>().ok()).is_some_and(|v| v != 0),
+        smooth: bool_val(s, "smooth"),
         trendlines: s.kids("trendline").filter_map(read_trendline).collect(),
     }
 }
@@ -201,7 +201,7 @@ pub fn read_chart(root: &El) -> Option<Chart> {
         }
     }
     let kind = if groups.len() > 1 { ChartKind::Combo } else { first_kind };
-    let show_val = |e: &El| e.child("dLbls").and_then(|d| d.child_val("showVal")).is_some_and(|v| v == "1" || v == "true");
+    let show_val = |e: &El| e.child("dLbls").is_some_and(|d| bool_val(d, "showVal"));
     let data_labels = groups.iter().any(|(g, _)| show_val(g) || g.kids("ser").any(show_val));
     let val_axes: Vec<&El> = plot.kids("valAx").collect();
     let cat_ax = plot.child("catAx").or_else(|| plot.child("dateAx"));
