@@ -2795,3 +2795,19 @@ fn a_decrypted_workbook_never_overwrites_its_encrypted_original() {
     assert_eq!(std::fs::read(&path).unwrap(), bytes, "the encrypted original is untouched");
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn link_open_refuses_every_scheme_but_http_https_and_mailto() {
+    let mut s = s();
+    s.execute("insert.link", json!({"cell": "A1", "target": "file:///etc/passwd"})).unwrap();
+    s.take_ui_requests();
+    for url in ["file:///etc/passwd", "smb://h/s", "\\\\h\\s", "JAVASCRIPT:1"] {
+        assert!(s.execute("link.open", json!({"url": url})).is_err(), "{url}");
+    }
+    assert!(s.execute("link.open", json!({"cell": "A1"})).is_err());
+    assert!(s.take_ui_requests().is_empty());
+    s.execute("link.open", json!({"url": "HTTPS://example.org/a"})).unwrap();
+    assert_eq!(s.take_ui_requests(), vec![crate::UiRequest::OpenUrl("HTTPS://example.org/a".into())]);
+    s.execute("link.open", json!({"url": "B2"})).unwrap();
+    assert!(s.take_ui_requests().is_empty());
+}
