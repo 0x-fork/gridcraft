@@ -247,3 +247,61 @@ fn paste_menu_items_paste_the_system_clipboard() {
     assert_eq!(value_at(&h, "F6"), Some(Value::from("from cell menu")));
     assert_eq!(clipboard.borrow().1, 2);
 }
+
+fn press(h: &mut Harness, key: egui::Key) {
+    for pressed in [true, false] {
+        h.input_mut().events.push(Event::Key { key, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE });
+        if pressed && key != egui::Key::F10 {
+            h.input_mut().events.push(Event::Text(key.name().to_ascii_lowercase()));
+        }
+    }
+    h.run_steps(2);
+}
+
+#[test]
+fn keytip_copy_and_cut_reach_the_system_clipboard_and_ribbon_paste_pastes_them() {
+    // Home › Copy / Cut by keytip (Alt or F10, H, C / X) is the ribbon button: the host clipboard
+    // gets the copy, and Paste pastes it rather than older text from another app.
+    for (letter, cut) in [(egui::Key::C, false), (egui::Key::X, true)] {
+        let (clipboard, mut services) = system_clipboard("stale text from earlier");
+        let host = clipboard.clone();
+        services.copy_html = Some(Box::new(move |_, text| {
+            host.borrow_mut().0 = text.to_string();
+            Ok(())
+        }));
+        let mut h = harness(services);
+        for key in [egui::Key::F10, egui::Key::H, letter] {
+            press(&mut h, key);
+        }
+        assert_eq!(h.state().session.clipboard.as_ref().map(|c| c.cut), Some(cut), "{letter:?}");
+        assert_eq!(clipboard.borrow().0, "Name\tScore\nAda\t42\n", "{letter:?} publishes to the system clipboard");
+
+        h.state_mut().run("selection.set", json!({"cell": "D4"})).unwrap();
+        h.get_by_role_and_label(Role::Button, "Paste").click();
+        h.run_steps(2);
+        assert_eq!(value_at(&h, "D4"), Some(Value::from("Name")), "{letter:?}");
+        assert_eq!(value_at(&h, "E5"), Some(Value::number(42.0)), "{letter:?}");
+    }
+}
+
+#[test]
+fn ribbon_paste_prefers_a_programmatic_copy_until_other_text_is_copied() {
+    // A control-channel or MCP copy leaves the system clipboard alone. Its older text must not
+    // win over the copy; text copied in another app afterwards must.
+    let (clipboard, services) = system_clipboard("stale text from earlier");
+    let mut h = harness(services);
+    h.state_mut().run("edit.copy", json!({"range": "A1:B2"})).unwrap();
+    assert_eq!(clipboard.borrow().0, "stale text from earlier", "the system clipboard is untouched");
+    h.state_mut().run("selection.set", json!({"cell": "D4"})).unwrap();
+    h.get_by_role_and_label(Role::Button, "Paste").click();
+    h.run_steps(2);
+    assert_eq!(value_at(&h, "D4"), Some(Value::from("Name")));
+    assert_eq!(value_at(&h, "E5"), Some(Value::number(42.0)));
+
+    clipboard.borrow_mut().0 = "copied elsewhere\t7".into();
+    h.state_mut().run("selection.set", json!({"cell": "G1"})).unwrap();
+    h.get_by_role_and_label(Role::Button, "Paste").click();
+    h.run_steps(2);
+    assert_eq!(value_at(&h, "G1"), Some(Value::from("copied elsewhere")));
+    assert_eq!(value_at(&h, "H1"), Some(Value::number(7.0)));
+}

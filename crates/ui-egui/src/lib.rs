@@ -250,6 +250,10 @@ pub struct SheetApp {
     pub(crate) shots: control::Shots,
     /// Chart selected on the sheet (id).
     pub selected_chart: Option<u32>,
+    /// The system clipboard's text when GridCraft last copied without publishing to it (a
+    /// control-channel or MCP `edit.copy`/`edit.cut`). While the system clipboard still holds this
+    /// text, GridCraft's copy is the newer one and Paste uses it.
+    clipboard_text_at_copy: Option<String>,
     pub started: f64,
 }
 
@@ -291,6 +295,7 @@ impl SheetApp {
             keytips: keytips::KeyTips::default(),
             shots: control::Shots::default(),
             selected_chart: None,
+            clipboard_text_at_copy: None,
             started: now_ms(),
         }
     }
@@ -326,6 +331,16 @@ impl SheetApp {
 
     /// Runs an engine command (or a UI command) and handles UI requests it makes.
     pub fn run(&mut self, id: &str, params: Json) -> Result<Json, String> {
+        let r = self.run_command(id, params);
+        // This copy leaves the system clipboard alone: note what it holds, so Paste can tell
+        // that GridCraft's copy is newer while that text is still there.
+        if matches!(id, "edit.copy" | "edit.cut") && r.is_ok() {
+            self.clipboard_text_at_copy = self.system_clipboard_text();
+        }
+        r
+    }
+
+    fn run_command(&mut self, id: &str, params: Json) -> Result<Json, String> {
         if matches!(id, "file.save" | "file.saveAs" | "file.saveBytes") {
             self.store_view_state();
         }
@@ -369,11 +384,13 @@ impl SheetApp {
     /// their existing internal clipboard behavior and do not write to the host clipboard.
     pub fn copy_to_clipboard(&mut self, ctx: &egui::Context, command: &str) {
         // Only ask the engine for HTML when the host can publish it.
-        let result = match self.run(command, json!({"html": self.services.copy_html.is_some()})) {
+        let result = match self.run_command(command, json!({"html": self.services.copy_html.is_some()})) {
             Ok(result) => result,
             Err(e) => return self.alert(e),
         };
         let Some(text) = result.get("text").and_then(Json::as_str) else { return };
+        // The system clipboard gets this copy, so its text decides what Paste pastes.
+        self.clipboard_text_at_copy = None;
         if let Some(html) = result.get("html").and_then(Json::as_str)
             && let Some(copy_html) = &mut self.services.copy_html
         {
@@ -397,14 +414,19 @@ impl SheetApp {
     }
 
     /// Ribbon and menu Paste: paste the text on the system clipboard, as Cmd/Ctrl+V does. With no
-    /// text there, or no host clipboard (web), GridCraft's own clipboard is pasted.
+    /// text there, no host clipboard (web), or the text that was there when GridCraft last copied
+    /// without publishing, GridCraft's own clipboard is pasted.
     pub fn paste_from_clipboard(&mut self) {
-        let text = self.services.paste_text.as_mut().and_then(|read| read()).filter(|t| !t.is_empty());
-        match text {
-            // Same line endings as egui's `Event::Paste` text.
-            Some(text) => self.paste_external(text.replace("\r\n", "\n")),
-            None => self.run_or_alert("edit.paste", json!({})),
+        match self.system_clipboard_text() {
+            Some(text) if self.session.clipboard.is_none() || self.clipboard_text_at_copy.as_ref() != Some(&text) => self.paste_external(text),
+            _ => self.run_or_alert("edit.paste", json!({})),
         }
+    }
+
+    /// The system clipboard's plain text, with the line endings of egui's `Event::Paste` text.
+    /// `None` when it holds no text or the host can't read it.
+    fn system_clipboard_text(&mut self) -> Option<String> {
+        self.services.paste_text.as_mut().and_then(|read| read()).filter(|t| !t.is_empty()).map(|t| t.replace("\r\n", "\n"))
     }
 
     /// Web: `file.exportPdf` without a path returns the PDF as base64; hand it to the browser as a download.
@@ -1094,6 +1116,7 @@ impl SheetApp {
                     self.run_or_alert("ui.ribbonTab", json!({"tab": tab}));
                     self.ui.ribbon_collapsed = false;
                 }
+                keytips::Action::Command(id @ ("edit.copy" | "edit.cut")) => self.copy_to_clipboard(ctx, id),
                 keytips::Action::Command(id) => self.run_or_alert(id, json!({})),
                 keytips::Action::Dialog(name) => self.open_dialog(name, json!({})),
                 // Reserved sequence: fires silently while its command is missing. When the
