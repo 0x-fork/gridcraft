@@ -72,7 +72,8 @@ pub struct GridState {
     pub drag_select: bool,
     pub rect: Option<Rect>,
     pub cells_rect: Option<Rect>,
-    pub filter_menu: Option<(u32, Pos2)>,
+    /// Column and row of the clicked header cell, and where to open the menu.
+    pub filter_menu: Option<(u32, u32, Pos2)>,
     pub context_menu: Option<Pos2>,
     pub marching_phase: f32,
     /// The selection outline on its way to a new selection.
@@ -1808,7 +1809,7 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
         }
         // Filter dropdown buttons.
         if is_filter_button(sh, geo, p) {
-            app.grid.filter_menu = Some((c.col, geo.mirror_pos(p)));
+            app.grid.filter_menu = Some((c.col, c.row, geo.mirror_pos(p)));
             return;
         }
         // Point mode while editing a formula: clicking inserts a reference.
@@ -2480,20 +2481,20 @@ fn popup_dismissed(response: &egui::Response, was_open: bool) -> bool {
     response.ctx.input(|i| !i.focused || i.key_pressed(egui::Key::Escape)) || (was_open && response.clicked_elsewhere())
 }
 
+/// The table whose header cell (`row`, `col`) was clicked, not just the first table in the column.
+fn filter_table_range(sh: &Sheet, col: u32, row: u32) -> Option<RangeRef> {
+    sh.tables.iter().find(|t| t.range.start.row == row && col >= t.range.start.col && col <= t.range.end.col).map(|t| t.range)
+}
+
 fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_open: bool) {
-    let Some((col, at)) = app.grid.filter_menu else { return };
+    let Some((col, row, at)) = app.grid.filter_menu else { return };
     let Some(d) = app.session.active() else { return };
     let wb = d.wb.clone();
     let si = wb.active_sheet;
     let Some(sh) = wb.sheet(si) else { return };
     let _ = geo;
     // Tables get an autofilter on demand.
-    let table_range = sh
-        .tables
-        .iter()
-        .find(|t| t.range.start.row <= at.y as u32 || true)
-        .filter(|t| col >= t.range.start.col && col <= t.range.end.col)
-        .map(|t| t.range);
+    let table_range = filter_table_range(sh, col, row);
     if sh.autofilter.is_none()
         && let Some(r) = table_range
     {
@@ -3052,6 +3053,32 @@ mod selection_fill_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filter_menu_uses_the_table_whose_header_was_clicked() {
+        use gridcraft_engine::model::Table;
+        let table = |id: u32, r0: u32, r1: u32| Table {
+            id,
+            name: format!("T{id}"),
+            range: RangeRef::new(CellRef::new(r0, 0), CellRef::new(r1, 0)),
+            header_row: true,
+            totals_row: false,
+            columns: vec![],
+            style: String::new(),
+            banded_rows: true,
+            banded_cols: false,
+            first_col: false,
+            last_col: false,
+            filter_button: true,
+            filter: vec![],
+        };
+        let mut sh = Sheet::new("S");
+        sh.tables.push(table(1, 0, 2));
+        sh.tables.push(table(2, 4, 7));
+        assert_eq!(filter_table_range(&sh, 0, 4), Some(sh.tables[1].range));
+        assert_eq!(filter_table_range(&sh, 0, 0), Some(sh.tables[0].range));
+        assert_eq!(filter_table_range(&sh, 1, 4), None);
+    }
 
     #[test]
     fn cell_text_y_moves_monotonically_in_standard_and_tall_rows() {
