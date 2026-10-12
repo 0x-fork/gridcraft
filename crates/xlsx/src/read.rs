@@ -201,6 +201,11 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
             file_to_model.push(None);
             continue;
         };
+        if rel.kind == "chartsheet" {
+            // Kept as it is and written back in place (see `passthrough`); nothing to model.
+            file_to_model.push(None);
+            continue;
+        }
         if rel.kind != "worksheet" {
             cx.warn(format!("sheet \"{name}\" is a {} and was skipped", rel.kind));
             file_to_model.push(None);
@@ -327,7 +332,7 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
             Err(e) => cx.warn(format!("macros (VBA project) could not be read and were dropped: {e}")),
         }
     }
-    wb.preserved = kept.workbook(&mut cx, &wb_part, &wb_xml);
+    wb.preserved = kept.workbook(&mut cx, &wb_part, &wb_xml, &file_to_model);
     // Calls of LAMBDA names are spelled like the names (the parser upper-cases them).
     wb.apply_name_call_case();
     wb.styles = cx.styles;
