@@ -1257,6 +1257,33 @@ fn ods_import_never_reuses_source_as_save_target() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// Open a `;` CSV by path (a double-click), edit, Save: the file keeps its `;` separator.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn saving_an_opened_semicolon_csv_keeps_semicolons() {
+    #[allow(clippy::disallowed_methods)] // native-only test: a unique temp dir name
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let dir = std::env::temp_dir().join(format!("gridcraft-csv-{}-{nonce}", std::process::id()));
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("cut list.csv");
+    std::fs::write(&path, "1;511;184;P3_L1_led;2162PE;16;;1244121406FB\r\n1;562;510;P3_pod;2162PE;19;;124412140710\r\n").unwrap();
+    let mut s = s();
+    s.execute("file.open", json!({"path": path})).unwrap();
+    s.execute("cell.set", json!({"cell": "B2", "input": "600"})).unwrap();
+    s.execute("file.save", json!({})).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "1;511;184;P3_L1_led;2162PE;16;;1244121406FB\r\n1;600;510;P3_pod;2162PE;19;;124412140710\r\n"
+    );
+    let exported = dir.join("export.csv");
+    s.execute("file.exportCsv", json!({"path": exported})).unwrap();
+    assert!(std::fs::read_to_string(&exported).unwrap().starts_with("1;511;184;"));
+    let saved = s.execute("file.saveBytes", json!({"format": "csv"})).unwrap();
+    let bytes = crate::io::base64_decode(saved["base64"].as_str().unwrap()).unwrap();
+    assert!(bytes.starts_with(b"1;511;184;"));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn validation_formulas_are_relative_and_see_the_new_value() {
     let mut s = s();
