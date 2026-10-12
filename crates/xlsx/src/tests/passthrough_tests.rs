@@ -483,3 +483,51 @@ fn kept_vml_drawings_are_charged_to_the_kept_total() {
     let (wb, _) = read_xlsx(&rich_package_with(CONTENT_TYPES, true)).unwrap();
     assert!(wb.sheets.iter().all(|s| s.preserved.as_ref().is_some_and(|p| p.vml.is_some())));
 }
+
+/// Where a link with `target`, in a workbook read from `from`, points once saved into `to`.
+#[cfg(unix)]
+fn rebased(target: &str, from: &str, to: &str) -> String {
+    let link = |rel_type: &str| gridcraft_model::PreservedRel {
+        id: "rId1".into(),
+        rel_type: format!("{NS_R}/{rel_type}"),
+        target: target.into(),
+        external: true,
+    };
+    let part = gridcraft_model::PreservedPart {
+        name: "xl/externalLinks/externalLink1.xml".into(),
+        content_type: String::new(),
+        data: Arc::from(&b""[..]),
+        rels: vec![link("externalLinkPath"), link("hyperlink")],
+    };
+    let mut wb = gridcraft_model::Workbook::new();
+    wb.preserved = Some(Arc::new(gridcraft_model::Preserved { parts: vec![part], ..Default::default() }));
+    wb.source_dir = Some(from.into());
+    let Some(out) = crate::rebase_links(&wb, std::path::Path::new(to)) else { return target.into() };
+    let rels = &out.preserved.as_ref().unwrap().parts[0].rels;
+    assert_eq!(rels[1].target, target, "only paths of linked workbooks change");
+    rels[0].target.clone()
+}
+
+#[test]
+#[cfg(unix)]
+fn saving_into_another_folder_rebases_relative_links_to_workbooks() {
+    assert_eq!(rebased("Source.xlsx", "/links", "/links/move2"), "../Source.xlsx");
+    assert_eq!(rebased("Source.xlsx", "/links", "/other/deeper"), "../../links/Source.xlsx");
+    assert_eq!(rebased("../Source.xlsx", "/links/move2", "/links"), "Source.xlsx");
+    assert_eq!(rebased("sub\\Source.xlsx", "/links", "/links/sub"), "Source.xlsx");
+    assert_eq!(rebased("./sub/../Source.xlsx", "/links", "/links/sub/"), "../Source.xlsx");
+    // Folder names from the file system are written as a URI path; the target's own spelling stays.
+    assert_eq!(rebased("My%20Book.xlsx", "/links/q2 data", "/links"), "q2%20data/My%20Book.xlsx");
+    assert_eq!(rebased("Résumé.xlsx", "/a/Été", "/a"), "Été/Résumé.xlsx");
+    // The same folder, absolute paths, URLs and paths above the root are kept as they are.
+    assert_eq!(rebased("Source.xlsx", "/links/", "/links/x/.."), "Source.xlsx");
+    for target in ["/links/Source.xlsx", "file:///C:/links/Source.xlsx", "C:\\links\\Source.xlsx", "https://example.com/Source.xlsx", "../../x.xlsx"]
+    {
+        assert_eq!(rebased(target, "/links", "/links/move2"), target);
+    }
+    // Without the folder it was read from, nothing to rebase.
+    let (mut wb, _) = read_xlsx(&rich_package()).unwrap();
+    assert!(crate::rebase_links(&wb, std::path::Path::new("/elsewhere")).is_none());
+    wb.source_dir = Some("relative/dir".into());
+    assert!(crate::rebase_links(&wb, std::path::Path::new("/elsewhere")).is_none());
+}

@@ -14,7 +14,8 @@
 //!   drawings, charts, tables, PivotTables, comments, slicers…) is not kept: it would point at
 //!   content that no longer exists in the same form.
 //! - External relationship targets (the path of a linked workbook) are kept as text and never
-//!   opened, followed or refreshed.
+//!   opened, followed or refreshed. A relative path to a linked workbook is rewritten when the
+//!   workbook is saved into another folder ([`rebase_links`]), so it still names the same file.
 //! - Sheet content lives on the sheet: deleting the sheet drops it, Copy Sheet doesn't copy it.
 //!   Cell references inside kept parts (a control's linked cell, a query table's range) are kept
 //!   as they were, not adjusted to inserted or deleted rows.
@@ -24,6 +25,7 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Write as _;
+use std::path::{Component, Path};
 use std::sync::Arc;
 
 use gridcraft_model::{Preserved, PreservedPart, PreservedRel, PreservedXml, Sheet, Workbook};
@@ -921,4 +923,137 @@ impl<'a> SheetKept<'a> {
         }
         s
     }
+}
+
+// ---------------------------------------------------------------- linked workbooks
+
+/// `wb` as it is saved into the folder `to` (absolute): the relative paths of its linked
+/// workbooks, relative to the folder it was read from, are rewritten relative to `to`, as Excel
+/// does on Save As, or made absolute when no relative path exists (another drive). `None` when
+/// nothing changes.
+pub fn rebase_links(wb: &Workbook, to: &Path) -> Option<Workbook> {
+    let p = wb.preserved.as_deref()?;
+    let from = Folder::of(wb.source_dir.as_deref()?)?;
+    let to = Folder::of(to)?;
+    if from == to {
+        return None;
+    }
+    let mut parts = p.parts.clone();
+    let mut changed = false;
+    for r in parts.iter_mut().flat_map(|part| part.rels.iter_mut()) {
+        if r.external
+            && is_kind(r, &["externalLinkPath"])
+            && let Some(target) = rebase(&r.target, &from, &to)
+        {
+            r.target = target;
+            changed = true;
+        }
+    }
+    if !changed {
+        return None;
+    }
+    let mut out = wb.clone();
+    out.preserved = Some(Arc::new(Preserved { parts, ..p.clone() }));
+    Some(out)
+}
+
+/// An absolute folder, lexically normalized.
+#[derive(PartialEq)]
+struct Folder {
+    /// Drive or share and root separator (`/`, `C:\`, `\\server\share\`).
+    root: String,
+    names: Vec<String>,
+}
+
+impl Folder {
+    fn of(dir: &Path) -> Option<Folder> {
+        if !dir.is_absolute() {
+            return None;
+        }
+        let mut f = Folder { root: String::new(), names: vec![] };
+        for c in dir.components() {
+            match c {
+                Component::Prefix(_) | Component::RootDir => f.root.push_str(&c.as_os_str().to_string_lossy()),
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    f.names.pop();
+                }
+                Component::Normal(n) => f.names.push(n.to_string_lossy().into_owned()),
+            }
+        }
+        Some(f)
+    }
+}
+
+/// A relative link target read from `from`, rewritten for `to`. `None` keeps it as it is: an
+/// absolute path or URL, or a path that climbs above the root.
+fn rebase(target: &str, from: &Folder, to: &Folder) -> Option<String> {
+    if !is_relative_path(target) {
+        return None;
+    }
+    // Each name as the file system knows it, and as it is written in a target. Names taken from
+    // the original target keep their spelling.
+    let mut path: Vec<(String, String)> = from.names.iter().map(|n| (n.clone(), encode_name(n))).collect();
+    for seg in target.split(['/', '\\']) {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                path.pop()?;
+            }
+            _ => path.push((decode_name(seg), seg.to_string())),
+        }
+    }
+    let folders = path.len().checked_sub(1)?;
+    if !from.root.eq_ignore_ascii_case(&to.root) {
+        let sep = if from.root.contains('\\') { "\\" } else { "/" };
+        let names: Vec<&str> = path.iter().map(|(name, _)| name.as_str()).collect();
+        return Some(format!("file:///{}{}", from.root, names.join(sep)));
+    }
+    let common = to.names.iter().zip(&path).take(folders).take_while(|(a, (b, _))| *a == b).count();
+    let up = "../".repeat(to.names.len().saturating_sub(common));
+    let down: Vec<&str> = path.iter().skip(common).map(|(_, written)| written.as_str()).collect();
+    Some(format!("{up}{}", down.join("/")))
+}
+
+/// Not empty, no root, no scheme or drive (`file:`, `http:`, `C:`).
+fn is_relative_path(target: &str) -> bool {
+    let scheme = target.split_once(':').is_some_and(|(s, _)| {
+        s.starts_with(|c: char| c.is_ascii_alphabetic()) && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+    });
+    !target.is_empty() && !target.starts_with(['/', '\\']) && !scheme
+}
+
+/// A folder name as a segment of a relationship target (a URI): ASCII characters a URI path
+/// can't hold are percent-encoded, other characters are written as they are.
+fn encode_name(name: &str) -> String {
+    let mut s = String::with_capacity(name.len());
+    for c in name.chars() {
+        if !c.is_ascii() || c.is_ascii_alphanumeric() || "-._~!$&'()+,;=@".contains(c) {
+            s.push(c);
+        } else {
+            let _ = write!(s, "%{:02X}", c as u32);
+        }
+    }
+    s
+}
+
+/// A target segment with its percent-escapes decoded; as written when they don't decode to UTF-8.
+fn decode_name(seg: &str) -> String {
+    let b = seg.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while let Some(&c) = b.get(i) {
+        let hex = b.get(i + 1..i + 3).and_then(|h| std::str::from_utf8(h).ok()).and_then(|h| u8::from_str_radix(h, 16).ok());
+        match hex {
+            Some(byte) if c == b'%' => {
+                out.push(byte);
+                i += 3;
+            }
+            _ => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8(out).unwrap_or_else(|_| seg.to_string())
 }

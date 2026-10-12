@@ -47,6 +47,7 @@ use gridcraft_model::Workbook;
 pub use crypto::{DecryptError, check_encryption, decrypt};
 pub use csv::{read_csv, write_csv};
 pub use ods::read_ods;
+pub use passthrough::rebase_links;
 pub use xls::read_xls;
 pub use xlsb::read_xlsb;
 
