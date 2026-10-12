@@ -516,8 +516,23 @@ fn run_length(data: &[u8]) -> Vec<u8> {
     out
 }
 
-fn pdf_text_string(s: &str) -> String {
-    pdf_string(s)
+/// Longest Info string written, in characters; longer values are cut on a character boundary.
+const MAX_INFO_CHARS: usize = 1024;
+
+/// A PDF text string (document Info entries) for `text`: a literal `( … )` for printable ASCII,
+/// otherwise UTF-16BE with a byte-order mark as a hex string (ISO 32000-1 7.9.2.2).
+fn pdf_text_string(text: &str) -> String {
+    let text: String = text.chars().take(MAX_INFO_CHARS).collect();
+    if text.chars().all(|c| matches!(c, ' '..='~')) {
+        return pdf_string(&text);
+    }
+    let mut s = String::with_capacity(text.len() * 4 + 6);
+    s.push_str("<FEFF");
+    for unit in text.encode_utf16() {
+        let _ = write!(s, "{unit:04X}");
+    }
+    s.push('>');
+    s
 }
 
 impl PdfDoc {

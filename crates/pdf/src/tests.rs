@@ -157,3 +157,43 @@ fn hostile_inputs_never_panic() {
     let pdf = d.finish();
     check_xref(&pdf);
 }
+
+/// Decodes the `<FEFF…>` hex string following `key` in the file bytes.
+fn utf16_entry(pdf: &[u8], key: &str) -> String {
+    let at = find(pdf, key.as_bytes()).unwrap() + key.len();
+    let rest = std::str::from_utf8(&pdf[at..at + 9000.min(pdf.len() - at)]).unwrap_or("");
+    let hex = rest.trim_start().strip_prefix("<FEFF").unwrap();
+    let hex = &hex[..hex.find('>').unwrap()];
+    let units: Vec<u16> = (0..hex.len()).step_by(4).map(|i| u16::from_str_radix(&hex[i..i + 4], 16).unwrap()).collect();
+    String::from_utf16(&units).unwrap()
+}
+
+#[test]
+fn info_strings_with_non_ascii_are_utf16be() {
+    let mut doc = PdfDoc::new();
+    doc.add_page(200.0, 200.0);
+    doc.info.title = "Übersicht €5 – “Q1” 日本 😀".into();
+    doc.info.author = "Müller & Søn".into();
+    let pdf = doc.finish();
+    assert_eq!(utf16_entry(&pdf, "/Title"), "Übersicht €5 – “Q1” 日本 😀");
+    assert_eq!(utf16_entry(&pdf, "/Author"), "Müller & Søn");
+}
+
+#[test]
+fn ascii_info_strings_stay_literal_and_escaped() {
+    let mut doc = PdfDoc::new();
+    doc.add_page(200.0, 200.0);
+    doc.info.title = r"Q1 (draft) a\b".into();
+    let pdf = doc.finish();
+    assert!(find(&pdf, br"/Title (Q1 \(draft\) a\\b)").is_some());
+    assert!(find(&pdf, b"/Producer (GridCraft PDF)").is_some());
+}
+
+#[test]
+fn info_strings_are_capped() {
+    let mut doc = PdfDoc::new();
+    doc.add_page(200.0, 200.0);
+    doc.info.title = "日".repeat(100_000);
+    let pdf = doc.finish();
+    assert_eq!(utf16_entry(&pdf, "/Title").chars().count(), MAX_INFO_CHARS);
+}
