@@ -324,3 +324,51 @@ fn preview_repaginates_so_fit_to_width_matches_the_commit() {
     let committed = geo(&h).paper.unwrap().scale;
     assert!((committed - live_scale).abs() < 0.01, "committed {committed} vs preview {live_scale}");
 }
+
+#[test]
+fn right_to_left_sheets_carry_the_vertical_ruler_on_the_right() {
+    let mut h = fixture_with(true, None);
+    let g = geo(&h);
+    assert!(g.rtl);
+    let pg = g.paper.clone().unwrap();
+    let start = margins(&h);
+    let outer = h.state().grid.rect.unwrap();
+    // The grid leaves the ruler's width free on the right, not on the left.
+    assert!((g.rect.right() - (outer.right() - gridcraft_ui_egui::paper_view::RULER)).abs() < 0.5, "{:?} {outer:?}", g.rect);
+    assert!((g.rect.left() - outer.left()).abs() < 0.5);
+    let x = outer.right() - 9.0;
+    let at = pos2(x, screen(&g, 0.0, pg.page_y(0) + pg.margins[2]).y);
+    let to = pos2(x, at.y + 0.25 * per_inch(&g));
+    press(&mut h, at);
+    mouse(&mut h, Event::PointerMoved(pos2(x, at.y + 4.0)));
+    mouse(&mut h, Event::PointerMoved(to));
+    release(&mut h, to);
+    let after = margins(&h);
+    assert!((after[2] - (start[2] + 0.25)).abs() < 0.03, "{after:?} vs {start:?}");
+    // The left ruler strip is not a handle any more: nothing happens there.
+    let g = geo(&h);
+    let pg = g.paper.clone().unwrap();
+    let at = pos2(outer.left() + 9.0, screen(&g, 0.0, pg.page_y(0) + pg.margins[3]).y);
+    press(&mut h, at);
+    mouse(&mut h, Event::PointerMoved(pos2(at.x, at.y - 30.0)));
+    release(&mut h, pos2(at.x, at.y - 30.0));
+    assert_eq!(margins(&h)[3], start[3]);
+}
+
+#[test]
+fn header_distance_cannot_be_dragged_past_the_top_margin() {
+    let mut h = fixture();
+    let g = geo(&h);
+    let pg = g.paper.clone().unwrap();
+    let start = margins(&h);
+    let ruler_x = h.state().grid.rect.unwrap().left() + 9.0;
+    let at = pos2(ruler_x, screen(&g, 0.0, pg.page_y(0) + pg.margins[4]).y);
+    let to = pos2(ruler_x, at.y + 3.0 * per_inch(&g));
+    press(&mut h, at);
+    mouse(&mut h, Event::PointerMoved(pos2(ruler_x, at.y + 4.0)));
+    mouse(&mut h, Event::PointerMoved(to));
+    release(&mut h, to);
+    let after = margins(&h);
+    assert!((after[4] - start[2]).abs() < 0.011, "header {} should stop at the top margin {}", after[4], start[2]);
+    assert_eq!(after[2], start[2]);
+}
