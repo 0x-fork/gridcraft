@@ -2039,4 +2039,38 @@ mod tests {
         assert!(e.contains("field name is not valid"), "{e}");
         assert!(s.execute("insert.pivotTable", json!({"source": "NoSuchTable"})).is_err());
     }
+
+    #[test]
+    fn too_many_value_columns_are_refused() {
+        let mut s = Session::new();
+        s.new_workbook();
+        let mut records: Vec<Json> = vec![json!(["Cat", "Sub", "V"])];
+        for r in 0..64 {
+            for c in 0..64 {
+                records.push(json!([format!("c{r}"), format!("s{c}"), 1.0]));
+            }
+        }
+        s.execute("range.setValues", json!({"range": "A1", "values": records})).unwrap();
+        let req = |n: usize| {
+            let values: Vec<Json> = (0..n).map(|_| json!({"field": "V"})).collect();
+            json!({"source": "A1:C4097", "rows": ["Cat"], "columns": ["Sub"], "values": values})
+        };
+        let e = s.execute("insert.pivotTable", req(256)).unwrap_err().to_string();
+        assert!(e.contains("will not fit"), "{e}");
+        assert!(s.execute("insert.pivotTable", req(128)).is_ok());
+    }
+
+    #[test]
+    fn collapsed_column_items_count_as_one_column_group() {
+        let mut s = Session::new();
+        s.new_workbook();
+        let mut records: Vec<Json> = vec![json!(["Grp", "Sub", "V"])];
+        records.extend((0..64).map(|c| json!(["g", format!("s{c}"), 1.0])));
+        s.execute("range.setValues", json!({"range": "A1", "values": records})).unwrap();
+        let values: Vec<Json> = (0..256).map(|_| json!({"field": "V"})).collect();
+        s.execute("insert.pivotTable", json!({"source": "A1:C65", "columns": ["Grp"], "values": values})).unwrap();
+        s.execute("pivot.collapse", json!({"field": "Grp"})).unwrap();
+        // 64 Sub items under the collapsed "g" show as one column group: (1 + grand total) x 256 columns fit.
+        s.execute("pivot.addField", json!({"field": "Sub", "area": "columns"})).unwrap();
+    }
 }
