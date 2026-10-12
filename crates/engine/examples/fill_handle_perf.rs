@@ -31,7 +31,8 @@ fn main() {
     let t = Instant::now();
     let mut last = 0u32;
     let mut iters = 0u64;
-    while last + 1 < gridcraft_engine::core::MAX_ROWS && sh.value_ref(CellRef::new(last + 1, neighbour)).is_some_and(|v| !v.is_empty()) && last < cap {
+    while last + 1 < gridcraft_engine::core::MAX_ROWS && sh.value_ref(CellRef::new(last + 1, neighbour)).is_some_and(|v| !v.is_empty()) && last < cap
+    {
         last += 1;
         iters += 1;
     }

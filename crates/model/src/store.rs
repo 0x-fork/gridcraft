@@ -149,7 +149,7 @@ impl CellStore {
             let band_hi = ((band_key + 1) * BAND - 1).min(cap);
             let mut advanced = false;
             for (r, cols) in band.rows.range(expect..=band_hi) {
-                if *r != expect || !cols.get(&from.col).is_some_and(|c| !c.value.is_empty()) {
+                if *r != expect || cols.get(&from.col).is_none_or(|c| c.value.is_empty()) {
                     return last;
                 }
                 last = Some(expect);
