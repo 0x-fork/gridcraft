@@ -198,27 +198,29 @@ fn sort(s: &mut Session, p: &Json) -> Result<Json> {
     let header = bool_param(p, "header").unwrap_or_else(|| guess_header(&d.wb, sh, r));
     let by_cols = str_param(p, "orientation") == Some("columns");
     let case = bool_param(p, "matchCase").unwrap_or(false);
-    let keys: Vec<SortKey> = p
-        .get("keys")
-        .and_then(Json::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(|k| {
-                    let col = if by_cols {
-                        k.get("row").and_then(Json::as_u64).map(|r| r as u32 - 1).or_else(|| col_param(k.get("column"), r.start.row))?
-                    } else {
-                        col_param(k.get("column"), r.start.col)?
-                    };
-                    Some(SortKey {
-                        col,
-                        desc: k.get("order").and_then(Json::as_str) == Some("desc"),
-                        by: k.get("by").and_then(Json::as_str).unwrap_or("values").to_string(),
-                        list: k.get("customList").and_then(Json::as_array).map(|l| l.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let mut keys: Vec<SortKey> = Vec::new();
+    for k in p.get("keys").and_then(Json::as_array).map(Vec::as_slice).unwrap_or_default() {
+        let col = if by_cols {
+            let row = match k.get("row").and_then(Json::as_u64) {
+                // Worksheet rows are 1-based; 0 (or a value past u32) has no coordinate.
+                Some(n) => {
+                    let row = u32::try_from(n).ok().and_then(|n| n.checked_sub(1));
+                    Some(row.ok_or_else(|| bad("data.sort", "sort key row must be 1 or greater"))?)
+                }
+                None => None,
+            };
+            row.or_else(|| col_param(k.get("column"), r.start.row))
+        } else {
+            col_param(k.get("column"), r.start.col)
+        };
+        let Some(col) = col else { continue };
+        keys.push(SortKey {
+            col,
+            desc: k.get("order").and_then(Json::as_str) == Some("desc"),
+            by: k.get("by").and_then(Json::as_str).unwrap_or("values").to_string(),
+            list: k.get("customList").and_then(Json::as_array).map(|l| l.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()),
+        });
+    }
     if keys.is_empty() {
         s.ui_requests.push(crate::UiRequest::Dialog("sort".into(), json!({"range": r.a1(), "header": header})));
         return ok();
@@ -1373,6 +1375,18 @@ mod tests {
         let sc = |id: &str| specs().into_iter().find(|c| c.id == id).and_then(|c| c.shortcut);
         assert_eq!(sc("data.group"), Some("Alt+Shift+Right"));
         assert_eq!(sc("data.ungroup"), Some("Alt+Shift+Left"));
+    }
+
+    #[test]
+    fn column_sort_rejects_row_key_zero_without_panicking() {
+        let mut s = Session::new();
+        s.new_workbook();
+        s.execute("cell.set", json!({"cell": "A1", "input": "2"})).unwrap();
+        for row in [0u64, 1 << 32] {
+            let params = json!({"range": "A1:B2", "header": false, "orientation": "columns", "keys": [{"row": row}]});
+            let err = s.execute("data.sort", params).unwrap_err();
+            assert!(matches!(err, EngineError::BadParams { .. }), "row {row}: {err:?}");
+        }
     }
 
     #[test]
