@@ -145,7 +145,7 @@ fn category_texts(wb: &Workbook, sheet: usize, formula: &str) -> Vec<String> {
                 if let Some(c) = at {
                     let code = &wb.styles.get(s.style_id(c)).num_fmt.0;
                     if !code.eq_ignore_ascii_case("general") {
-                        return format_value(v, &NumberFormat::parse(code), wb.date_system).text;
+                        return format_value(v, &NumberFormat::parse_cached(code), wb.date_system).text;
                     }
                 }
             }
