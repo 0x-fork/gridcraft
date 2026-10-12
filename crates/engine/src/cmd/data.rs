@@ -570,9 +570,9 @@ pub(crate) fn apply_filter(wb: &mut Workbook, sheet: usize) {
     let Some(af) = sh.autofilter.clone() else { return };
     let r = af.range;
     let mut hide = Vec::new();
-    // Precompute per-column top10 threshold and average once, not per row.
-    let mut col_stats: std::collections::HashMap<u32, (Option<f64>, f64)> = std::collections::HashMap::new();
-    for (off, c) in &af.criteria {
+    // Precompute per-criterion top10 threshold and average once, not per row.
+    let mut col_stats: std::collections::HashMap<usize, (Option<f64>, f64)> = std::collections::HashMap::new();
+    for (i, (off, c)) in af.criteria.iter().enumerate() {
         if matches!(c, FilterCriterion::Top10 { .. } | FilterCriterion::AboveAverage(_)) {
             let col = r.start.col + off;
             let mut nums: Vec<f64> = (r.start.row + 1..=r.end.row).filter_map(|row| sh.value(CellRef::new(row, col)).as_f64()).collect();
@@ -586,12 +586,12 @@ pub(crate) fn apply_filter(wb: &mut Workbook, sheet: usize) {
                 }
                 _ => None,
             };
-            col_stats.insert(*off, (thr, avg));
+            col_stats.insert(i, (thr, avg));
         }
     }
     for row in r.start.row + 1..=r.end.row {
         let mut visible = true;
-        for (off, crit) in &af.criteria {
+        for (i, (off, crit)) in af.criteria.iter().enumerate() {
             let c = CellRef::new(row, r.start.col + off);
             let v = sh.value(c);
             let text = crate::display::cell_text(wb, sh, c);
@@ -613,14 +613,14 @@ pub(crate) fn apply_filter(wb: &mut Workbook, sheet: usize) {
                         None => x,
                     }
                 }
-                FilterCriterion::Top10 { bottom, .. } => match (v.as_f64(), col_stats.get(off)) {
+                FilterCriterion::Top10 { bottom, .. } => match (v.as_f64(), col_stats.get(&i)) {
                     (Some(n), Some((thr, _))) => {
                         let thr = thr.unwrap_or(n);
                         if *bottom { n <= thr } else { n >= thr }
                     }
                     _ => false,
                 },
-                FilterCriterion::AboveAverage(above) => match (v.as_f64(), col_stats.get(off)) {
+                FilterCriterion::AboveAverage(above) => match (v.as_f64(), col_stats.get(&i)) {
                     (Some(n), Some((_, avg))) => {
                         if *above {
                             n > *avg
