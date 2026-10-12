@@ -403,6 +403,22 @@ fn references_functions() {
     assert_eq!(t.num("B3"), 50.0);
     t.set("B4", "=INDIRECT(\"A\"&4)");
     assert_eq!(t.num("B4"), 40.0);
+    // With a1 = FALSE the text must be R1C1: A1-style text is #REF!, not read as A1.
+    t.set("C1", "=INDIRECT(\"R3C1\",FALSE)");
+    assert_eq!(t.num("C1"), 30.0);
+    t.set("C2", "=INDIRECT(\"A3\",FALSE)");
+    assert_eq!(t.get("C2"), Value::Error(CellError::Ref));
+    // Defined names don't depend on the reference style.
+    t.wb.names.push(gridcraft_model::DefinedName {
+        name: "Third".into(),
+        scope: None,
+        formula: "Sheet1!$A$3".into(),
+        comment: String::new(),
+        hidden: false,
+    });
+    t.calc.rebuild(&t.wb);
+    t.set("C3", "=INDIRECT(\"Third\",FALSE)");
+    assert_eq!(t.num("C3"), 30.0);
     t.set("B5", "=SUM(A1:INDEX(A1:A4,3))");
     assert_eq!(t.num("B5"), 60.0);
     t.set("B6", "=SUM(A:A)");
