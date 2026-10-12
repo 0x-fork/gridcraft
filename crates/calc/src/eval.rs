@@ -860,7 +860,12 @@ impl<'h> Evaluator<'h> {
     }
 
     pub fn apply_lambda(&mut self, l: &Lambda, args: &[Expr]) -> Ev {
-        if args.len() > l.params.len() {
+        // Too many or too few argument positions is #VALUE!. An explicitly empty position, as in
+        // `(1,)`, is `Expr::Missing` and still counts as a position (it binds as omitted). `f()`
+        // parses to no arguments, which for a one-parameter lambda can also be read as one empty
+        // position, so that call still binds the parameter as omitted.
+        let positions_ok = args.len() == l.params.len() || (args.is_empty() && l.params.len() == 1);
+        if !positions_ok {
             return err(CellError::Value);
         }
         let mut bound = Vec::with_capacity(l.params.len());
