@@ -178,7 +178,15 @@ fn write_expr(s: &mut String, e: &Expr, r1c1: Option<CellRef>) {
             Some(at) => s.push_str(&reference_r1c1(r, at)),
             None => s.push_str(&reference_a1(r)),
         },
-        Expr::Name(n) => s.push_str(n),
+        Expr::Name(n) => match n.rsplit_once('!') {
+            // A sheet-qualified name is stored with the bare sheet name (`My Sheet!Total`): quote it so it parses back.
+            Some((sheet, name)) => {
+                s.push_str(&quote_sheet(sheet));
+                s.push('!');
+                s.push_str(name);
+            }
+            _ => s.push_str(n),
+        },
         Expr::Struct(st) => s.push_str(&struct_ref(st)),
         Expr::Unary(op, x) => match op {
             UnOp::Neg => {
