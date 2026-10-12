@@ -214,7 +214,7 @@ fn find_impl(a: &[Arg], wild: bool) -> R<Value> {
     let hay = text(a, 1)?;
     let start = opt_num(a, 2, 1.0)?;
     let hc = chars(&hay);
-    if (start.is_nan() || start < 1.0) || start > hc.len() as f64 + 1.0 {
+    if (start.is_nan() || start < 1.0) || start > hc.len().max(1) as f64 {
         return Err(CellError::Value);
     }
     let start = start as usize - 1;
@@ -1032,6 +1032,10 @@ mod tests {
         close(ev("SEARCH", vec![t("~*"), t("a*b")]), 2.0);
         is_err(ev("SEARCH", vec![t("z"), t("abc")]), CellError::Value);
         is_err(ev("SEARCH", vec![t("a"), t("abc"), n(5.0)]), CellError::Value);
+        for f in ["FIND", "SEARCH"] {
+            close(ev(f, vec![t(""), t("abc"), n(3.0)]), 3.0);
+            is_err(ev(f, vec![t(""), t("abc"), n(4.0)]), CellError::Value);
+        }
         assert_eq!(ev("EXACT", vec![t("a"), t("A")]), Value::Bool(false));
         assert_eq!(ev("EXACT", vec![t("a"), t("a")]), Value::Bool(true));
     }
