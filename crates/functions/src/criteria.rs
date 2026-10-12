@@ -53,12 +53,26 @@ impl Criterion {
 
     /// Parses the criteria argument of COUNTIF, SUMIF, AVERAGEIF and the single-pair *IFS
     /// functions: like `parse`, but text longer than 255 characters is `#VALUE!`, as in Excel.
-    /// The *IFS functions with two or more criteria pairs use `parse`: Excel doesn't limit them.
     pub(crate) fn parse_arg(v: &Value) -> Result<Criterion, CellError> {
         match v {
             Value::Array(a) => Criterion::parse_arg(a.data.first().unwrap_or(&Value::Empty)),
             Value::Text(t) if t.chars().nth(MAX_CRITERION_CHARS).is_some() => Err(CellError::Value),
             other => Ok(Criterion::parse(other)),
+        }
+    }
+
+    /// Parses a criteria argument of an *IFS function with two or more criteria pairs. Excel
+    /// doesn't reject a longer text criterion there: it matches its first 255 characters
+    /// (checked on Excel 2016 and Microsoft 365 with COUNTIFS, SUMIFS, AVERAGEIFS, MAXIFS and
+    /// MINIFS).
+    pub(crate) fn parse_arg_truncated(v: &Value) -> Criterion {
+        match v {
+            Value::Array(a) => Criterion::parse_arg_truncated(a.data.first().unwrap_or(&Value::Empty)),
+            Value::Text(t) => match t.char_indices().nth(MAX_CRITERION_CHARS) {
+                Some((end, _)) => Criterion::parse_text(&t[..end]),
+                None => Criterion::parse_text(t),
+            },
+            other => Criterion::parse(other),
         }
     }
 

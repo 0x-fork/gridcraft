@@ -950,10 +950,9 @@ fn criteria_mask(a: &[Arg], first_pair: usize, rows: usize, cols: usize) -> R<Ve
     if rest.is_empty() || rest.len() % 2 != 0 {
         return Err(CellError::Value);
     }
-    // Excel rejects a text criterion over 255 characters only when there is a single criteria
-    // pair. With two or more pairs it matches the long text normally (checked with COUNTIFS in
-    // Excel 2016).
-    let limit_length = rest.len() == 2;
+    // A text criterion over 255 characters is `#VALUE!` only when there is a single criteria
+    // pair. With two or more pairs Excel matches its first 255 characters instead.
+    let single_pair = rest.len() == 2;
     let mut mask = vec![true; rows.saturating_mul(cols)];
     for pair in rest.chunks(2) {
         let (Some(range), Some(crit)) = (pair.first(), pair.get(1)) else { return Err(CellError::Value) };
@@ -962,7 +961,7 @@ fn criteria_mask(a: &[Arg], first_pair: usize, rows: usize, cols: usize) -> R<Ve
             return Err(CellError::Value);
         }
         let scalar = crit.value.scalar();
-        let c = if limit_length { Criterion::parse_arg(&scalar)? } else { Criterion::parse(&scalar) };
+        let c = if single_pair { Criterion::parse_arg(&scalar)? } else { Criterion::parse_arg_truncated(&scalar) };
         for (m, v) in mask.iter_mut().zip(r.iter()) {
             if *m && !c.matches(v) {
                 *m = false;
@@ -1650,7 +1649,7 @@ mod tests {
     }
 
     #[test]
-    fn criteria_over_255_chars_are_value_errors_with_one_pair() {
+    fn criteria_over_255_chars_are_value_errors_with_one_pair_and_truncated_with_more() {
         let ok = "x".repeat(255);
         let long = "x".repeat(256);
         let cells = arr(vec![vec![tv(&ok)], vec![tv(&long)]]);
@@ -1660,9 +1659,13 @@ mod tests {
         close(ev("SUMIFS", vec![rf(qty.clone()), rf(cells.clone()), t(&ok)]), 1.0);
         is_err(ev("SUMIFS", vec![rf(qty.clone()), rf(cells.clone()), t(&long)]), CellError::Value);
         is_err(ev("COUNTIFS", vec![rf(cells.clone()), t(&long)]), CellError::Value);
-        // With a second pair the long criterion matches like any other.
+        // With two or more pairs Excel matches the first 255 characters: the 255-character cell
+        // (quantity 1), not the 256-character one (quantity 2). Checked on Excel 2016 and 365.
+        let over = format!("{ok}y");
         close(ev("COUNTIFS", vec![rf(cells.clone()), t(&long), rf(qty.clone()), t(">0")]), 1.0);
-        close(ev("COUNTIFS", vec![rf(qty.clone()), t(">0"), rf(cells.clone()), t(&long)]), 1.0);
-        close(ev("SUMIFS", vec![rf(qty.clone()), rf(cells.clone()), t(&long), rf(qty), t(">0")]), 2.0);
+        close(ev("SUMIFS", vec![rf(qty.clone()), rf(cells.clone()), t(&long), rf(qty.clone()), t(">0")]), 1.0);
+        close(ev("SUMIFS", vec![rf(qty.clone()), rf(qty.clone()), t(">0"), rf(cells.clone()), t(&over)]), 1.0);
+        close(ev("AVERAGEIFS", vec![rf(qty.clone()), rf(cells.clone()), t(&long), rf(qty.clone()), t(">0")]), 1.0);
+        close(ev("MAXIFS", vec![rf(qty.clone()), rf(cells.clone()), t(&"x".repeat(300)), rf(qty), t(">0")]), 1.0);
     }
 }
