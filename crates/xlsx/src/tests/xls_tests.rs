@@ -359,6 +359,21 @@ fn reads_values_formulas_formats_and_layout() {
 }
 
 #[test]
+fn text_result_of_a_formula_kept_as_its_value() {
+    // A what-if data table cell ({=TABLE(B1,)}) can't be imported as a formula, so its saved result
+    // is kept. With the default XF the cell is blank until the String record brings the text.
+    let table = cat(&[&[0x02], &u16s(&[0, 0])]);
+    let sheet = cat(&[&bof(0x0010), &formula(0, 0, special(0, 0), &table), &rec(0x0207, &xlstr("103a")), &eof()]);
+    let boundsheet = |pos: u32| rec(0x0085, &cat(&[&pos.to_le_bytes(), &[0, 0, 6, 0], b"Sheet1"]));
+    let len = cat(&[&bof(0x0005), &boundsheet(0), &eof()]).len() as u32;
+    let stream = cat(&[&bof(0x0005), &boundsheet(len), &eof(), &sheet]);
+    let (wb, report) = read_xls(&compound("Workbook", &stream)).unwrap();
+    assert!(report.warnings.iter().any(|w| w.contains("what-if data tables")), "{:?}", report.warnings);
+    assert_eq!(ftext(&wb, "A1"), None);
+    assert_eq!(v(&wb, 0, "A1"), Value::from("103a"));
+}
+
+#[test]
 fn refuses_encrypted_old_and_foreign_files() {
     // FILEPASS in the globals: an encrypted workbook.
     let mut stream = bof(0x0005);
