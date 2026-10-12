@@ -4,7 +4,7 @@
 //! The database and the criteria are arrays whose first row holds column labels. Each criteria
 //! row is a set of conditions that must all hold (AND); a record matches when any criteria row
 //! holds (OR). An empty criteria cell matches anything. Plain text conditions match values that
-//! begin with the text, as in Excel's advanced filter.
+//! begin with the text, as in Excel's advanced filter, so an empty string matches any text.
 
 use std::borrow::Cow;
 
@@ -49,7 +49,6 @@ fn field_index(db: &Array, a: &[Arg]) -> R<Option<usize>> {
 fn cell_criterion(v: &Value) -> Option<Criterion> {
     match v {
         Value::Empty => None,
-        Value::Text(t) if t.is_empty() => None,
         Value::Text(t) => {
             let s: &str = t;
             let has_op = s.starts_with(['=', '<', '>']);
@@ -158,9 +157,12 @@ fn dcounta(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
 fn dget(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     let s = select(a)?;
     let f = s.field.ok_or(CellError::Value)?;
-    match s.records.as_slice() {
-        [] => Err(CellError::Value),
-        [r] => Ok(s.db.get(*r, f).cloned().unwrap_or(Value::Empty)),
+    // Records whose field is blank (or "") don't count, as in Excel.
+    let mut found =
+        s.records.iter().filter_map(|&r| s.db.get(r, f)).filter(|v| !matches!(v, Value::Empty) && !matches!(v, Value::Text(t) if t.is_empty()));
+    match (found.next(), found.next()) {
+        (None, _) => Err(CellError::Value),
+        (Some(v), None) => Ok(v.clone()),
         _ => Err(CellError::Num),
     }
 }
@@ -370,5 +372,70 @@ mod tests {
         close(ev("DSTDEVP", vec![rf(db()), t("Yield"), rf(c("=Cherry"))]), 0.0);
         is_err(ev("DSUM", vec![e(CellError::Ref), t("Yield"), rf(c("=Cherry"))]), CellError::Ref);
         close(ev("DCOUNTA", vec![rf(db()), empty(), rf(c("=Pear"))]), 2.0);
+    }
+
+    /// Expected results are Excel's, from Apache POI's `DGet.xls` (rows 74-86).
+    #[test]
+    fn empty_string_criterion() {
+        let db = arr(vec![
+            vec![tv("Index"), tv("Value")],
+            vec![tv("a"), tv("=")],
+            vec![tv("b"), Value::Empty],
+            vec![tv("c"), tv("")],
+            vec![tv("d"), tv(" ")],
+            vec![tv("f"), Value::Error(CellError::Value)],
+            vec![tv("h"), tv("abc")],
+            vec![tv("i"), nv(0.0)],
+        ]);
+        let get = |index: &str| {
+            let crit = arr(vec![vec![tv("Index"), tv("Value")], vec![tv(index), tv("")]]);
+            ev("DGET", vec![rf(db.clone()), t("Index"), rf(crit)])
+        };
+        // Like any plain text, "" is a "begins with" pattern: it matches every text value.
+        is_text(get("c"), "c");
+        is_text(get("h"), "h");
+        is_err(get("b"), CellError::Value);
+        is_err(get("i"), CellError::Value);
+        is_err(get("f"), CellError::Value);
+        let all = arr(vec![vec![tv("Value")], vec![tv("")]]);
+        close(ev("DCOUNTA", vec![rf(db.clone()), t("Index"), rf(all)]), 4.0);
+
+        // Under a label that names no field, "" is a condition that never holds.
+        let db = arr(vec![vec![tv("One"), tv("Two"), tv("Three")], vec![tv("a"), tv("c"), tv("x")], vec![tv("b"), tv("d"), tv("y")]]);
+        let get = |label: Value, value: Value| {
+            let crit = arr(vec![vec![tv("One"), label, tv("Three")], vec![tv("a"), value, tv("x")]]);
+            ev("DGET", vec![rf(db.clone()), t("One"), rf(crit)])
+        };
+        is_text(get(Value::Empty, Value::Empty), "a");
+        is_text(get(tv(""), Value::Empty), "a");
+        is_err(get(Value::Empty, tv("")), CellError::Value);
+        is_err(get(tv(""), tv("")), CellError::Value);
+    }
+
+    /// Expected results are Excel's, from Apache POI's `DGet.xls` (rows 108-119).
+    #[test]
+    fn dget_skips_empty_fields() {
+        let db = arr(vec![
+            vec![tv("One"), tv("Two")],
+            vec![tv("a"), Value::Empty],
+            vec![tv("b"), tv(" ")],
+            vec![tv("c"), tv("")],
+            vec![tv("d"), Value::Error(CellError::NA)],
+            vec![tv("j"), Value::Empty],
+            vec![tv("j"), tv("Text")],
+            vec![tv("j"), Value::Empty],
+            vec![tv("k"), Value::Empty],
+            vec![tv("k"), tv("")],
+        ]);
+        let get = |one: &str| {
+            let crit = arr(vec![vec![tv("One")], vec![tv(one)]]);
+            ev("DGET", vec![rf(db.clone()), t("Two"), rf(crit)])
+        };
+        is_err(get("a"), CellError::Value);
+        is_text(get("b"), " ");
+        is_err(get("c"), CellError::Value);
+        is_err(get("d"), CellError::NA);
+        is_text(get("j"), "Text");
+        is_err(get("k"), CellError::Value);
     }
 }
