@@ -254,6 +254,10 @@ pub struct SheetApp {
     /// control-channel or MCP `edit.copy`/`edit.cut`). While the system clipboard still holds this
     /// text, GridCraft's copy is the newer one and Paste uses it.
     clipboard_text_at_copy: Option<String>,
+    /// The system clipboard's text right after GridCraft's last cut (the published text, or the
+    /// text noted for an unpublished cut); `None` after a copy. Once the cut has been pasted, Paste
+    /// leaves this text alone.
+    cut_text: Option<String>,
     pub started: f64,
 }
 
@@ -296,6 +300,7 @@ impl SheetApp {
             shots: control::Shots::default(),
             selected_chart: None,
             clipboard_text_at_copy: None,
+            cut_text: None,
             started: now_ms(),
         }
     }
@@ -336,6 +341,7 @@ impl SheetApp {
         // that GridCraft's copy is newer while that text is still there.
         if matches!(id, "edit.copy" | "edit.cut") && r.is_ok() {
             self.clipboard_text_at_copy = self.system_clipboard_text();
+            self.cut_text = if id == "edit.cut" { self.clipboard_text_at_copy.clone() } else { None };
         }
         r
     }
@@ -391,6 +397,7 @@ impl SheetApp {
         let Some(text) = result.get("text").and_then(Json::as_str) else { return };
         // The system clipboard gets this copy, so its text decides what Paste pastes.
         self.clipboard_text_at_copy = None;
+        self.cut_text = (command == "edit.cut").then(|| text.replace("\r\n", "\n"));
         if let Some(html) = result.get("html").and_then(Json::as_str)
             && let Some(copy_html) = &mut self.services.copy_html
         {
@@ -416,9 +423,16 @@ impl SheetApp {
     /// Ribbon and menu Paste: paste the text on the system clipboard, as Cmd/Ctrl+V does. With no
     /// text there, no host clipboard (web), or the text that was there when GridCraft last copied
     /// without publishing, GridCraft's own clipboard is pasted.
+    ///
+    /// Excel pastes a cut once: after GridCraft's cut has been pasted, the system clipboard text
+    /// that came with it is not pasted again over the moved block.
     pub fn paste_from_clipboard(&mut self) {
-        match self.system_clipboard_text() {
-            Some(text) if self.session.clipboard.is_none() || self.clipboard_text_at_copy.as_ref() != Some(&text) => self.paste_external(text),
+        let text = self.system_clipboard_text();
+        let cut_pasted = self.session.clipboard.is_none() && Self::same_clipboard_text(text.as_deref(), self.cut_text.as_deref());
+        match text {
+            Some(text) if !cut_pasted && (self.session.clipboard.is_none() || self.clipboard_text_at_copy.as_ref() != Some(&text)) => {
+                self.paste_external(text)
+            }
             _ => self.run_or_alert("edit.paste", json!({})),
         }
     }
@@ -427,6 +441,15 @@ impl SheetApp {
     /// `None` when it holds no text or the host can't read it.
     fn system_clipboard_text(&mut self) -> Option<String> {
         self.services.paste_text.as_mut().and_then(|read| read()).filter(|t| !t.is_empty()).map(|t| t.replace("\r\n", "\n"))
+    }
+
+    /// Whether two clipboard texts are the same copy: trailing line breaks don't count, as in the
+    /// engine's `edit.paste`.
+    fn same_clipboard_text(a: Option<&str>, b: Option<&str>) -> bool {
+        match (a, b) {
+            (Some(a), Some(b)) => a.trim_end_matches(['\r', '\n']) == b.trim_end_matches(['\r', '\n']),
+            _ => false,
+        }
     }
 
     /// Web: `file.exportPdf` without a path returns the PDF as base64; hand it to the browser as a download.
@@ -1117,6 +1140,7 @@ impl SheetApp {
                     self.ui.ribbon_collapsed = false;
                 }
                 keytips::Action::Command(id @ ("edit.copy" | "edit.cut")) => self.copy_to_clipboard(ctx, id),
+                keytips::Action::Command("edit.paste") => self.paste_from_clipboard(),
                 keytips::Action::Command(id) => self.run_or_alert(id, json!({})),
                 keytips::Action::Dialog(name) => self.open_dialog(name, json!({})),
                 // Reserved sequence: fires silently while its command is missing. When the

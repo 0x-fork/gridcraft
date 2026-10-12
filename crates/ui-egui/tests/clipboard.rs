@@ -305,3 +305,92 @@ fn ribbon_paste_prefers_a_programmatic_copy_until_other_text_is_copied() {
     assert_eq!(value_at(&h, "G1"), Some(Value::from("copied elsewhere")));
     assert_eq!(value_at(&h, "H1"), Some(Value::number(7.0)));
 }
+
+fn has_formula(h: &Harness, a1: &str) -> bool {
+    let at = CellRef::parse(a1).unwrap();
+    h.state().session.active().and_then(|d| d.wb.active().and_then(|s| s.cell(at)).map(|c| c.formula.is_some())).unwrap_or(false)
+}
+
+/// Close the "Nothing to paste." alert so the ribbon takes clicks again.
+fn dismiss(h: &mut Harness) {
+    h.state_mut().message = None;
+    h.state_mut().toast = None;
+    h.run_steps(2);
+}
+
+fn click_paste(h: &mut Harness) {
+    h.get_by_role_and_label(Role::Button, "Paste").click();
+    h.run_steps(2);
+}
+
+#[test]
+fn a_pasted_ribbon_cut_is_not_pasted_again_from_the_system_clipboard() {
+    // Excel pastes a cut once. After the move, the cut's text is still on the system clipboard:
+    // a second Paste must not write it over the moved block (formulas would become values).
+    let (clipboard, mut services) = system_clipboard("stale text from earlier");
+    let host = clipboard.clone();
+    services.copy_html = Some(Box::new(move |_, text| {
+        host.borrow_mut().0 = text.to_string();
+        Ok(())
+    }));
+    let mut h = harness(services);
+    h.state_mut().run("cell.set", json!({"cell": "B3", "input": "=B2*2"})).unwrap();
+    h.state_mut().run("selection.set", json!({"range": "A1:B3"})).unwrap();
+    h.run_steps(2);
+    for key in [egui::Key::F10, egui::Key::H, egui::Key::X] {
+        press(&mut h, key);
+    }
+    assert_eq!(clipboard.borrow().0, "Name\tScore\nAda\t42\n\t84\n", "the cut is published");
+    h.state_mut().run("selection.set", json!({"cell": "D4"})).unwrap();
+    click_paste(&mut h);
+    assert_eq!(value_at(&h, "E6"), Some(Value::number(84.0)));
+    assert!(has_formula(&h, "E6"), "the cut moves the formula");
+
+    click_paste(&mut h);
+    assert!(has_formula(&h, "E6"), "a second Paste leaves the moved formula alone");
+    assert_eq!(value_at(&h, "D4"), Some(Value::from("Name")));
+    assert!(h.state().toast.is_some() || h.state().message.is_some(), "Paste reports there is nothing to paste");
+
+    // Text copied in another app afterwards still pastes.
+    dismiss(&mut h);
+    clipboard.borrow_mut().0 = "copied elsewhere\t7".into();
+    h.state_mut().run("selection.set", json!({"cell": "H1"})).unwrap();
+    click_paste(&mut h);
+    assert_eq!(value_at(&h, "H1"), Some(Value::from("copied elsewhere")));
+    assert_eq!(value_at(&h, "I1"), Some(Value::number(7.0)));
+}
+
+#[test]
+fn a_pasted_programmatic_cut_does_not_paste_the_older_system_clipboard_text() {
+    // A control-channel or MCP cut leaves the system clipboard alone; once the cut has been
+    // pasted, the text that was there before it must not land on the moved data.
+    let (clipboard, services) = system_clipboard("stale");
+    let mut h = harness(services);
+    h.state_mut().run("edit.cut", json!({"range": "A1:B2"})).unwrap();
+    h.state_mut().run("selection.set", json!({"cell": "D4"})).unwrap();
+    click_paste(&mut h);
+    assert_eq!(value_at(&h, "D4"), Some(Value::from("Name")));
+
+    click_paste(&mut h);
+    assert_eq!(value_at(&h, "D4"), Some(Value::from("Name")), "the moved data stays");
+    assert_eq!(value_at(&h, "E5"), Some(Value::number(42.0)));
+
+    dismiss(&mut h);
+    clipboard.borrow_mut().0 = "copied elsewhere".into();
+    click_paste(&mut h);
+    assert_eq!(value_at(&h, "D4"), Some(Value::from("copied elsewhere")), "newer external text pastes");
+}
+
+#[test]
+fn the_paste_keytip_pastes_the_system_clipboard_like_the_paste_button() {
+    // Alt/F10, H, V, P is Home › Paste: it pastes text copied in another app.
+    let (_clipboard, services) = system_clipboard("external\t7");
+    let mut h = harness(services);
+    h.state_mut().run("selection.set", json!({"cell": "D4"})).unwrap();
+    for key in [egui::Key::F10, egui::Key::H, egui::Key::V, egui::Key::P] {
+        press(&mut h, key);
+    }
+    assert_eq!(value_at(&h, "D4"), Some(Value::from("external")));
+    assert_eq!(value_at(&h, "E4"), Some(Value::number(7.0)));
+    assert!(h.state().toast.is_none() && h.state().message.is_none());
+}
