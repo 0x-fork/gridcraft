@@ -1081,7 +1081,15 @@ impl<'h> Evaluator<'h> {
                 v.scalar().to_bool().unwrap_or(true)
             }
         };
-        let text = if a1 { text } else { r1c1_to_a1(&text, self.at).unwrap_or(text) };
+        let text = if a1 {
+            text
+        } else {
+            match r1c1_to_a1(&text, self.at) {
+                Ok(Some(a1_text)) => a1_text,
+                Ok(None) => text,
+                Err(e) => return err(e),
+            }
+        };
         match gridcraft_formula::parse(&text) {
             Ok(e @ (Expr::Ref(_) | Expr::Name(_) | Expr::Struct(_))) => match self.eval(&e) {
                 r @ Ev::R(_) => r,
@@ -1406,37 +1414,42 @@ fn same_kind(a: &Value, b: &Value) -> bool {
     std::mem::discriminant(a) == std::mem::discriminant(b) || (a.is_empty() || b.is_empty())
 }
 
-/// Converts an R1C1 reference text to A1 (for INDIRECT(…, FALSE)).
-pub fn r1c1_to_a1(s: &str, at: CellRef) -> Option<String> {
+/// Converts an R1C1 reference text to A1 (for INDIRECT(…, FALSE)). `Ok(None)` means the text is
+/// not R1C1; `Err` means it is R1C1 but points past the sheet.
+pub fn r1c1_to_a1(s: &str, at: CellRef) -> Result<Option<String>, CellError> {
     let (sheet, body) = match s.rsplit_once('!') {
         Some((sh, b)) => (format!("{sh}!"), b),
         None => (String::new(), s),
     };
-    let conv = |part: &str| -> Option<String> {
+    let conv = |part: &str| -> Result<Option<String>, CellError> {
         let u = part.to_ascii_uppercase();
-        let rest = u.strip_prefix('R')?;
-        let (rpart, cpart) = rest.split_once('C')?;
-        let num = |p: &str, base: u32| -> Option<(u32, bool)> {
-            if p.is_empty() {
-                return Some((base, false));
-            }
-            if let Some(inner) = p.strip_prefix('[').and_then(|x| x.strip_suffix(']')) {
-                let d: i64 = inner.parse().ok()?;
-                let v = base as i64 + d;
-                return if v >= 0 { Some((v as u32, false)) } else { None };
-            }
-            let v: u32 = p.parse().ok()?;
-            Some((v.checked_sub(1)?, true))
+        let Some((rpart, cpart)) = u.strip_prefix('R').and_then(|rest| rest.split_once('C')) else { return Ok(None) };
+        // `None`: not R1C1. `Some(None)`: R1C1, but past the sheet.
+        let num = |p: &str, base: u32, max: u32| -> Option<Option<(u32, bool)>> {
+            let (v, absolute) = if p.is_empty() {
+                (Some(i64::from(base)), false)
+            } else if let Some(inner) = p.strip_prefix('[').and_then(|x| x.strip_suffix(']')) {
+                (i64::from(base).checked_add(inner.parse().ok()?), false)
+            } else {
+                (p.parse::<u32>().ok()?.checked_sub(1).map(i64::from), true)
+            };
+            Some(v.filter(|v| (0..i64::from(max)).contains(v)).map(|v| (v as u32, absolute)))
         };
-        let (r, ra) = num(rpart, at.row)?;
-        let (c, ca) = num(cpart, at.col)?;
-        Some(format!("{}{}{}{}", if ca { "$" } else { "" }, gridcraft_core::col_to_letters(c), if ra { "$" } else { "" }, r + 1))
+        let (Some(r), Some(c)) = (num(rpart, at.row, MAX_ROWS), num(cpart, at.col, MAX_COLS)) else { return Ok(None) };
+        let (Some((r, ra)), Some((c, ca))) = (r, c) else { return Err(CellError::Ref) };
+        Ok(Some(format!("{}{}{}{}", if ca { "$" } else { "" }, gridcraft_core::col_to_letters(c), if ra { "$" } else { "" }, r + 1)))
     };
     let out = match body.split_once(':') {
-        Some((a, b)) => format!("{}:{}", conv(a)?, conv(b)?),
-        None => conv(body)?,
+        Some((a, b)) => match (conv(a)?, conv(b)?) {
+            (Some(a), Some(b)) => format!("{a}:{b}"),
+            _ => return Ok(None),
+        },
+        None => match conv(body)? {
+            Some(x) => x,
+            None => return Ok(None),
+        },
     };
-    Some(format!("{sheet}{out}"))
+    Ok(Some(format!("{sheet}{out}")))
 }
 
 /// The aggregates that can fold a reference without building an array.
