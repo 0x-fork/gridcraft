@@ -2506,6 +2506,15 @@ fn fill_series_month_clamps_to_month_end() {
 }
 
 #[test]
+fn fill_series_weekday_out_of_range_step_errors() {
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "45000"})).unwrap();
+    let r = s.execute("edit.fillSeries", json!({"range": "A1:A2", "direction": "columns", "type": "date", "dateUnit": "weekday", "step": 1e12}));
+    assert!(r.is_err());
+    assert_eq!(v(&s, "A2"), Value::Empty);
+}
+
+#[test]
 fn fill_series_month_leap_year() {
     let s = series_date("2028-01-31", "A1:A3", "month");
     assert_eq!(v(&s, "A2"), ymd(2028, 2, 29));
