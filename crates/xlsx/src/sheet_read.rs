@@ -714,6 +714,8 @@ fn read_hyperlinks(e: &El, rels: &[Rel], sheet: &mut Sheet) {
     for h in e.kids("hyperlink") {
         let Some(range) = h.attr("ref").and_then(RangeRef::parse) else { continue };
         let mut target = h.attr("id").and_then(|id| rels.iter().find(|r| r.id == id)).map(|r| r.target.clone()).unwrap_or_default();
+        // A relationship is a file or web page; a bare `location` is a place in this workbook.
+        let external = !target.is_empty();
         if let Some(loc) = h.attr("location").filter(|l| !l.is_empty()) {
             if target.is_empty() {
                 target = loc.trim_start_matches('#').to_string();
@@ -724,7 +726,7 @@ fn read_hyperlinks(e: &El, rels: &[Rel], sheet: &mut Sheet) {
         if target.is_empty() {
             continue;
         }
-        let link = Hyperlink { target, tooltip: h.attr("tooltip").map(str::to_string) };
+        let link = Hyperlink { target, tooltip: h.attr("tooltip").map(str::to_string), external };
         for c in range.iter() {
             if cells >= MAX_HYPERLINK_CELLS {
                 return;

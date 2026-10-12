@@ -388,7 +388,10 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
             if t.is_empty() {
                 continue;
             }
-            let external = t.contains("://")
+            // `external` is what the file said, or what Insert › Link chose; the scheme test covers
+            // links made before the flag existed.
+            let external = h.external
+                || t.contains("://")
                 || t.to_ascii_lowercase().starts_with("mailto:")
                 || t.starts_with("\\\\")
                 || t.to_ascii_lowercase().starts_with("file:");

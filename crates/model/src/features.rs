@@ -304,9 +304,14 @@ pub struct Comment {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Hyperlink {
-    /// URL, `mailto:`, or an in-workbook location like `Sheet2!A1`.
+    /// URL, `mailto:`, a file path (`Book.xlsx`, `Book.xlsx#Sheet1!A2`), or an in-workbook location
+    /// like `Sheet2!A1`.
     pub target: String,
     pub tooltip: Option<String>,
+    /// The target is outside this workbook (Excel's "Existing File or Web Page"): a relationship in
+    /// the file, not a `location`. A bare file name can't be told from a defined name by its text.
+    #[serde(default)]
+    pub external: bool,
 }
 
 // ---------------------------------------------------------------- drawing objects
