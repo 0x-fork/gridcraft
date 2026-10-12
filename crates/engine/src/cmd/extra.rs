@@ -812,7 +812,7 @@ fn table_resize(s: &mut Session, p: &Json) -> Result<Json> {
         let sheet = cx.sheet_mut(si)?;
         let headers: Vec<String> = (r.start.col..=r.end.col).map(|c| sheet.value(CellRef::new(r.start.row, c)).display()).collect();
         let t = sheet.tables.get_mut(ti).ok_or_else(|| bad("table", "gone"))?;
-        if r.start.row != t.range.start.row {
+        if r.start.row != t.range.start.row || !r.intersects(&t.range) {
             return Err(EngineError::Other(
                 "The headers must remain in the same row, and the resulting table range must overlap the original table range.".into(),
             ));
