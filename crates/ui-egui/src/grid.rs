@@ -2674,7 +2674,17 @@ pub fn point_move(app: &mut SheetApp, ed: &mut EditState, dr: i64, dc: i64, exte
     let from = ed.point_cell.unwrap_or(ed.cell);
     let to = from.offset_clamped(dr, dc);
     let text = if extend {
-        let anchor = ed.point.and_then(|(s, e)| ed.text.get(s..e)).and_then(|t| CellRef::parse(t.split(':').next().unwrap_or(""))).unwrap_or(from);
+        // The anchor is the corner opposite the moving end: the written range is normalized, so
+        // after extending up or left its first cell is the moving end, not the anchor.
+        let pointed = ed.point.and_then(|(s, e)| ed.text.get(s..e)).and_then(RangeRef::parse);
+        let anchor = pointed
+            .map(|r| {
+                CellRef::new(
+                    if from.row == r.start.row { r.end.row } else { r.start.row },
+                    if from.col == r.start.col { r.end.col } else { r.start.col },
+                )
+            })
+            .unwrap_or(from);
         RangeRef::new(anchor, to).a1()
     } else {
         to.a1()
