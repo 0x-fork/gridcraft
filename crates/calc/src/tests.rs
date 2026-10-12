@@ -609,6 +609,23 @@ fn subtotal_skips_filtered_rows() {
 }
 
 #[test]
+fn aggregate_without_data_argument_is_an_error() {
+    let mut t = T::new();
+    t.set("A1", "1");
+    t.set("A2", "2");
+    t.set("D1", "=AGGREGATE(9,0)");
+    t.set("D2", "=AGGREGATE(4,0)");
+    t.set("D3", "=AGGREGATE(9,0,A1:A2)");
+    t.set("D4", "=AGGREGATE(9,0,A3:A4)");
+    t.set("D5", "=AGGREGATE(9,0,A1:A2,A1:A2)");
+    assert_eq!(t.get("D1"), Value::Error(CellError::Value));
+    assert_eq!(t.get("D2"), Value::Error(CellError::Value));
+    assert_eq!(t.num("D3"), 3.0);
+    assert_eq!(t.num("D4"), 0.0);
+    assert_eq!(t.num("D5"), 6.0);
+}
+
+#[test]
 fn recalc_all_after_load() {
     let mut t = T::new();
     let s = t.wb.sheet_mut(0).unwrap();

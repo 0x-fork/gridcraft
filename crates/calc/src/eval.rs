@@ -1290,7 +1290,9 @@ impl<'h> Evaluator<'h> {
     }
 
     fn subtotal(&mut self, name: &str, args: &[Expr]) -> Ev {
-        if args.len() < 2 {
+        // SUBTOTAL needs function_num and ref1; AGGREGATE needs function_num, options and ref1.
+        let min_args = if name == "AGGREGATE" { 3 } else { 2 };
+        if args.len() < min_args {
             return err(CellError::Value);
         }
         let code = match self.arg_num(args, 0, 0.0) {
