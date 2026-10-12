@@ -6,6 +6,22 @@ fn rt(src: &str) -> String {
 }
 
 #[test]
+fn intersection_with_deleted_operand_reparses() {
+    // Deleting the columns of an intersection operand prints `A1:B2 #REF!`; that text must parse back.
+    assert_eq!(rt("A1:B2 #REF!"), "A1:B2 #REF!");
+    assert_eq!(rt("#REF! A1:B2"), "#REF! A1:B2");
+    assert_eq!(parse("A1:B2 #REF!"), parse("A1:B2 (#REF!)").map(|e| strip_paren(&e)));
+}
+
+fn strip_paren(e: &Expr) -> Expr {
+    match e {
+        Expr::Binary(op, a, b) => Expr::Binary(*op, Box::new(strip_paren(a)), Box::new(strip_paren(b))),
+        Expr::Paren(x) => strip_paren(x),
+        other => other.clone(),
+    }
+}
+
+#[test]
 fn roundtrips() {
     for f in [
         "1+2*3",
