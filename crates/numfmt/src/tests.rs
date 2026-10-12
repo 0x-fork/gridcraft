@@ -582,3 +582,35 @@ fn decimal_digits_keeps_fifteen_digits_and_truncates_a_tie() {
     let (d, e) = decimal_digits(999999999999999.6);
     assert_eq!((d, e), ([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 15));
 }
+
+#[test]
+fn fraction_denominator_with_65536_zeros_does_not_panic() {
+    // `{:0>n$}` panics for a width above u16::MAX; the cap keeps this out of reach of `parse`,
+    // so the renderer is driven with the uncapped parser.
+    let code = format!("# ?/{}", "0".repeat(65_536));
+    let fmt = NumberFormat::parse_uncapped(&code);
+    let text = format_value(&Value::Number(0.5), &fmt, S).text;
+    assert!(text.starts_with(" 1/"), "{text}");
+    // And a denominator with fewer digits than zeros is still zero padded.
+    assert_eq!(f("# ?/000", 0.5), " 1/002");
+}
+
+#[test]
+fn format_codes_are_capped_at_255_characters() {
+    let ok = format!("0{}", "0".repeat(254));
+    let long = format!("0{}", "0".repeat(255));
+    assert_eq!(ok.chars().count(), MAX_FORMAT_CODE_CHARS);
+    assert!(text_function(&Value::Number(1.0), &ok, S).is_ok());
+    assert_eq!(text_function(&Value::Number(1.0), &long, S), Err(CellError::Value));
+    // Capped codes display as General.
+    assert_eq!(f(&long, 0.5), "0.5");
+    // Characters are counted, not bytes: 255 two-byte characters are fine, 256 are not.
+    let multi_ok = "é".repeat(255);
+    assert!(multi_ok.len() > 255);
+    assert!(text_function(&Value::Number(1.0), &multi_ok, S).is_ok());
+    assert_eq!(text_function(&Value::Number(1.0), &"é".repeat(256), S), Err(CellError::Value));
+    // 65536 zeros through the public API: no panic, TEXT is #VALUE!.
+    let huge = format!("# ?/{}", "0".repeat(65_536));
+    assert_eq!(text_function(&Value::Number(0.5), &huge, S), Err(CellError::Value));
+    assert_eq!(f(&huge, 0.5), "0.5");
+}
