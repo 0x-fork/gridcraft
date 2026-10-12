@@ -394,3 +394,37 @@ fn the_paste_keytip_pastes_the_system_clipboard_like_the_paste_button() {
     assert_eq!(value_at(&h, "E4"), Some(Value::number(7.0)));
     assert!(h.state().toast.is_none() && h.state().message.is_none());
 }
+
+#[test]
+fn cmd_v_after_a_pasted_cut_does_not_paste_the_cut_text_again() {
+    // Cmd/Ctrl+V hands the app the system clipboard's text, which still holds the cut after the
+    // move. Excel pastes a cut once: the second Cmd/Ctrl+V must leave the moved formulas alone.
+    let mut h = harness(Services::default());
+    h.state_mut().run("cell.set", json!({"cell": "B3", "input": "=B2*2"})).unwrap();
+    h.state_mut().run("selection.set", json!({"range": "A1:B3"})).unwrap();
+    h.input_mut().events.push(Event::Cut);
+    h.step();
+    let text = h
+        .output()
+        .platform_output
+        .commands
+        .iter()
+        .find_map(|c| match c {
+            OutputCommand::CopyText(text) => Some(text.clone()),
+            _ => None,
+        })
+        .expect("the cut is published");
+    h.run_steps(2);
+    h.state_mut().run("selection.set", json!({"cell": "D4"})).unwrap();
+    h.input_mut().events.push(Event::Paste(text.clone()));
+    h.run_steps(2);
+    assert!(has_formula(&h, "E6"), "the cut moves the formula");
+
+    // The host may hand the text back with CRLF line endings.
+    h.input_mut().events.push(Event::Paste(text.replace('\n', "\r\n")));
+    h.run_steps(2);
+    assert!(has_formula(&h, "E6"), "a second Cmd/Ctrl+V leaves the moved formula alone");
+    assert_eq!(value_at(&h, "E6"), Some(Value::number(84.0)));
+    assert_eq!(value_at(&h, "D4"), Some(Value::from("Name")));
+    assert!(h.state().toast.is_some() || h.state().message.is_some(), "Paste reports there is nothing to paste");
+}

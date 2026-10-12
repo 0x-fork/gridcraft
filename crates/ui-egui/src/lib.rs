@@ -409,9 +409,16 @@ impl SheetApp {
         ctx.copy_text(text.to_string());
     }
 
-    /// Paste text that came from the system clipboard, with the clipboard's HTML flavour when the
-    /// host can read it.
+    /// Paste text that came from the system clipboard (Cmd/Ctrl+V, or the ribbon and menu Paste),
+    /// with the clipboard's HTML flavour when the host can read it.
+    ///
+    /// Excel pastes a cut once: after GridCraft's cut has been pasted, the system clipboard text
+    /// that came with it is not pasted again over the moved block; GridCraft's own (empty)
+    /// clipboard is pasted instead, which reports "Nothing to paste.".
     pub fn paste_external(&mut self, text: String) {
+        if self.session.clipboard.is_none() && Self::same_clipboard_text(Some(&text), self.cut_text.as_deref()) {
+            return self.run_or_alert("edit.paste", json!({}));
+        }
         let html = self.services.paste_html.as_mut().and_then(|read| read());
         let params = match html {
             Some(html) => json!({"text": text, "html": html}),
@@ -423,16 +430,9 @@ impl SheetApp {
     /// Ribbon and menu Paste: paste the text on the system clipboard, as Cmd/Ctrl+V does. With no
     /// text there, no host clipboard (web), or the text that was there when GridCraft last copied
     /// without publishing, GridCraft's own clipboard is pasted.
-    ///
-    /// Excel pastes a cut once: after GridCraft's cut has been pasted, the system clipboard text
-    /// that came with it is not pasted again over the moved block.
     pub fn paste_from_clipboard(&mut self) {
-        let text = self.system_clipboard_text();
-        let cut_pasted = self.session.clipboard.is_none() && Self::same_clipboard_text(text.as_deref(), self.cut_text.as_deref());
-        match text {
-            Some(text) if !cut_pasted && (self.session.clipboard.is_none() || self.clipboard_text_at_copy.as_ref() != Some(&text)) => {
-                self.paste_external(text)
-            }
+        match self.system_clipboard_text() {
+            Some(text) if self.session.clipboard.is_none() || self.clipboard_text_at_copy.as_ref() != Some(&text) => self.paste_external(text),
             _ => self.run_or_alert("edit.paste", json!({})),
         }
     }
@@ -444,10 +444,13 @@ impl SheetApp {
     }
 
     /// Whether two clipboard texts are the same copy: trailing line breaks don't count, as in the
-    /// engine's `edit.paste`.
+    /// engine's `edit.paste`, and CRLF matches LF (egui's `Event::Paste` text may keep the host's).
     fn same_clipboard_text(a: Option<&str>, b: Option<&str>) -> bool {
+        fn chars(t: &str) -> impl Iterator<Item = char> + '_ {
+            t.trim_end_matches(['\r', '\n']).chars().filter(|c| *c != '\r')
+        }
         match (a, b) {
-            (Some(a), Some(b)) => a.trim_end_matches(['\r', '\n']) == b.trim_end_matches(['\r', '\n']),
+            (Some(a), Some(b)) => chars(a).eq(chars(b)),
             _ => false,
         }
     }
