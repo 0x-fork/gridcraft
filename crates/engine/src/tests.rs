@@ -1696,6 +1696,23 @@ fn every_command_survives_empty_params() {
     }
 }
 
+#[test]
+fn non_object_params_do_not_panic_in_wrapper_commands() {
+    // Issue #516.
+    for cmd in ["pageLayout.themeColors", "pageLayout.background", "home.drawBorder"] {
+        for params in [json!([]), json!(5), json!("x"), json!(true)] {
+            let mut s = s();
+            let r = s.execute(cmd, params.clone());
+            assert!(!matches!(r, Err(crate::EngineError::Internal(..))), "{cmd} {params}: {r:?}");
+        }
+    }
+    // A saved script step forwards its params unchanged into the same call.
+    let mut s = s();
+    s.execute("automate.newScript", json!({"name": "bad", "commands": [{"command": "home.drawBorder", "params": []}]})).unwrap();
+    let r = s.execute("automate.runScript", json!({"name": "bad"}));
+    assert!(!matches!(r, Err(crate::EngineError::Internal(..))), "script: {r:?}");
+}
+
 fn fmt_of(s: &Session, a: &str) -> String {
     let wb = &s.doc().unwrap().wb;
     let sh = wb.active().unwrap();
