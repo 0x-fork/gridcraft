@@ -30,6 +30,11 @@ fn rows_of(a: &Array) -> Vec<Vec<Value>> {
     (0..a.rows).map(|r| (0..a.cols).map(|c| a.get(r, c).cloned().unwrap_or(Value::Empty)).collect()).collect()
 }
 
+/// `#NUM!` when an `h` x `w` output would exceed the function cell budget.
+fn check_output_size(h: usize, w: usize) -> R<()> {
+    if h.saturating_mul(w) > MAX_CELLS { Err(CellError::Num) } else { Ok(()) }
+}
+
 /// Builds an array from rows (all rows padded to the widest with `pad`). Empty → `#CALC!`.
 fn from_rows(rows: Vec<Vec<Value>>, pad: &Value) -> R<Value> {
     let h = rows.len();
@@ -37,9 +42,7 @@ fn from_rows(rows: Vec<Vec<Value>>, pad: &Value) -> R<Value> {
     if h == 0 || w == 0 {
         return Err(CellError::Calc);
     }
-    if h.saturating_mul(w) > MAX_CELLS {
-        return Err(CellError::Num);
-    }
+    check_output_size(h, w)?;
     let mut data = Vec::with_capacity(h * w);
     for mut r in rows {
         r.resize(w, pad.clone());
@@ -321,16 +324,20 @@ fn vstack(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
 fn hstack(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     let mut arrays = Vec::new();
     let mut h = 0usize;
+    let mut w = 0usize;
     let mut total = 0usize;
     for i in 0..args.len() {
         let a = arr_arg(args, i)?;
         h = h.max(a.rows);
+        w = w.saturating_add(a.cols);
         total = total.saturating_add(a.data.len());
         if total > MAX_CELLS {
             return Err(CellError::Num);
         }
         arrays.push(a);
     }
+    // The padded rectangle can be far larger than the inputs; refuse it before building any rows.
+    check_output_size(h, w)?;
     let mut rows = vec![Vec::new(); h];
     for a in &arrays {
         for (r, row) in rows.iter_mut().enumerate() {
@@ -1130,6 +1137,17 @@ mod tests {
         assert_eq!(rows_of(&ev("TOCOL", vec![av(m.clone()), n(2.0), b(true)])), vec![vec![nv(1.0)], vec![Value::Empty], vec![nv(4.0)]]);
         is_err(ev("TOCOL", vec![av(m), n(4.0)]), CellError::Value);
         is_err(ev("TOROW", vec![av(arr(vec![vec![Value::Empty]])), n(1.0)]), CellError::Calc);
+    }
+
+    #[test]
+    fn output_size_checked_before_padding() {
+        assert_eq!(super::check_output_size(1_000_001, 10), Err(CellError::Num));
+        assert_eq!(super::check_output_size(usize::MAX, 2), Err(CellError::Num));
+        assert_eq!(super::check_output_size(1_000_000, 10), Ok(()));
+        // A 1M-row column beside a 9-wide row: ~1M input cells, but the padded result would be 10,000,010.
+        let tall = Value::from(gridcraft_core::Array::column(vec![nv(1.0); 1_000_001]));
+        let wide = row(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
+        is_err(ev("HSTACK", vec![av(tall), av(wide)]), CellError::Num);
     }
 
     #[test]
