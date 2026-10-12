@@ -240,7 +240,7 @@ fn insert_table(s: &mut Session, p: &Json) -> Result<Json> {
     let name = str_param(p, "name")
         .map(str::to_string)
         .unwrap_or_else(|| (1..).map(|n| format!("Table{n}")).find(|n| d.wb.table(n).is_none()).unwrap_or_else(|| "Table".into()));
-    if name.is_empty() || name.contains(' ') || name.chars().next().is_some_and(|c| c.is_ascii_digit()) || CellRef::parse(&name).is_some() {
+    if !valid_table_name(&name) {
         return Err(EngineError::Other("The name that you entered is not valid.".into()));
     }
     if d.wb.table(&name).is_some() || d.wb.names.iter().any(|n| n.name.eq_ignore_ascii_case(&name)) {
@@ -448,14 +448,19 @@ fn table_style(s: &mut Session, p: &Json) -> Result<Json> {
     })
 }
 
+/// Table names follow the Microsoft name rules, as the xlsx writer does: letters, digits, `_` and `.`,
+/// starting with a letter, `_` or `\`. Anything else (a hyphen, say) would read as an operator inside a
+/// structured reference, and the writer would rename the table on save.
+fn valid_table_name(name: &str) -> bool {
+    name.starts_with(|c: char| c.is_alphabetic() || c == '_' || c == '\\')
+        && CellRef::parse(name).is_none()
+        && name.chars().enumerate().all(|(i, c)| c.is_alphanumeric() || c == '_' || c == '.' || (i == 0 && c == '\\'))
+}
+
 fn table_rename(s: &mut Session, p: &Json) -> Result<Json> {
     let (si, ti) = find_table(s, p)?;
     let name = str_param(p, "name").ok_or_else(|| bad("table.rename", "missing `name`"))?.to_string();
-    if name.is_empty()
-        || name.contains(' ')
-        || name.chars().next().is_some_and(|c| c.is_ascii_digit())
-        || gridcraft_core::CellRef::parse(&name).is_some()
-    {
+    if !valid_table_name(&name) {
         return Err(EngineError::Other("The name that you entered is not valid.".into()));
     }
     if s.doc()?.wb.table(&name).is_some_and(|x| x != (si, ti)) {
