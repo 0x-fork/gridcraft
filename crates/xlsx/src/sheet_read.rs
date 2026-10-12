@@ -104,7 +104,7 @@ pub fn read_sheet(cx: &mut Ctx<'_>, part: &str, name: &str) -> Result<Sheet, IoE
                     }
                 }
             }
-            "hyperlinks" => read_hyperlinks(e, &rels, &mut sheet),
+            "hyperlinks" => read_hyperlinks(cx, name, e, &rels, &mut sheet),
             "autoFilter" => sheet.autofilter = read_autofilter(cx, e),
             "printOptions" => {
                 sheet.print.gridlines = e.flag("gridLines", false);
@@ -709,7 +709,7 @@ fn read_validation(v: &El) -> Option<Validation> {
     })
 }
 
-fn read_hyperlinks(e: &El, rels: &[Rel], sheet: &mut Sheet) {
+fn read_hyperlinks(cx: &mut Ctx<'_>, name: &str, e: &El, rels: &[Rel], sheet: &mut Sheet) {
     let mut cells = 0u64;
     for h in e.kids("hyperlink") {
         let Some(range) = h.attr("ref").and_then(RangeRef::parse) else { continue };
@@ -727,6 +727,7 @@ fn read_hyperlinks(e: &El, rels: &[Rel], sheet: &mut Sheet) {
         let link = Hyperlink { target, tooltip: h.attr("tooltip").map(str::to_string) };
         for c in range.iter() {
             if cells >= MAX_HYPERLINK_CELLS {
+                cx.warn(format!("sheet \"{name}\": hyperlinks past the first {MAX_HYPERLINK_CELLS} cells were dropped"));
                 return;
             }
             cells += 1;
