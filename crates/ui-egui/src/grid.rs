@@ -2398,6 +2398,12 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
                         let _ = app.session.run("selection.set", json!({"cell": CellRef::new(a.row, 0).a1()}));
                         app.grid.ensure_visible = true;
                     }
+                    // Excel: Enter while a copied range is marked pastes it and ends copy mode.
+                    Key::Enter if !m.alt && !m.ctrl && !shift && !cmd && app.session.clipboard.is_some() => {
+                        app.run_or_alert("edit.paste", json!({}));
+                        app.session.clipboard = None;
+                        app.grid.ensure_visible = true;
+                    }
                     Key::Enter => {
                         if m.alt || m.ctrl {
                             app.begin_edit(None, false);
