@@ -120,6 +120,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Right Margin" => "Pravý okraj",
         "Top Margin" => "Horní okraj",
         "Bottom Margin" => "Dolní okraj",
+        "Header Margin" => "Okraj záhlaví",
+        "Footer Margin" => "Okraj zápatí",
         "Size" => "Velikost",
         "Print\nArea" => "Oblast\ntisku",
         "Set Print Area" => "Nastavit oblast tisku",

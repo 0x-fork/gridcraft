@@ -126,6 +126,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Right Margin" => "Margem direita",
         "Top Margin" => "Margem superior",
         "Bottom Margin" => "Margem inferior",
+        "Header Margin" => "Margem do cabeçalho",
+        "Footer Margin" => "Margem do rodapé",
         "Size" => "Tamanho",
         "Print\nArea" => "Área de\nImpressão",
         "Set Print Area" => "Definir Área de Impressão",

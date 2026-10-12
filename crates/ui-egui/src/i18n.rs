@@ -294,6 +294,8 @@ const JAPANESE: &[(&str, &str)] = &[
     ("Right Margin", "右余白"),
     ("Top Margin", "上余白"),
     ("Bottom Margin", "下余白"),
+    ("Header Margin", "ヘッダーの余白"),
+    ("Footer Margin", "フッターの余白"),
     ("Size", "サイズ"),
     ("Print\nArea", "印刷範囲"),
     ("Set Print Area", "印刷範囲の設定"),

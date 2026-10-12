@@ -495,7 +495,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
         if paper {
             let probe = Geo::new(sh, grid_rect, scroll);
             if let Some(g) = crate::paper_view::grid_for(app, &wb, si, sh, probe.cells.size(), scroll) {
-                let g = crate::paper_view::with_dragged_margin(app, si, g);
+                let g = crate::paper_view::with_dragged_margin(app, &wb, si, g);
                 return Geo::paged(sh, grid_rect, scroll, g);
             }
         }

@@ -125,6 +125,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Right Margin" => "Правое поле",
         "Top Margin" => "Верхнее поле",
         "Bottom Margin" => "Нижнее поле",
+        "Header Margin" => "Поле верхнего колонтитула",
+        "Footer Margin" => "Поле нижнего колонтитула",
         "Size" => "Размер",
         "Print\nArea" => "Область\nпечати",
         "Set Print Area" => "Задать область печати",

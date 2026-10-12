@@ -125,6 +125,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Right Margin" => "右边距",
         "Top Margin" => "上边距",
         "Bottom Margin" => "下边距",
+        "Header Margin" => "页眉边距",
+        "Footer Margin" => "页脚边距",
         "Size" => "纸张大小",
         "Print\nArea" => "打印\n区域",
         "Set Print Area" => "设置打印区域",

@@ -120,6 +120,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Right Margin" => "Rechter Seitenrand",
         "Top Margin" => "Oberer Seitenrand",
         "Bottom Margin" => "Unterer Seitenrand",
+        "Header Margin" => "Kopfzeilenabstand",
+        "Footer Margin" => "Fußzeilenabstand",
         "Size" => "Größe",
         "Print\nArea" => "Druck-\nbereich",
         "Set Print Area" => "Druckbereich festlegen",

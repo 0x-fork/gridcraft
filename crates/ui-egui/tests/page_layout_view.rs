@@ -12,8 +12,20 @@ use serde_json::json;
 type Harness = egui_kittest::Harness<'static, SheetApp>;
 
 fn fixture() -> Harness {
+    fixture_with(false, None)
+}
+
+/// `rtl` mirrors the sheet; `setup` is extra `pageLayout.pageSetup` params.
+fn fixture_with(rtl: bool, setup: Option<serde_json::Value>) -> Harness {
     let mut session = Session::new();
     session.new_workbook();
+    if rtl {
+        session.execute("view.rightToLeft", json!({"on": true})).unwrap();
+    }
+    if let Some(p) = setup {
+        session.execute("cell.set", json!({"cell": "Z1", "input": "wide"})).unwrap();
+        session.execute("pageLayout.pageSetup", p).unwrap();
+    }
     for r in 1..=60 {
         session.execute("cell.set", json!({"cell": format!("A{r}"), "input": r.to_string()})).unwrap();
     }
@@ -215,4 +227,100 @@ fn dragging_a_ruler_edge_previews_commits_on_release_as_one_undo_step_and_esc_ca
     mouse(&mut h, Event::PointerButton { pos: edge, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
     h.run_steps(3);
     assert_eq!(margins(&h), start_margins);
+}
+
+fn press(h: &mut Harness, p: Pos2) {
+    h.run_steps(40);
+    mouse(h, Event::PointerMoved(p));
+    mouse(h, Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+}
+
+fn release(h: &mut Harness, p: Pos2) {
+    mouse(h, Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    h.run_steps(3);
+}
+
+/// Screen pixels per inch of the page.
+fn per_inch(g: &Geo) -> f32 {
+    let pg = g.paper.clone().unwrap();
+    (72.0 / (pg.paper_pt.0 as f64 / pg.page_w)) as f32 * g.z
+}
+
+#[test]
+fn header_and_footer_margins_are_dragged_on_the_vertical_ruler() {
+    let mut h = fixture();
+    let g = geo(&h);
+    let pg = g.paper.clone().unwrap();
+    let start = margins(&h);
+    let ruler_x = h.state().grid.rect.unwrap().left() + 9.0;
+    // Header: distance from the top of the page, 0.2 in further down.
+    let at = pos2(ruler_x, screen(&g, 0.0, pg.page_y(0) + pg.margins[4]).y);
+    let to = pos2(ruler_x, at.y + 0.2 * per_inch(&g));
+    press(&mut h, at);
+    mouse(&mut h, Event::PointerMoved(pos2(ruler_x, at.y + 4.0)));
+    mouse(&mut h, Event::PointerMoved(to));
+    release(&mut h, to);
+    let after = margins(&h);
+    assert!((after[4] - (start[4] + 0.2)).abs() < 0.03, "{after:?} vs {start:?}");
+    assert_eq!((after[..4].to_vec(), after[5]), (start[..4].to_vec(), start[5]));
+    h.state_mut().run("edit.undo", json!({})).unwrap();
+    h.run_steps(3);
+    assert_eq!(margins(&h), start);
+    // Footer: distance from the bottom, dragged up by 0.2 in grows it (zoom out so the page
+    // bottom is on screen).
+    h.state_mut().run("view.zoom", json!({"percent": 50})).unwrap();
+    h.run_steps(4);
+    let g = geo(&h);
+    let pg = g.paper.clone().unwrap();
+    let (_, py, _, ph) = pg.page_rect(0, 0);
+    let at = pos2(ruler_x, screen(&g, 0.0, py + ph - pg.margins[5]).y);
+    let to = pos2(ruler_x, at.y - 0.2 * per_inch(&g));
+    press(&mut h, at);
+    mouse(&mut h, Event::PointerMoved(pos2(ruler_x, at.y - 4.0)));
+    mouse(&mut h, Event::PointerMoved(to));
+    release(&mut h, to);
+    assert!((margins(&h)[5] - (start[5] + 0.2)).abs() < 0.03, "{:?}", margins(&h));
+}
+
+#[test]
+fn right_to_left_sheets_mirror_the_horizontal_ruler_drag() {
+    let mut h = fixture_with(true, None);
+    let g = geo(&h);
+    assert!(g.rtl);
+    let pg = g.paper.clone().unwrap();
+    let start = margins(&h);
+    let y = h.state().grid.rect.unwrap().top() + 9.0;
+    // The left margin edge is drawn on the right of the mirrored page; dragging it towards the
+    // page centre (screen-left) grows the left margin.
+    let at = pos2(g.mirror_x(screen(&g, pg.page_x(0) + pg.margins[0], 0.0).x), y);
+    let to = pos2(at.x - per_inch(&g), y);
+    press(&mut h, at);
+    mouse(&mut h, Event::PointerMoved(pos2(at.x - 4.0, y)));
+    mouse(&mut h, Event::PointerMoved(to));
+    release(&mut h, to);
+    let after = margins(&h);
+    assert!((after[0] - (start[0] + 1.0)).abs() < 0.03, "{after:?} vs {start:?}");
+    assert_eq!(after[1], start[1]);
+}
+
+#[test]
+fn preview_repaginates_so_fit_to_width_matches_the_commit() {
+    let mut h = fixture_with(false, Some(json!({"fitWidth": 1, "fitHeight": 0})));
+    let g = geo(&h);
+    let pg = g.paper.clone().unwrap();
+    let start = margins(&h);
+    let y = h.state().grid.rect.unwrap().top() + 9.0;
+    let at = pos2(screen(&g, pg.page_x(0) + pg.margins[0], 0.0).x, y);
+    let to = pos2(at.x + 2.0 * per_inch(&g), y);
+    press(&mut h, at);
+    mouse(&mut h, Event::PointerMoved(pos2(at.x + 4.0, y)));
+    mouse(&mut h, Event::PointerMoved(to));
+    h.run_steps(2);
+    let live_scale = geo(&h).paper.unwrap().scale;
+    assert_eq!(margins(&h), start);
+    assert!(live_scale < pg.scale, "live scale {live_scale} should shrink below {}", pg.scale);
+    release(&mut h, to);
+    h.run_steps(2);
+    let committed = geo(&h).paper.unwrap().scale;
+    assert!((committed - live_scale).abs() < 0.01, "committed {committed} vs preview {live_scale}");
 }

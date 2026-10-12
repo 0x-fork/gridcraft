@@ -128,6 +128,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Right Margin" => "Marge droite",
         "Top Margin" => "Marge haute",
         "Bottom Margin" => "Marge basse",
+        "Header Margin" => "Marge de l'en-tête",
+        "Footer Margin" => "Marge du pied de page",
         "Size" => "Taille",
         "Print\nArea" => "Zone d’impression",
         "Set Print Area" => "Définir la zone d’impression",

@@ -125,6 +125,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Right Margin" => "오른쪽 여백",
         "Top Margin" => "위쪽 여백",
         "Bottom Margin" => "아래쪽 여백",
+        "Header Margin" => "머리글 여백",
+        "Footer Margin" => "바닥글 여백",
         "Size" => "용지 크기",
         "Print\nArea" => "인쇄\n영역",
         "Set Print Area" => "인쇄 영역 설정",
