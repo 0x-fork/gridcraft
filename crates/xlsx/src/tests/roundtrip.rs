@@ -1014,3 +1014,31 @@ fn package_kind_sets_workbook_content_type() {
     }
     assert_eq!(crate::XlsxKind::from_path("noext"), crate::XlsxKind::Workbook);
 }
+
+#[test]
+fn solid_data_bar_survives_with_sparklines_and_gradient_neighbours() {
+    let mut wb = Workbook::new();
+    let s = wb.sheet_mut(0).unwrap();
+    s.set_value(at("A1"), Value::Number(1.0));
+    let bar = |gradient: bool, max: CfValueKind| CfRule::DataBar {
+        min: CfValueKind::Min,
+        max,
+        color: Color::Rgb(0x638EC6),
+        gradient,
+        show_value: true,
+    };
+    let rules = [(true, "A1", CfValueKind::Max), (false, "B1", CfValueKind::Formula("$C$1".into())), (false, "D1:D3", CfValueKind::Number(9.0))];
+    for (i, (gradient, range, max)) in rules.into_iter().enumerate() {
+        s.cond_formats.push(CondFormat { ranges: vec![rr(range)], rule: bar(gradient, max), priority: i as u32 + 1, stop_if_true: false });
+    }
+    s.sparklines.push(Sparkline { cell: at("F1"), source: "A1:C1".into(), kind: SparklineKind::Line, color: Color::Rgb(0x376092), markers: false });
+    let bytes = write_xlsx(&wb).unwrap();
+    // x14 cfvo values are `xm:f` children; a `val` attribute there is not valid x14.
+    let (xml, _) = sheet1_xml(&bytes);
+    assert!(xml.contains("<x14:cfvo type=\"num\"><xm:f>9</xm:f></x14:cfvo>"), "{xml}");
+    let (back, rep) = read_xlsx(&bytes).unwrap();
+    assert!(rep.warnings.is_empty(), "{:?}", rep.warnings);
+    let b = &back.sheets[0];
+    assert_eq!(b.cond_formats, wb.sheets[0].cond_formats);
+    assert_eq!(b.sparklines.len(), 1);
+}
