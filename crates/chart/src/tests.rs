@@ -902,3 +902,25 @@ fn union_series_references() {
     c.series[0].values = format!("{}Sheet1!$B$1,Sheet1!$B$2{}", "(".repeat(5000), ")".repeat(5000));
     let _ = resolve(&wb, 0, &c);
 }
+
+#[test]
+fn funnel_value_labels_follow_the_data_labels_flag() {
+    let data = ChartData {
+        categories: vec!["a".into(), "b".into(), "c".into()],
+        series: vec![series("S", &[11111.0, 22222.0, 33333.0], [20, 96, 130, 255], ChartKind::Funnel)],
+    };
+    let mut c = chart(ChartKind::Funnel);
+    c.data_labels = false;
+    let off = render(&c, &data, 500.0, 350.0, &ApproxMeasure);
+    c.data_labels = true;
+    let on = render(&c, &data, 500.0, 350.0, &ApproxMeasure);
+    let values = ["$11,111", "$22,222", "$33,333"];
+    for v in values {
+        assert!(texts(&on).contains(&v), "{v} missing with labels on");
+        assert!(!texts(&off).contains(&v), "{v} drawn with labels off");
+    }
+    for cat in ["a", "b", "c"] {
+        assert!(texts(&off).contains(&cat));
+        assert!(texts(&on).contains(&cat));
+    }
+}

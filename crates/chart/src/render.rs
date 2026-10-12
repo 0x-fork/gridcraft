@@ -254,7 +254,7 @@ fn draw_kind(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx) {
         Doughnut => pie(ctx, chart, data, area, 0.5, false),
         Sunburst => pie(ctx, chart, data, area, 0.2, true),
         Treemap => treemap(ctx, chart, data, area),
-        Funnel => funnel(ctx, data, area),
+        Funnel => funnel(ctx, chart, data, area),
         Radar => radar(ctx, chart, data, area),
         _ => {
             let area = axis_titles(ctx, chart, area);
@@ -1301,7 +1301,7 @@ fn waterfall(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx) {
 
 // ---------------------------------------------------------------- funnel
 
-fn funnel(ctx: &mut Ctx, data: &ChartData, area: Bx) {
+fn funnel(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx) {
     let Some(s) = data.series.first() else { return };
     let n = data.categories.len().max(s.values.len()).min(MAX_CATS);
     if n == 0 {
@@ -1331,9 +1331,11 @@ fn funnel(ctx: &mut Ctx, data: &ChartData, area: Bx) {
         }
         if show {
             let yc = y + bh / 2.0;
-            let t = f.format(s.values.get(j).copied().flatten().unwrap_or(0.0), None);
-            let color = if ctx.tw(&t, LABEL_SIZE) + 4.0 <= bw { on(s.color) } else { TEXT };
-            ctx.text(plot.cx(), yc, &t, LABEL_SIZE, color, HAlign::Center, VAlign::Middle);
+            if chart.data_labels {
+                let t = f.format(s.values.get(j).copied().flatten().unwrap_or(0.0), None);
+                let color = if ctx.tw(&t, LABEL_SIZE) + 4.0 <= bw { on(s.color) } else { TEXT };
+                ctx.text(plot.cx(), yc, &t, LABEL_SIZE, color, HAlign::Center, VAlign::Middle);
+            }
             let l = ctx.fit(labels.get(j).map(String::as_str).unwrap_or(""), LABEL_SIZE, lw - 8.0);
             ctx.text(plot.x - 6.0, yc, &l, LABEL_SIZE, TEXT, HAlign::Right, VAlign::Middle);
         }
