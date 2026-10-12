@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-12 · **Change:** minor (CSV save keeps the separator it was opened with) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-12 · **Change:** minor (editable ink round-trips as DrawingML geometry) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Every format Excel opens or saves, with GridCraft's read and write support, fidelity and tests.
 Part of [target-app-parity.md](target-app-parity.md). **File formats: ~50% ready, 80–120 h**
@@ -12,6 +12,13 @@ support comes from `crates/engine/src/io.rs` (`FileKind`), `crates/xlsx/src` and
 `crates/xlsx/src/tests/` (round-trip, fixtures, malformed input, CSV, ODS, XLSB, XLS, PivotTables).
 
 ## Workbook formats
+
+Ink created with Draw is written as standard, unfilled DrawingML polylines, without visible point
+captions or private metadata. Supported numeric polylines reopen as editable ink, retaining points,
+colour, integer width and anchor. Curves, filled paths, transforms and unsupported line styles are
+not interpreted as ink. This does not implement Office InkML or fix inserted icons (#551).
+Command and package tests cover repeated saves and unrelated cell edits; external Excel rendering
+and repair-free opening remain unverified.
 
 | Format | Excel | GridCraft read | GridCraft write | Fidelity / notes | Tests |
 |---|---|---|---|---|---|
@@ -78,6 +85,7 @@ refresh. Counted under features (Get & Transform, ~10% ready), not here.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-12 | minor | Ink paths and editing survive XLSX save/reopen; strict polyline import and malformed-input controls |
 | 2026-10-12 | minor | CSV: saving a file opened as CSV keeps its detected separator (`;` files were rewritten with `,`) |
 | 2026-10-11 | minor | XLSX: cell/shared/array formulas read through the file→model conversion (`_xlpm.` LET/LAMBDA parameter prefixes stripped); table column names keep line breaks; table names may start with `\` |
 | 2026-10-11 | minor | CSV/TSV export writes displayed values (number formats applied, no `#####`); `.xltx`, `.xltm` and `.xlsm` saved with their own workbook content types |
