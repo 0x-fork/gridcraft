@@ -11,6 +11,8 @@ use crate::parse::{DatePart, Section, Tok};
 pub(crate) struct Out {
     pub text: String,
     pub fill: Option<(char, usize)>,
+    /// True when every digit shown is zero (a number section that rounded to zero).
+    pub zero: bool,
 }
 
 impl Out {
@@ -247,6 +249,7 @@ pub(crate) fn render_number(sec: &Section, v: f64) -> Out {
     let mut pieces: Vec<String> = vec![String::new(); n];
     let mut before: Vec<String> = vec![String::new(); n + 1];
     let mut lits: Vec<Option<String>> = Vec::new();
+    let mut zero = false;
     if sec.fraction {
         lits = vec![None; n];
         render_fraction(sec, x, &mut pieces, &mut lits);
@@ -310,6 +313,7 @@ pub(crate) fn render_number(sec: &Section, v: f64) -> Out {
         } else {
             fixed(x, frac_idx.len())
         };
+        zero = int_s.chars().chain(frac_s.chars()).all(|c| c == '0');
         fill_int(toks, &int_idx, &int_s, sec.thousands, false, &mut pieces);
         if int_idx.is_empty()
             && !int_s.is_empty()
@@ -338,6 +342,7 @@ pub(crate) fn render_number(sec: &Section, v: f64) -> Out {
             _ => out.push(pieces.get(i).map(String::as_str).unwrap_or("")),
         }
     }
+    out.zero = zero;
     out
 }
 
