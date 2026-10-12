@@ -1668,4 +1668,56 @@ mod tests {
         close(ev("AVERAGEIFS", vec![rf(qty.clone()), rf(cells.clone()), t(&long), rf(qty.clone()), t(">0")]), 1.0);
         close(ev("MAXIFS", vec![rf(qty.clone()), rf(cells.clone()), t(&"x".repeat(300)), rf(qty), t(">0")]), 1.0);
     }
+
+    #[test]
+    fn criteria_over_255_utf16_units_follow_excel() {
+        // The tester's sheet, identical on Excel 2016 and Microsoft 365: A1:A6 hold these
+        // strings, B is the row number, and each row uses its own string as the criterion.
+        let e = "😀";
+        let strings =
+            [e.repeat(127), e.repeat(128), format!("{}{e}", "a".repeat(254)), format!("{}{e}", "a".repeat(253)), e.repeat(200), "я".repeat(256)];
+        let cells = arr(strings.iter().map(|s| vec![tv(s)]).collect());
+        let rows = col(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        // COUNTIF, SUMIF, COUNTIFS with one pair, SUMIFS with a second pair `B,">0"`.
+        let expected: [Option<[f64; 4]>; 6] = [Some([1.0, 1.0, 1.0, 1.0]), None, None, Some([1.0, 4.0, 1.0, 4.0]), None, None];
+        for (s, want) in strings.iter().zip(expected) {
+            let countif = ev("COUNTIF", vec![rf(cells.clone()), t(s)]);
+            let sumif = ev("SUMIF", vec![rf(cells.clone()), t(s), rf(rows.clone())]);
+            let countifs = ev("COUNTIFS", vec![rf(cells.clone()), t(s)]);
+            let sumifs = ev("SUMIFS", vec![rf(rows.clone()), rf(cells.clone()), t(s), rf(rows.clone()), t(">0")]);
+            match want {
+                Some([a, b, c, d]) => {
+                    close(countif, a);
+                    close(sumif, b);
+                    close(countifs, c);
+                    close(sumifs, d);
+                }
+                // Over 255 units: `#VALUE!` with one pair; cut to 255 units with two, which
+                // matches no cell (for emoji it splits a surrogate pair).
+                None => {
+                    is_err(countif, CellError::Value);
+                    is_err(sumif, CellError::Value);
+                    is_err(countifs, CellError::Value);
+                    close(sumifs, 0.0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn criteria_cut_inside_a_surrogate_pair() {
+        let e = "😀";
+        let cells = arr(vec![vec![tv(&e.repeat(127))], vec![tv(&e.repeat(128))], vec![tv("zzz")], vec![Value::Empty]]);
+        let rows = col(&[1.0, 2.0, 3.0, 4.0]);
+        let sumifs = |crit: String| ev("SUMIFS", vec![rf(rows.clone()), rf(cells.clone()), t(&crit), rf(rows.clone()), t(">0")]);
+        // "=" + 😀×128 is 257 units: the cut after 255 keeps "=" and 127 whole emoji.
+        close(sumifs(format!("={}", e.repeat(128))), 1.0);
+        // With a two-unit prefix the cut keeps 126 emoji and half of the 127th. Such a criterion
+        // equals no cell text: "=" matches nothing and "<>" everything, blanks included.
+        close(sumifs(format!("=a{}", e.repeat(128))), 0.0);
+        close(sumifs(format!("<>{}", e.repeat(128))), 10.0);
+        // Comparisons treat it as sorting just above the 126 kept emoji.
+        close(sumifs(format!(">={}", e.repeat(128))), 1.0 + 2.0);
+        close(sumifs(format!("<={}", e.repeat(128))), 3.0);
+    }
 }
