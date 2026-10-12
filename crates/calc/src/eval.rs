@@ -1315,7 +1315,8 @@ impl<'h> Evaluator<'h> {
         // SUBTOTAL documentation); 101-111 also leave out rows hidden by hand.
         let skip_filtered = name == "SUBTOTAL";
         let skip_errors = matches!(options, 2 | 3 | 6 | 7);
-        let skip_nested = options <= 3;
+        // SUBTOTAL always leaves out nested SUBTOTAL/AGGREGATE cells (101-111 too); AGGREGATE does so for options 0-3.
+        let skip_nested = name == "SUBTOTAL" || options <= 3;
         let mut values = Vec::new();
         let mut k = None;
         let refs = if name == "AGGREGATE" && func >= 14 { &rest[..1.min(rest.len())] } else { rest };
