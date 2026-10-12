@@ -4,9 +4,9 @@
 //!
 //! Read: worksheets, shared strings, cell values, formulas (text and cached results, including
 //! shared and array formulas), number formats, the 1904 date system, merged cells, column
-//! widths, row heights, defined names, print areas and print titles. Everything else (fonts,
-//! fills, borders, charts, pictures, comments, conditional formats, validation, macros) is
-//! skipped with a warning. Encrypted workbooks and pre-BIFF8 versions are refused.
+//! widths, row heights, defined names, print areas, print titles and the iterative calculation
+//! settings. Everything else (fonts, fills, borders, charts, pictures, comments, conditional
+//! formats, validation, macros) is skipped with a warning. Encrypted workbooks and pre-BIFF8 versions are refused.
 
 mod formula;
 mod ftab;
@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use gridcraft_core::{CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
-use gridcraft_model::{Cell, DefinedName, Formula, LineInfo, NumFmt, Sheet, Style, StyleId, Visibility, Workbook};
+use gridcraft_model::{CalcSettings, Cell, DefinedName, Formula, LineInfo, NumFmt, Sheet, Style, StyleId, Visibility, Workbook};
 
 use crate::cfb::Compound;
 use crate::tables::{builtin_format, col_width_to_px, pt_to_px};
@@ -175,12 +175,16 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
             continue;
         }
         wb.check_sheet_name(&bs.name, None).map_err(invalid)?;
-        let Some(mut sheet) = worksheet(&stream, bs, &g, &styles, &mut budget, &mut report)? else {
+        let Some((mut sheet, calc)) = worksheet(&stream, bs, &g, &styles, &mut budget, &mut report)? else {
             report.warn("Dialog sheets and unreadable sheets were skipped.");
             model_index.push(None);
             continue;
         };
         sheet.visibility = bs.visibility;
+        // Every worksheet repeats the workbook's iteration settings; Excel applies the first.
+        if wb.sheets.is_empty() {
+            wb.calc = calc;
+        }
         model_index.push(Some(wb.sheets.len()));
         wb.sheets.push(Arc::new(sheet));
     }
@@ -393,6 +397,7 @@ struct SheetState<'g> {
     pending_string: Option<CellRef>,
     dropped: usize,
     unsupported: Vec<&'static str>,
+    calc: CalcSettings,
 }
 
 impl SheetState<'_> {
@@ -462,7 +467,7 @@ fn worksheet(
     styles: &[StyleId],
     budget: &mut Budget,
     report: &mut ReadReport,
-) -> Result<Option<Sheet>, IoError> {
+) -> Result<Option<(Sheet, CalcSettings)>, IoError> {
     if bs.pos >= stream.len() {
         return Err(invalid(format!("sheet '{}' points outside the Workbook stream", bs.name)));
     }
@@ -483,6 +488,7 @@ fn worksheet(
         pending_string: None,
         dropped: 0,
         unsupported: vec![],
+        calc: CalcSettings::default(),
     };
     let mut depth = 1usize;
     while let Some(rec) = recs.next_record()? {
@@ -525,7 +531,7 @@ fn worksheet(
     for why in &st.unsupported {
         report.warn(format!("Some formulas use {why}; their saved results were kept as values."));
     }
-    Ok(Some(st.sheet))
+    Ok(Some((st.sheet, st.calc)))
 }
 
 fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, report: &mut ReadReport) -> Result<(), IoError> {
@@ -620,6 +626,9 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
                 st.arrays.insert(at, (range, f));
             }
         }
+        0x000C => st.calc.set_max_iterations(u32::from(c.u16()?)),
+        0x0011 => st.calc.iterative = c.u16()? == 1,
+        0x0010 => st.calc.set_max_change(c.f64()?),
         0x0236 => report.warn("What-if data tables are not supported; their values were kept."),
         0x00E5 => {
             let n = usize::from(c.u16()?);

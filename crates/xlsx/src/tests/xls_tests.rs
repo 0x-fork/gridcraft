@@ -476,3 +476,22 @@ fn sheets_share_one_record_budget() {
     let err = read_xls(&compound("Workbook", &dup)).unwrap_err().to_string();
     assert!(err.contains("same substream"), "{err}");
 }
+
+#[test]
+fn reads_iterative_calculation_settings() {
+    // CalcCount, CalcIter and CalcDelta repeat in every worksheet substream; here only the first
+    // sheet carries them, so the sheet after it must not reset them to the defaults.
+    let calc = cat(&[&rec(0x000C, &u16s(&[50])), &rec(0x0011, &u16s(&[1])), &rec(0x0010, &0.01f64.to_le_bytes())]);
+    let sheet1 = cat(&[&bof(0x0010), &calc, &eof()]);
+    let sheet2 = cat(&[&bof(0x0010), &eof()]);
+    let boundsheet = |pos: u32, name: &str| rec(0x0085, &cat(&[&pos.to_le_bytes(), &[0, 0, name.len() as u8, 0], name.as_bytes()]));
+    let globals = |p1: u32, p2: u32| cat(&[&bof(0x0005), &boundsheet(p1, "A"), &boundsheet(p2, "B"), &eof()]);
+    let p1 = globals(0, 0).len() as u32;
+    let p2 = p1 + sheet1.len() as u32;
+    let (wb, _) = read_xls(&compound("Workbook", &cat(&[&globals(p1, p2), &sheet1, &sheet2]))).unwrap();
+    assert!(wb.calc.iterative);
+    assert_eq!((wb.calc.max_iterations, wb.calc.max_change), (50, 0.01));
+    // Without the records: Excel's defaults, iteration off.
+    let (wb, _) = read_xls(&compound("Workbook", &sample(false))).unwrap();
+    assert_eq!(wb.calc, gridcraft_model::CalcSettings::default());
+}
