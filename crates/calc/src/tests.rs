@@ -968,3 +968,55 @@ fn trim_references() {
     t.set("K20", "=SUM(Q1:.Q9)");
     assert_eq!(t.get("K20"), Value::Error(CellError::Calc));
 }
+
+/// Expected results are Excel's, from Apache POI's `DGet.xls` (rows 46-49): a criteria cell holding
+/// a formula under a label that names no field is evaluated for every record.
+#[test]
+fn database_functions_with_computed_criteria() {
+    let mut t = T::new();
+    let db = [
+        ["name", "age", "size", "headgear", "glasses"],
+        ["Huey", "6", "45", "cap~", "FALSE"],
+        ["Dewey", "7", "fourty-six", "cap?", "FALSE"],
+        ["Louie", "8", "47", "cap*", "FALSE"],
+        ["Donald", "32", "70", "sailor's hat", "FALSE"],
+        ["Scrooge", "62", "65", "top hat", "TRUE"],
+    ];
+    for (r, row) in db.iter().enumerate() {
+        for (c, v) in row.iter().enumerate() {
+            t.set(&format!("{}{}", ["F", "G", "H", "I", "J"][c], r + 2), v);
+        }
+    }
+    t.set("G45", "7");
+    let cases = [
+        // Relative references are to the first record's row and move to each record's row;
+        // `$G$45` stays put.
+        ("G", "=G2<$G$45", "Dewey"),
+        // Column labels stand for the record's fields.
+        ("H", "=glasses=TRUE", "Scrooge"),
+        ("I", "=age<7", "Huey"),
+        ("J", "=size/7=10", "Donald"),
+        // An absolute reference to a cell that is not the first record's.
+        ("K", "=H3=$L$1", "Donald"),
+    ];
+    t.set("L1", "70");
+    for (i, (col, formula, _)) in cases.iter().enumerate() {
+        t.set(&format!("{col}46"), "Formula");
+        t.set(&format!("{col}47"), formula);
+        t.set(&format!("B{}", 46 + i), &format!("=DGET($F$2:$J$7,\"name\",{col}46:{col}47)"));
+    }
+    for (i, (_, formula, want)) in cases.iter().enumerate() {
+        assert_eq!(t.get(&format!("B{}", 46 + i)), Value::text(*want), "{formula}");
+    }
+    // Every database function takes them, ANDed with the other criteria of their row.
+    // Text sorts after numbers, so Dewey's "fourty-six" is > 40.
+    t.set("L47", "=size>40");
+    t.set("M46", "age");
+    t.set("M47", ">6");
+    t.set("B51", "=DCOUNT($F$2:$J$7,\"age\",I46:I47)");
+    t.set("B52", "=DSUM($F$2:$J$7,\"age\",G46:G47)");
+    t.set("B53", "=DCOUNTA($F$2:$J$7,\"name\",L46:M47)");
+    assert_eq!(t.num("B51"), 1.0);
+    assert_eq!(t.num("B52"), 7.0);
+    assert_eq!(t.num("B53"), 4.0);
+}

@@ -4,7 +4,9 @@
 //! The database and the criteria are arrays whose first row holds column labels. Each criteria
 //! row is a set of conditions that must all hold (AND); a record matches when any criteria row
 //! holds (OR). An empty criteria cell matches anything. Plain text conditions match values that
-//! begin with the text, as in Excel's advanced filter, so an empty string matches any text.
+//! begin with the text, as in Excel's advanced filter, so an empty string matches any text. A
+//! formula under a label that names no field is a computed criterion, which the host evaluates
+//! for each record ([`Ctx::computed_criterion`]).
 
 use std::borrow::Cow;
 
@@ -64,9 +66,10 @@ fn cell_criterion(v: &Value) -> Option<Criterion> {
 }
 
 /// Rows (1-based within the database, excluding the header) of matching records.
-fn matching_records(db: &Array, crit: &Array) -> Vec<usize> {
-    // Per criteria row: list of (database column or None when the label is unknown, criterion).
-    let mut rows: Vec<Vec<(Option<usize>, Criterion)>> = Vec::new();
+fn matching_records(db: &Array, crit: &Array, ctx: &mut dyn Ctx) -> Vec<usize> {
+    // Per criteria row: its index and a list of (criteria column, database column or None when
+    // the label is unknown, criterion).
+    let mut rows: Vec<(usize, Vec<(usize, Option<usize>, Criterion)>)> = Vec::new();
     for r in 1..crit.rows {
         let mut conds = Vec::new();
         for c in 0..crit.cols {
@@ -77,18 +80,20 @@ fn matching_records(db: &Array, crit: &Array) -> Vec<usize> {
                 Some(Value::Number(n)) => find_column(db, &gridcraft_core::number_to_text(*n)),
                 _ => None,
             };
-            conds.push((col, cr));
+            conds.push((c, col, cr));
         }
-        rows.push(conds);
+        rows.push((r, conds));
     }
     let all_match = rows.is_empty();
     (1..db.rows)
-        .filter(|&r| {
+        .filter(|&rec| {
             all_match
-                || rows.iter().any(|conds| {
-                    conds.iter().all(|(col, cr)| match col {
-                        Some(c) => cr.matches(db.get(r, *c).unwrap_or(&Value::Empty)),
-                        None => false,
+                || rows.iter().any(|(r, conds)| {
+                    conds.iter().all(|(c, col, cr)| match col {
+                        Some(f) => cr.matches(db.get(rec, *f).unwrap_or(&Value::Empty)),
+                        // Under a label that names no field, only a formula (a computed
+                        // criterion) can hold.
+                        None => ctx.computed_criterion(*r, *c, db, rec).unwrap_or(false),
                     })
                 })
         })
@@ -101,7 +106,7 @@ struct Selection<'a> {
     records: Vec<usize>,
 }
 
-fn select(a: &[Arg]) -> R<Selection<'_>> {
+fn select<'a>(a: &'a [Arg], ctx: &mut dyn Ctx) -> R<Selection<'a>> {
     let dbv = &a.first().ok_or(CellError::Value)?.value;
     let critv = &a.get(2).ok_or(CellError::Value)?.value;
     if let Value::Error(e) = dbv {
@@ -113,31 +118,31 @@ fn select(a: &[Arg]) -> R<Selection<'_>> {
     let db = as_array(dbv);
     let crit = as_array(critv);
     let field = field_index(&db, a)?;
-    let records = matching_records(&db, &crit);
+    let records = matching_records(&db, &crit, ctx);
     Ok(Selection { db, field, records })
 }
 
 /// Numbers of the field among matching records (field required).
-fn field_numbers(a: &[Arg]) -> R<Vec<f64>> {
-    let s = select(a)?;
+fn field_numbers(a: &[Arg], c: &mut dyn Ctx) -> R<Vec<f64>> {
+    let s = select(a, c)?;
     let f = s.field.ok_or(CellError::Value)?;
     Ok(s.records.iter().filter_map(|&r| s.db.get(r, f).and_then(Value::as_f64)).collect())
 }
 
-fn dsum(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
-    num_val(field_numbers(a)?.iter().sum())
+fn dsum(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
+    num_val(field_numbers(a, c)?.iter().sum())
 }
 
-fn daverage(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
-    let v = field_numbers(a)?;
+fn daverage(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
+    let v = field_numbers(a, c)?;
     if v.is_empty() {
         return Err(CellError::Div0);
     }
     num_val(v.iter().sum::<f64>() / v.len() as f64)
 }
 
-fn dcount(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
-    let s = select(a)?;
+fn dcount(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
+    let s = select(a, c)?;
     let n = match s.field {
         Some(f) => s.records.iter().filter(|&&r| matches!(s.db.get(r, f), Some(Value::Number(_)))).count(),
         None => s.records.len(),
@@ -145,8 +150,8 @@ fn dcount(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     num_val(n as f64)
 }
 
-fn dcounta(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
-    let s = select(a)?;
+fn dcounta(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
+    let s = select(a, c)?;
     let n = match s.field {
         Some(f) => s.records.iter().filter(|&&r| !matches!(s.db.get(r, f), None | Some(Value::Empty))).count(),
         None => s.records.len(),
@@ -154,8 +159,8 @@ fn dcounta(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     num_val(n as f64)
 }
 
-fn dget(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
-    let s = select(a)?;
+fn dget(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
+    let s = select(a, c)?;
     let f = s.field.ok_or(CellError::Value)?;
     // Records whose field is blank (or "") don't count, as in Excel.
     let mut found =
@@ -167,18 +172,18 @@ fn dget(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     }
 }
 
-fn dmax(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
-    let v = field_numbers(a)?;
+fn dmax(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
+    let v = field_numbers(a, c)?;
     num_val(v.iter().copied().reduce(f64::max).unwrap_or(0.0))
 }
 
-fn dmin(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
-    let v = field_numbers(a)?;
+fn dmin(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
+    let v = field_numbers(a, c)?;
     num_val(v.iter().copied().reduce(f64::min).unwrap_or(0.0))
 }
 
-fn dproduct(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
-    let v = field_numbers(a)?;
+fn dproduct(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
+    let v = field_numbers(a, c)?;
     if v.is_empty() {
         return num_val(0.0);
     }
@@ -196,20 +201,20 @@ fn variance(v: &[f64], sample: bool) -> R<f64> {
     Ok(ss / if sample { n - 1.0 } else { n })
 }
 
-fn dvar(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
-    num_val(variance(&field_numbers(a)?, true)?)
+fn dvar(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
+    num_val(variance(&field_numbers(a, c)?, true)?)
 }
 
-fn dvarp(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
-    num_val(variance(&field_numbers(a)?, false)?)
+fn dvarp(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
+    num_val(variance(&field_numbers(a, c)?, false)?)
 }
 
-fn dstdev(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
-    num_val(variance(&field_numbers(a)?, true)?.sqrt())
+fn dstdev(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
+    num_val(variance(&field_numbers(a, c)?, true)?.sqrt())
 }
 
-fn dstdevp(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
-    num_val(variance(&field_numbers(a)?, false)?.sqrt())
+fn dstdevp(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
+    num_val(variance(&field_numbers(a, c)?, false)?.sqrt())
 }
 
 pub(crate) fn specs() -> Vec<FnSpec> {
