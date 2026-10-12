@@ -51,8 +51,9 @@ impl Criterion {
         }
     }
 
-    /// Parses the criteria argument of COUNTIF(S), SUMIF(S), AVERAGEIF(S), MAXIFS and MINIFS:
-    /// like `parse`, but text longer than 255 characters is `#VALUE!`, as in Excel.
+    /// Parses the criteria argument of COUNTIF, SUMIF, AVERAGEIF and the single-pair *IFS
+    /// functions: like `parse`, but text longer than 255 characters is `#VALUE!`, as in Excel.
+    /// The *IFS functions with two or more criteria pairs use `parse`: Excel doesn't limit them.
     pub(crate) fn parse_arg(v: &Value) -> Result<Criterion, CellError> {
         match v {
             Value::Array(a) => Criterion::parse_arg(a.data.first().unwrap_or(&Value::Empty)),

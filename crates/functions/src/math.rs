@@ -950,6 +950,10 @@ fn criteria_mask(a: &[Arg], first_pair: usize, rows: usize, cols: usize) -> R<Ve
     if rest.is_empty() || rest.len() % 2 != 0 {
         return Err(CellError::Value);
     }
+    // Excel rejects a text criterion over 255 characters only when there is a single criteria
+    // pair. With two or more pairs it matches the long text normally (checked with COUNTIFS in
+    // Excel 2016).
+    let limit_length = rest.len() == 2;
     let mut mask = vec![true; rows.saturating_mul(cols)];
     for pair in rest.chunks(2) {
         let (Some(range), Some(crit)) = (pair.first(), pair.get(1)) else { return Err(CellError::Value) };
@@ -957,7 +961,8 @@ fn criteria_mask(a: &[Arg], first_pair: usize, rows: usize, cols: usize) -> R<Ve
         if r.rows != rows || r.cols != cols {
             return Err(CellError::Value);
         }
-        let c = Criterion::parse_arg(&crit.value.scalar())?;
+        let scalar = crit.value.scalar();
+        let c = if limit_length { Criterion::parse_arg(&scalar)? } else { Criterion::parse(&scalar) };
         for (m, v) in mask.iter_mut().zip(r.iter()) {
             if *m && !c.matches(v) {
                 *m = false;
@@ -1645,7 +1650,7 @@ mod tests {
     }
 
     #[test]
-    fn criteria_longer_than_255_chars_are_value_errors() {
+    fn criteria_over_255_chars_are_value_errors_with_one_pair() {
         let ok = "x".repeat(255);
         let long = "x".repeat(256);
         let cells = arr(vec![vec![tv(&ok)], vec![tv(&long)]]);
@@ -1653,6 +1658,11 @@ mod tests {
         close(ev("COUNTIF", vec![rf(cells.clone()), t(&ok)]), 1.0);
         is_err(ev("COUNTIF", vec![rf(cells.clone()), t(&long)]), CellError::Value);
         close(ev("SUMIFS", vec![rf(qty.clone()), rf(cells.clone()), t(&ok)]), 1.0);
-        is_err(ev("SUMIFS", vec![rf(qty), rf(cells), t(&long)]), CellError::Value);
+        is_err(ev("SUMIFS", vec![rf(qty.clone()), rf(cells.clone()), t(&long)]), CellError::Value);
+        is_err(ev("COUNTIFS", vec![rf(cells.clone()), t(&long)]), CellError::Value);
+        // With a second pair the long criterion matches like any other.
+        close(ev("COUNTIFS", vec![rf(cells.clone()), t(&long), rf(qty.clone()), t(">0")]), 1.0);
+        close(ev("COUNTIFS", vec![rf(qty.clone()), t(">0"), rf(cells.clone()), t(&long)]), 1.0);
+        close(ev("SUMIFS", vec![rf(qty.clone()), rf(cells.clone()), t(&long), rf(qty), t(">0")]), 2.0);
     }
 }
