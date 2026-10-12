@@ -79,11 +79,12 @@ fn mode_sngl(v: &[f64]) -> R<f64> {
 }
 
 /// Numbers for MODE / MODE.SNGL / MODE.MULT. Inside multi-cell ranges and arrays only numbers
-/// count, like [`numbers`]. Scalar arguments differ from SUM: text and logical values are skipped
-/// whether typed or referenced (even numeric text such as `"1"`, so `MODE(1,"1",2,3)` is `#N/A`,
-/// and `MODE(1,TRUE,TRUE,2)` is `#N/A`), but a single-cell reference to a blank cell is
-/// `#VALUE!` (`MODE(B9,2,D7)` with D7 blank). Arguments are processed left to right, so the
-/// first error wins.
+/// count, like [`numbers`]. Scalar arguments differ from SUM: in Excel 365, text and logical
+/// values are skipped whether typed or referenced (even numeric text such as `"1"`, so
+/// `MODE(1,"1",2,3)` is `#N/A`, and `MODE(1,TRUE,TRUE,2)` is `#N/A`), but a single-cell reference
+/// to a blank cell is `#VALUE!` (`MODE(B9,2,D7)` with D7 blank). Arguments are processed left to
+/// right, so the first error wins. The results cached in POI's FormulaEvalTestData come from an
+/// older Excel that answered `#VALUE!` for typed text; they are not the reference here.
 fn mode_numbers(args: &[Arg]) -> R<Vec<f64>> {
     let mut out = Vec::new();
     for a in args {
@@ -2279,9 +2280,11 @@ mod tests {
         assert_eq!(rows_of(&ev("MODE.MULT", vec![c(&[1.0, 2.0, 3.0, 4.0, 3.0, 2.0, 1.0, 2.0, 3.0])])), vec![vec![nv(2.0)], vec![nv(3.0)]]);
     }
 
-    /// MODE argument semantics from the Excel-cached results in FormulaEvalTestData (row "Mode"):
+    /// MODE argument semantics in Excel 365, on the inputs of FormulaEvalTestData (row "Mode"):
     /// text is skipped, typed or referenced, but a single-cell reference to a blank cell is
-    /// `#VALUE!`; the first error from the left wins.
+    /// `#VALUE!`; the first error from the left wins. The values cached in POI's file come from an
+    /// older Excel and say `#VALUE!` for `MODE(C9,E16,"1",B8)`, `MODE(B8,"1",2,3)` and
+    /// `MODE("1",1,#DIV/0!,2,3)`; Excel 365 gives `#N/A`, `#N/A` and `#DIV/0!`.
     #[test]
     fn mode_scalar_arguments() {
         let data = arr(vec![vec![tv(""), nv(0.0), nv(1.0)], vec![tv("x"), nv(1.0), nv(1.001)], vec![tv("y"), nv(9e9), nv(2.3456)]]);
