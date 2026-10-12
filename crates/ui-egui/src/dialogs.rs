@@ -2352,9 +2352,13 @@ fn solver(ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, open: &mut bool
     let method = text(d, "method");
     ui.horizontal(|ui| {
         ui.label("Select a Solving Method:");
-        let label = |m: &str| if m == "simplex" { "Simplex LP" } else { "GRG Nonlinear" };
+        let label = |m: &str| match m {
+            "simplex" => "Simplex LP",
+            "evolutionary" => "Evolutionary",
+            _ => "GRG Nonlinear",
+        };
         egui::ComboBox::from_id_salt("solverMethod").selected_text(label(&method)).show_ui(ui, |ui| {
-            for m in ["grg", "simplex"] {
+            for m in ["grg", "simplex", "evolutionary"] {
                 if ui.selectable_label(method == m, label(m)).clicked() {
                     d.values.insert("method".into(), json!(m));
                 }
@@ -2362,10 +2366,10 @@ fn solver(ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, open: &mut bool
         });
     });
     ui.label(
-        egui::RichText::new(if method == "simplex" {
-            "Simplex LP: for linear models; integer and binary constraints by branch and bound."
-        } else {
-            "GRG Nonlinear: a local optimum of a smooth model, from the current values."
+        egui::RichText::new(match method.as_str() {
+            "simplex" => "Simplex LP: for linear models; integer and binary constraints by branch and bound.",
+            "evolutionary" => "Evolutionary: a genetic search for models that aren't smooth; every variable cell needs bounds.",
+            _ => "GRG Nonlinear: a local optimum of a smooth model, from the current values.",
         })
         .small(),
     );

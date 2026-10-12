@@ -14,6 +14,12 @@
 //!   projection. It finds a local optimum of a smooth model; integer constraints use a small
 //!   branch and bound on top.
 //!
+//! - **Evolutionary**: a genetic search for models that aren't smooth (IF, lookups, rounding),
+//!   with tournament selection, blend crossover and Gaussian mutation inside the variable bounds,
+//!   feasibility-first ranking and integer rounding, followed by a compass (pattern) search around
+//!   the best member. It stops when the population has converged, when the best member stops
+//!   improving, or at the evaluation budget.
+//!
 //! Work is bounded by an evaluation budget (no clock: `Instant` traps on wasm). The model is
 //! saved as hidden sheet-scoped names (`solver_opt`, `solver_adj`, `solver_lhs1`…), so it
 //! travels with the workbook through XLSX.
@@ -36,6 +42,9 @@ const MAX_EVALS: u64 = 200_000;
 const LP_WORK: u64 = 2_000_000_000;
 const MAX_NODES_LP: usize = 10_000;
 const MAX_NODES_NLP: usize = 200;
+/// Evolutionary population sizes.
+const MIN_POPULATION: usize = 10;
+const MAX_POPULATION: usize = 1000;
 /// Constraint precision (Excel's default 0.000001).
 const PRECISION: f64 = 1e-6;
 const EPS: f64 = 1e-9;
@@ -46,7 +55,7 @@ pub fn specs() -> Vec<CommandSpec> {
         "Solver…",
         ["Data", "Analysis"],
         None,
-        "{objective: \"B10\" (formula cell), goal?: max|min|value (default max), value?: number (for goal value), variables: \"B2:B4,D1\" (≤200 constant cells, same sheet), constraints?: [\"B5 <= 10\", \"B2:B4 >= C2:C4\", \"B2 int\", \"B3 bin\", {lhs: \"B6\", op: \"=\", rhs: 3 | \"C6\"}], nonNegative?: bool (default true: variables without a lower bound get 0), method?: grg|simplex (default grg), keep?: bool (default true; false restores the original values), saveModel?: bool (default true: hidden solver_* names), maxEvaluations?: 20000, integerOptimality?: percent (default 0), saved?: bool (solve the sheet's saved model; other params override)} → {status: optimal|converged|iterationLimit|infeasible|unbounded|notLinear, message, objective, values: {cell: value}, evaluations, changed}. No `objective` → {model: the saved model} (the menu opens the dialog).",
+        "{objective: \"B10\" (formula cell), goal?: max|min|value (default max), value?: number (for goal value), variables: \"B2:B4,D1\" (≤200 constant cells, same sheet), constraints?: [\"B5 <= 10\", \"B2:B4 >= C2:C4\", \"B2 int\", \"B3 bin\", {lhs: \"B6\", op: \"=\", rhs: 3 | \"C6\"}], nonNegative?: bool (default true: variables without a lower bound get 0), method?: grg|simplex|evolutionary (default grg), populationSize?: 100, mutationRate?: 0.075, randomSeed?: 0 (a fixed seed, so runs repeat), convergence?: 0.0001, generationsWithoutImprovement?: 50, requireBounds?: bool (default true: every variable needs both bounds; false searches within ±100 of the start) (Evolutionary options), keep?: bool (default true; false restores the original values), saveModel?: bool (default true: hidden solver_* names), maxEvaluations?: 20000, integerOptimality?: percent (default 0), saved?: bool (solve the sheet's saved model; other params override)} → {status: optimal|converged|cannotImprove|iterationLimit|infeasible|unbounded|notLinear, message, objective, values: {cell: value}, evaluations, changed}. No `objective` → {model: the saved model} (the menu opens the dialog).",
         has_doc,
         run
     )]
@@ -132,6 +141,38 @@ enum Goal {
 enum Method {
     Simplex,
     Grg,
+    Evolutionary,
+}
+
+/// The Evolutionary method's options (Solver Options › Evolutionary). The search keeps no
+/// clock, so the time without improvement is counted in generations.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct EvoOptions {
+    population: usize,
+    mutation: f64,
+    seed: u64,
+    convergence: f64,
+    stall: u64,
+    require_bounds: bool,
+}
+
+impl Default for EvoOptions {
+    fn default() -> EvoOptions {
+        EvoOptions { population: 100, mutation: 0.075, seed: 0, convergence: 1e-4, stall: 50, require_bounds: true }
+    }
+}
+
+fn evo_options(p: &Json) -> EvoOptions {
+    let d = EvoOptions::default();
+    let num = |k: &str| p.get(k).and_then(Json::as_f64).or_else(|| str_param(p, k).and_then(num_text)).filter(|v| v.is_finite());
+    EvoOptions {
+        population: num("populationSize").map_or(d.population, |v| v.clamp(MIN_POPULATION as f64, MAX_POPULATION as f64) as usize),
+        mutation: num("mutationRate").map_or(d.mutation, |v| v.clamp(0.0, 1.0)),
+        seed: num("randomSeed").map_or(d.seed, |v| v.clamp(0.0, f64::from(u32::MAX)) as u64),
+        convergence: num("convergence").map_or(d.convergence, |v| v.clamp(0.0, 1.0)),
+        stall: num("generationsWithoutImprovement").map_or(d.stall, |v| v.clamp(1.0, 100_000.0) as u64),
+        require_bounds: bool_param(p, "requireBounds").unwrap_or(d.require_bounds),
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -144,6 +185,7 @@ struct Model {
     cons: Vec<Constraint>,
     non_negative: bool,
     method: Method,
+    evo: EvoOptions,
 }
 
 /// Cells of `"B2:B4,D1"` on one sheet (row-major per area, in order), at most `cap`.
@@ -301,10 +343,10 @@ fn parse_model(s: &Session, p: &Json) -> Result<Model> {
     let method = match str_param(p, "method").unwrap_or("grg").to_ascii_lowercase().replace([' ', '_', '-'], "").as_str() {
         "grg" | "grgnonlinear" | "nonlinear" => Method::Grg,
         "simplex" | "simplexlp" | "lp" | "linear" => Method::Simplex,
-        "evolutionary" => return Err(EngineError::Other("The Evolutionary method isn't available; use GRG Nonlinear or Simplex LP.".into())),
-        m => return Err(bad(CMD, format!("unknown method `{m}` (grg or simplex)"))),
+        "evolutionary" | "evo" | "genetic" => Method::Evolutionary,
+        m => return Err(bad(CMD, format!("unknown method `{m}` (grg, simplex or evolutionary)"))),
     };
-    Ok(Model { sheet, objective, goal, vars, vars_text, cons, non_negative, method })
+    Ok(Model { sheet, objective, goal, vars, vars_text, cons, non_negative, method, evo: evo_options(p) })
 }
 
 // ---------------------------------------------------------------- saved model
@@ -359,7 +401,18 @@ fn save_model(wb: &mut Workbook, m: &Model) {
     }
     put("solver_num".into(), m.cons.len().to_string());
     put("solver_neg".into(), if m.non_negative { "1" } else { "2" }.into());
-    put("solver_eng".into(), if m.method == Method::Simplex { "2" } else { "1" }.into());
+    let eng = match m.method {
+        Method::Grg => "1",
+        Method::Simplex => "2",
+        Method::Evolutionary => "3",
+    };
+    put("solver_eng".into(), eng.into());
+    if m.method == Method::Evolutionary {
+        put("solver_ssz".into(), m.evo.population.to_string());
+        put("solver_mrt".into(), m.evo.mutation.to_string());
+        put("solver_rsd".into(), m.evo.seed.to_string());
+        put("solver_rbv".into(), if m.evo.require_bounds { "1" } else { "2" }.into());
+    }
     put("solver_ver".into(), "3".into());
 }
 
@@ -398,15 +451,29 @@ pub fn saved_model(wb: &Workbook, sheet: usize) -> Option<Json> {
             }
         });
     }
-    Some(json!({
+    let method = match get("solver_eng").as_deref().map(str::trim) {
+        Some("2") => "simplex",
+        Some("3") => "evolutionary",
+        _ => "grg",
+    };
+    let mut model = json!({
         "objective": objective,
         "goal": goal,
         "value": value,
         "variables": get("solver_adj").map(local).unwrap_or_default(),
         "constraints": constraints,
         "nonNegative": get("solver_neg").as_deref().map(str::trim) != Some("2"),
-        "method": if get("solver_eng").as_deref().map(str::trim) == Some("2") { "simplex" } else { "grg" },
-    }))
+        "method": method,
+    });
+    for (name, key) in [("solver_ssz", "populationSize"), ("solver_mrt", "mutationRate"), ("solver_rsd", "randomSeed")] {
+        if let Some(v) = get(name).and_then(|v| num_text(&v)) {
+            model[key] = json!(v);
+        }
+    }
+    if let Some(v) = get("solver_rbv") {
+        model["requireBounds"] = json!(v.trim() != "2");
+    }
+    Some(model)
 }
 
 // ---------------------------------------------------------------- evaluation
@@ -1182,6 +1249,248 @@ fn nlp(ev: &mut Evaluator, x0: &[f64], lo: &[f64], hi: &[f64], goal: Goal) -> Ou
     Outcome::Solved(x, phi, (converged || viol <= PRECISION * scale) && !out_of_budget)
 }
 
+// ---------------------------------------------------------------- evolutionary
+
+/// A small deterministic generator (SplitMix64), so a seed reproduces a run on every platform.
+struct Rng(u64);
+
+impl Rng {
+    fn new(seed: u64) -> Rng {
+        Rng(seed ^ 0x2545_F491_4F6C_DD1D)
+    }
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+    /// Uniform in [0, 1).
+    fn uniform(&mut self) -> f64 {
+        (self.next() >> 11) as f64 / (1u64 << 53) as f64
+    }
+    fn between(&mut self, a: f64, b: f64) -> f64 {
+        a + (b - a) * self.uniform()
+    }
+    fn below(&mut self, n: usize) -> usize {
+        if n == 0 { 0 } else { usize::try_from(self.next() % n as u64).unwrap_or(0) }
+    }
+    /// Standard normal (Box–Muller).
+    fn normal(&mut self) -> f64 {
+        let u = self.uniform().max(f64::MIN_POSITIVE);
+        (-2.0 * u.ln()).sqrt() * (std::f64::consts::TAU * self.uniform()).cos()
+    }
+}
+
+/// A candidate: its point, the objective to minimise and its constraint violation.
+#[derive(Clone, Debug)]
+struct Member {
+    x: Vec<f64>,
+    phi: f64,
+    viol: f64,
+}
+
+impl Member {
+    /// Feasible beats infeasible; then the lower objective, or the smaller violation.
+    fn better(&self, o: &Member, tol: f64) -> bool {
+        match (self.viol <= tol, o.viol <= tol) {
+            (true, false) => true,
+            (false, true) => false,
+            (true, true) => self.phi < o.phi,
+            (false, false) => self.viol < o.viol,
+        }
+    }
+}
+
+/// Why the Evolutionary search stopped.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum EvoEnd {
+    /// Almost all of the population is within Convergence of the best member.
+    Converged,
+    /// The best member didn't improve for the set number of generations.
+    Stalled,
+    /// The evaluation budget ran out.
+    Budget,
+}
+
+/// The search box, integer flags and scoring shared by the genetic and pattern phases.
+struct EvoSearch<'a> {
+    ev: &'a mut Evaluator,
+    rows: Vec<Row>,
+    senses: Vec<Sense>,
+    goal: Goal,
+    lo: Vec<f64>,
+    hi: Vec<f64>,
+    integer: &'a [bool],
+    tol: f64,
+}
+
+impl EvoSearch<'_> {
+    /// Clamps into the box and rounds integer variables.
+    fn repair(&self, x: &mut [f64]) {
+        for (j, v) in x.iter_mut().enumerate() {
+            let (l, h) = (self.lo.get(j).copied().unwrap_or(0.0), self.hi.get(j).copied().unwrap_or(0.0));
+            *v = if v.is_finite() { v.clamp(l, h) } else { l };
+            if self.integer.get(j).copied().unwrap_or(false) {
+                *v = v.round().clamp(l.ceil(), h.floor());
+            }
+        }
+    }
+
+    /// Scores `x`; `None` once the budget is spent.
+    fn score(&mut self, x: Vec<f64>) -> Option<Member> {
+        let p = self.ev.eval(&x)?;
+        let (phi, cons) = shape(&p, &self.rows, self.goal);
+        let viol = violation(&cons, &self.senses);
+        let phi = if phi.is_finite() { phi } else { f64::INFINITY };
+        let viol = if viol.is_finite() && cons.iter().all(|c| c.is_finite()) { viol } else { f64::INFINITY };
+        Some(Member { x, phi, viol })
+    }
+}
+
+/// The Evolutionary method within `lo..hi` from `x0`.
+fn evolutionary(ev: &mut Evaluator, x0: &[f64], lo: &[f64], hi: &[f64], integer: &[bool], goal: Goal, o: &EvoOptions) -> (Outcome, EvoEnd) {
+    let rows = ev.rows.clone();
+    let senses: Vec<Sense> = rows.iter().map(|r| r.sense).collect();
+    let scale = rows.iter().map(|r| r.rhs_const.abs()).fold(1.0, f64::max);
+    let mut start = x0.to_vec();
+    project(&mut start, lo, hi);
+    // Without a bound, search within 100 of the start.
+    let blo: Vec<f64> = lo.iter().zip(&start).map(|(l, s)| if l.is_finite() { *l } else { s - 100.0 }).collect();
+    let bhi: Vec<f64> = hi.iter().zip(&start).map(|(h, s)| if h.is_finite() { *h } else { s + 100.0 }).collect();
+    let no_integer = blo.iter().zip(&bhi).zip(integer).any(|((l, h), int)| *int && l.ceil() > h.floor());
+    if blo.iter().zip(&bhi).any(|(l, h)| l > h) || no_integer {
+        return (Outcome::Infeasible, EvoEnd::Converged);
+    }
+    let span: Vec<f64> = blo.iter().zip(&bhi).map(|(l, h)| (h - l).max(1e-9)).collect();
+    let mut se = EvoSearch { ev, rows, senses, goal, lo: blo, hi: bhi, integer, tol: PRECISION * scale };
+    let mut rng = Rng::new(o.seed);
+    let size = o.population.clamp(MIN_POPULATION, MAX_POPULATION);
+    let tol = se.tol;
+    let mut end = EvoEnd::Budget;
+    // The first generation: the start and random points in the box.
+    let mut pop: Vec<Member> = Vec::with_capacity(size);
+    se.repair(&mut start);
+    let mut next_x = Some(start);
+    while pop.len() < size {
+        let x = next_x.take().unwrap_or_else(|| {
+            let mut x: Vec<f64> = se.lo.iter().zip(&se.hi).map(|(l, h)| rng.between(*l, *h)).collect();
+            se.repair(&mut x);
+            x
+        });
+        match se.score(x) {
+            Some(m) => pop.push(m),
+            None => break,
+        }
+    }
+    let mut best: Option<Member> = None;
+    for m in &pop {
+        if best.as_ref().is_none_or(|b| m.better(b, tol)) {
+            best = Some(m.clone());
+        }
+    }
+    let mut last_improved = 0u64;
+    let mut generation = 0u64;
+    'search: while pop.len() == size {
+        let Some(b) = best.clone() else { break };
+        // Converged: 99% of the population is feasible and within Convergence of the best.
+        let close = pop.iter().filter(|m| m.viol <= tol && (m.phi - b.phi).abs() <= o.convergence * b.phi.abs().max(1.0)).count();
+        if b.viol <= tol && generation >= 5 && close * 100 >= size * 99 {
+            end = EvoEnd::Converged;
+            break;
+        }
+        if generation.saturating_sub(last_improved) >= o.stall {
+            end = EvoEnd::Stalled;
+            break;
+        }
+        // The next generation: the best survives, the rest are children of two tournaments.
+        let mut next = Vec::with_capacity(size);
+        next.push(b.clone());
+        while next.len() < size {
+            let mut parent = || {
+                let (i, k) = (rng.below(size), rng.below(size));
+                match (pop.get(i), pop.get(k)) {
+                    (Some(p), Some(q)) => Some(if q.better(p, tol) { q.x.clone() } else { p.x.clone() }),
+                    _ => None,
+                }
+            };
+            let (Some(pa), Some(pb)) = (parent(), parent()) else { break 'search };
+            let mut x: Vec<f64> = pa
+                .iter()
+                .zip(&pb)
+                .zip(&span)
+                .map(|((a, c), w)| {
+                    let mut v = a + rng.between(-0.25, 1.25) * (c - a);
+                    if rng.uniform() < o.mutation {
+                        v += 0.1 * w * rng.normal();
+                    }
+                    v
+                })
+                .collect();
+            se.repair(&mut x);
+            match se.score(x) {
+                Some(m) => next.push(m),
+                None => break 'search,
+            }
+        }
+        generation += 1;
+        for m in &next {
+            let Some(cur) = &best else { continue };
+            if m.better(cur, tol) {
+                let improved = cur.viol > tol || cur.phi - m.phi > 1e-9 * cur.phi.abs().max(1.0);
+                best = Some(m.clone());
+                if improved {
+                    last_improved = generation;
+                }
+            }
+        }
+        pop = next;
+    }
+    // Polish: a compass search on the continuous variables around the best member.
+    if let Some(mut b) = best.clone() {
+        let mut step: Vec<f64> = span.iter().map(|w| 0.01 * w).collect();
+        let n = b.x.len();
+        'polish: for _ in 0..10_000 {
+            if step.iter().zip(&span).zip(integer).all(|((s, w), int)| *int || *s <= 1e-9 * w.max(1.0)) {
+                break;
+            }
+            let mut moved = false;
+            for j in 0..n {
+                if integer.get(j).copied().unwrap_or(false) {
+                    continue;
+                }
+                for dir in [1.0, -1.0] {
+                    let mut x = b.x.clone();
+                    if let (Some(v), Some(s)) = (x.get_mut(j), step.get(j)) {
+                        *v += dir * s;
+                    }
+                    se.repair(&mut x);
+                    if x == b.x {
+                        continue;
+                    }
+                    let Some(m) = se.score(x) else { break 'polish };
+                    if m.better(&b, tol) {
+                        b = m;
+                        moved = true;
+                        break;
+                    }
+                }
+            }
+            if !moved {
+                for s in &mut step {
+                    *s *= 0.5;
+                }
+            }
+        }
+        best = Some(b);
+    }
+    match best {
+        Some(b) if b.viol <= tol => (Outcome::Solved(b.x, b.phi, end != EvoEnd::Budget), end),
+        _ if end == EvoEnd::Budget => (Outcome::Limit, end),
+        _ => (Outcome::Infeasible, end),
+    }
+}
+
 // ---------------------------------------------------------------- command
 
 fn run(s: &mut Session, p: &Json) -> Result<Json> {
@@ -1227,7 +1536,14 @@ fn run(s: &mut Session, p: &Json) -> Result<Json> {
         budget,
     };
     let any_int = prob.integer.iter().any(|b| *b);
+    if model.method == Method::Evolutionary && model.evo.require_bounds && prob.lo.iter().chain(&prob.hi).any(|b| !b.is_finite()) {
+        return Err(EngineError::Other(
+            "The Evolutionary method needs a lower and an upper bound on every variable cell (constraints such as \"A1:A3 <= 10\"), or requireBounds: false."
+                .into(),
+        ));
+    }
     let mut not_linear = false;
+    let mut evo_end = None;
     let outcome = if prob.lo.iter().zip(&prob.hi).any(|(l, h)| l > h) {
         Outcome::Infeasible
     } else {
@@ -1271,10 +1587,21 @@ fn run(s: &mut Session, p: &Json) -> Result<Json> {
                     nlp(&mut ev, &x0, &prob.lo, &prob.hi, goal)
                 }
             }
+            Method::Evolutionary => {
+                let (out, end) = evolutionary(&mut ev, &x0, &prob.lo, &prob.hi, &prob.integer, model.goal, &model.evo);
+                evo_end = Some(end);
+                out
+            }
         }
     };
     let (status, message, solution) = match outcome {
         _ if not_linear => ("notLinear", "The model isn't linear in the variable cells, so Simplex LP can't solve it. Try GRG Nonlinear.", None),
+        Outcome::Solved(x, _, true) if model.method == Method::Evolutionary => match evo_end {
+            Some(EvoEnd::Stalled) => {
+                ("cannotImprove", "Solver stopped when the best solution stopped improving. All constraints are satisfied.", Some(x))
+            }
+            _ => ("converged", "The population converged. The best solution found satisfies all constraints.", Some(x)),
+        },
         Outcome::Solved(x, _, true) => (
             if model.method == Method::Simplex { "optimal" } else { "converged" },
             if model.method == Method::Simplex {
@@ -1433,6 +1760,90 @@ mod tests {
     }
 
     #[test]
+    fn evolutionary_finds_the_global_minimum_of_non_smooth_and_multimodal_models() {
+        let mut s = s();
+        // |x − 3| + |y + 2| has a kink at its minimum (3, −2).
+        set(&mut s, &[("A1", "0"), ("A2", "0"), ("B1", "=ABS(A1-3)+ABS(A2+2)")]);
+        let p =
+            json!({"objective": "B1", "goal": "min", "variables": "A1:A2", "constraints": ["A1:A2 >= -10", "A1:A2 <= 10"], "method": "evolutionary"});
+        let r = s.execute("data.solver", p.clone()).unwrap();
+        assert!(r["status"] == "converged" || r["status"] == "cannotImprove", "{r}");
+        assert!((n(&s, "A1") - 3.0).abs() < 1e-6 && (n(&s, "A2") + 2.0).abs() < 1e-6, "{r}");
+        // The same seed repeats the run exactly.
+        set(&mut s, &[("A1", "0"), ("A2", "0")]);
+        let again = s.execute("data.solver", p).unwrap();
+        assert_eq!(again["values"], r["values"]);
+        assert_eq!(again["evaluations"], r["evaluations"]);
+        // Rastrigin's function 20 + Σ (x² − 10 cos 2πx) on [−5.12, 5.12]² has its global minimum 0
+        // at the origin among many local minima; GRG from (3.3, −2.7) stops at a local one.
+        set(&mut s, &[("C1", "3.3"), ("C2", "-2.7"), ("D1", "=20+C1^2-10*COS(2*PI()*C1)+C2^2-10*COS(2*PI()*C2)")]);
+        let base = json!({"objective": "D1", "goal": "min", "variables": "C1:C2", "constraints": ["C1:C2 >= -5.12", "C1:C2 <= 5.12"]});
+        s.execute("data.solver", base.clone()).unwrap();
+        assert!(n(&s, "D1") > 0.5, "GRG is local: {}", n(&s, "D1"));
+        set(&mut s, &[("C1", "3.3"), ("C2", "-2.7")]);
+        let mut p = base.clone();
+        p["method"] = json!("evolutionary");
+        let r = s.execute("data.solver", p).unwrap();
+        assert!(n(&s, "D1") < 1e-8 && n(&s, "C1").abs() < 1e-5 && n(&s, "C2").abs() < 1e-5, "{r}");
+        // A stepped model: ROUND makes it flat almost everywhere; the minimum is at 7.2.
+        set(&mut s, &[("E1", "0"), ("F1", "=ABS(ROUND(E1,0)-7)+ABS(E1-7.2)/100")]);
+        s.execute("data.solver", json!({"objective": "F1", "goal": "min", "variables": "E1", "constraints": ["E1 <= 20"], "method": "evolutionary"}))
+            .unwrap();
+        assert!((n(&s, "E1") - 7.2).abs() < 1e-6, "{}", n(&s, "E1"));
+    }
+
+    #[test]
+    fn evolutionary_handles_integers_bounds_and_the_saved_model() {
+        let mut s = s();
+        // The 0/1 knapsack of the branch-and-bound test: items 2 and 3, value 20.
+        set(&mut s, &[("D1", "=10*C1+13*C2+7*C3"), ("D2", "=5*C1+6*C2+4*C3")]);
+        let p = json!({"objective": "D1", "variables": "C1:C3", "constraints": ["D2 <= 10", "C1:C3 bin"], "method": "evolutionary", "populationSize": 30, "randomSeed": 7});
+        let r = s.execute("data.solver", p).unwrap();
+        assert!(r["status"] == "converged" || r["status"] == "cannotImprove", "{r}");
+        assert_eq!((n(&s, "C1"), n(&s, "C2"), n(&s, "C3"), n(&s, "D1")), (0.0, 1.0, 1.0, 20.0));
+        // The method and its options are saved, survive XLSX and solve again.
+        let b64 = s.execute("file.saveBytes", json!({"format": "xlsx"})).unwrap()["base64"].as_str().unwrap().to_string();
+        s.execute("file.open", json!({"name": "e.xlsx", "base64": b64})).unwrap();
+        let m = s.execute("data.solver", json!({})).unwrap();
+        assert_eq!(m["model"]["method"], "evolutionary");
+        assert_eq!((m["model"]["populationSize"].as_f64(), m["model"]["randomSeed"].as_f64()), (Some(30.0), Some(7.0)));
+        set(&mut s, &[("C1", "0"), ("C2", "0"), ("C3", "0")]);
+        s.execute("data.solver", json!({"saved": true})).unwrap();
+        assert_eq!(n(&s, "D1"), 20.0);
+        // Integer constraints: max x + y with x + 2y ≤ 7 on integers in [0, 10] → (7, 0).
+        set(&mut s, &[("A1", "0"), ("A2", "0"), ("B1", "=A1+A2"), ("B2", "=A1+2*A2")]);
+        let r = s
+            .execute(
+                "data.solver",
+                json!({"objective": "B1", "variables": "A1:A2", "constraints": ["B2 <= 7", "A1:A2 <= 10", "A1:A2 int"], "method": "evolutionary"}),
+            )
+            .unwrap();
+        assert_eq!((n(&s, "A1"), n(&s, "A2")), (7.0, 0.0), "{r}");
+        // Every variable needs bounds unless requireBounds is off; then it searches around the start.
+        set(&mut s, &[("E1", "1"), ("F1", "=ABS(E1-4)")]);
+        let p = json!({"objective": "F1", "goal": "min", "variables": "E1", "method": "evolutionary"});
+        assert!(s.execute("data.solver", p.clone()).is_err());
+        let mut p = p;
+        p["requireBounds"] = json!(false);
+        s.execute("data.solver", p).unwrap();
+        assert!((n(&s, "E1") - 4.0).abs() < 1e-6);
+        // Infeasible constraints and a tiny budget are reported without changing the cells.
+        set(&mut s, &[("E1", "1")]);
+        let r = s
+            .execute("data.solver", json!({"objective": "F1", "variables": "E1", "constraints": ["E1 <= 3", "F1 >= 10"], "method": "evolutionary"}))
+            .unwrap();
+        assert_eq!(r["status"], "infeasible", "{r}");
+        let r = s
+            .execute(
+                "data.solver",
+                json!({"objective": "F1", "variables": "E1", "constraints": ["E1 <= 3"], "method": "evolutionary", "maxEvaluations": 3}),
+            )
+            .unwrap();
+        assert_eq!(r["status"], "iterationLimit", "{r}");
+        assert_eq!(n(&s, "E1"), 1.0);
+    }
+
+    #[test]
     fn infeasible_unbounded_and_nonlinear_models_are_reported() {
         let mut s = s();
         set(&mut s, &[("A1", "1"), ("B1", "=2*A1")]);
@@ -1469,6 +1880,7 @@ mod tests {
             json!({"objective": "B1", "variables": "A1", "goal": "sideways"}),
             json!({"objective": "B1", "variables": "A1", "goal": "value"}),
             json!({"objective": "B1", "variables": "A1", "method": "evolutionary"}),
+            json!({"objective": "B1", "variables": "A1", "method": "annealing"}),
             json!({"objective": "B1", "variables": "A1", "constraints": ["A1 ?? 3"]}),
             json!({"objective": "B1", "variables": "A1", "constraints": "A1 <= 3"}),
             json!({"objective": "B1", "variables": "A1", "constraints": ["A1:A3 <= C1:C2"]}),
