@@ -4,9 +4,10 @@
 //!
 //! Read: worksheets, shared strings, cell values, formulas (text and cached results, including
 //! shared and array formulas), number formats, the 1904 date system, merged cells, column
-//! widths, row heights, defined names, print areas, print titles and the iterative calculation
-//! settings. Everything else (fonts, fills, borders, charts, pictures, comments, conditional
-//! formats, validation, macros) is skipped with a warning. Encrypted workbooks and pre-BIFF8 versions are refused.
+//! widths, row heights, defined names, print areas, print titles and the calculation settings
+//! (mode, iteration, precision as displayed). Everything else (fonts, fills, borders, charts,
+//! pictures, comments, conditional formats, validation, macros) is skipped with a warning.
+//! Encrypted workbooks and pre-BIFF8 versions are refused.
 
 mod formula;
 mod ftab;
@@ -16,7 +17,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use gridcraft_core::{CellRef, DateSystem, MAX_COLS, MAX_ROWS, RangeRef, Value};
-use gridcraft_model::{CalcSettings, Cell, DefinedName, Formula, LineInfo, NumFmt, Sheet, Style, StyleId, Visibility, Workbook};
+use gridcraft_model::{CalcMode, CalcSettings, Cell, DefinedName, Formula, LineInfo, NumFmt, Sheet, Style, StyleId, Visibility, Workbook};
 
 use crate::cfb::Compound;
 use crate::tables::{builtin_format, col_width_to_px, pt_to_px};
@@ -123,6 +124,7 @@ struct Globals {
     sst: Vec<Arc<str>>,
     links: Links,
     names: Vec<Lbl>,
+    precision_as_displayed: bool,
 }
 
 /// Reads an Excel 97-2003 workbook. Inspect the report's warnings for what was skipped.
@@ -181,7 +183,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
             continue;
         };
         sheet.visibility = bs.visibility;
-        // Every worksheet repeats the workbook's iteration settings; Excel applies the first.
+        // Every worksheet repeats the workbook's calculation settings; Excel applies the first.
         if wb.sheets.is_empty() {
             wb.calc = calc;
         }
@@ -191,6 +193,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
     if wb.sheets.is_empty() {
         return Err(invalid("the workbook has no worksheets GridCraft can read"));
     }
+    wb.calc.precision_as_displayed = g.precision_as_displayed;
     defined_names(&g, &model_index, &mut wb, &mut report);
     wb.active_sheet = wb.sheets.iter().position(|s| s.visibility == Visibility::Visible).unwrap_or(0);
     // The overview comes first.
@@ -251,6 +254,7 @@ fn globals(stream: &[u8], budget: &mut Budget) -> Result<Globals, IoError> {
                 g.sheets.push(BoundSheet { pos, name, visibility, kind });
             }
             0x0022 => g.date1904 = c.u16()? == 1,
+            0x000E => g.precision_as_displayed = c.u16()? == 0,
             0x041E => {
                 let ifmt = c.u16()?;
                 let code = c.string()?;
@@ -624,6 +628,13 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
             let range = RangeRef::new(CellRef::new(u32::from(r0), u32::from(c0)), CellRef::new(u32::from(r1.max(r0)), u32::from(c1.max(c0))));
             if let Some(at) = st.last_formula {
                 st.arrays.insert(at, (range, f));
+            }
+        }
+        0x000D => {
+            st.calc.mode = match c.u16()? as i16 {
+                0 => CalcMode::Manual,
+                -1 => CalcMode::AutomaticExceptTables,
+                _ => CalcMode::Automatic,
             }
         }
         0x000C => st.calc.set_max_iterations(u32::from(c.u16()?)),
