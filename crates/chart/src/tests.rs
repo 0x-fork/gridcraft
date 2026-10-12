@@ -421,6 +421,16 @@ fn rasterize_bar_center_has_bar_color() {
 }
 
 #[test]
+fn rasterize_does_not_panic_on_negative_rect_extents() {
+    let red = [255, 0, 0, 255];
+    for (w, h) in [(-10.0, 10.0), (10.0, -10.0), (-10.0, -10.0), (f32::NAN, f32::NAN)] {
+        let rect = Prim::Rect { x: 5.0, y: 5.0, w, h, fill: Some(red), stroke: Some((red, 2.0)), radius: 0.0 };
+        let img = rasterize(&[rect], 20, 20, [0, 0, 0, 0]);
+        assert_eq!(img.len(), 20 * 20 * 4);
+    }
+}
+
+#[test]
 fn pie_starts_at_twelve_clockwise() {
     let c = chart(ChartKind::Pie);
     let d = sample(ChartKind::Pie);
