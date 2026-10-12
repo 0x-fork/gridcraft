@@ -830,10 +830,11 @@ fn table_xml(pt: &PivotTable, idx: usize, cache_id: u32, c: &Cache, fmt_id: &dyn
     let loc = RangeRef::new(a, CellRef::new(end.row.max(a.row), end.col.max(a.col)));
     let k = vals.len();
     // Σ Values (two or more value fields): its index among the written fields of its axis.
-    let (row_map, col_map) = c.axis_map.split_at(pt.rows.len().min(c.axis_map.len()));
+    let (row_map, _) = c.axis_map.split_at(pt.rows.len().min(c.axis_map.len()));
     let values_at = |map: &[Option<usize>], n: usize| pt.values_position.map_or(n, |p| map.iter().take(p).filter(|x| x.is_some()).count());
     let row_values = (k > 1 && pt.values_on_rows).then(|| values_at(row_map, row_idx.len()));
-    let col_values = (k > 1 && !pt.values_on_rows).then(|| values_at(col_map, col_idx.len()));
+    // In Columns Σ Values comes after the last field: the column layout doesn't place it elsewhere.
+    let col_values = (k > 1 && !pt.values_on_rows).then_some(col_idx.len());
     let first_data_row = if col_idx.is_empty() { 1 } else { 1 + col_idx.len() + usize::from(col_values.is_some()) };
     let row_levels = row_idx.len() + usize::from(row_values.is_some());
     let first_data_col = if row_levels == 0 && col_idx.is_empty() {
@@ -1334,10 +1335,10 @@ fn read_table(cx: &mut Ctx<'_>, x: &El, cache: &CacheIn, id: u32) -> Option<Pivo
     pt.rows = rows;
     pt.columns = columns;
     // Σ Values: where its `-2` entry is, else `dataOnRows` and `dataPosition`; after the last
-    // field by default.
+    // field by default. In Columns it always comes last, as the column layout puts it there.
     pt.values_on_rows = rows_values.is_some() || (cols_values.is_none() && x.flag("dataOnRows", false));
-    let (at, count) = if pt.values_on_rows { (rows_values, pt.rows.len()) } else { (cols_values, pt.columns.len()) };
-    pt.values_position = at.or_else(|| x.attr_u32("dataPosition").map(|p| p as usize)).filter(|p| *p < count);
+    pt.values_position =
+        if pt.values_on_rows { rows_values.or_else(|| x.attr_u32("dataPosition").map(|p| p as usize)).filter(|p| *p < pt.rows.len()) } else { None };
     filters.extend(page_filters);
     filters.extend(axis_filters);
     pt.filters = filters;

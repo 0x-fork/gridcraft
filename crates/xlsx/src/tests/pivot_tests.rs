@@ -550,7 +550,7 @@ fn values_on_rows_round_trip() {
     let (back, _) = read_xlsx(&bytes).unwrap();
     assert_eq!(back.sheet(1).unwrap().pivots, wb.sheet(1).unwrap().pivots);
 
-    // Σ Values first among the column fields stays first.
+    // Σ Values in Columns is written after the last column field, its only place in the layout.
     {
         let p = wb.sheet_mut(1).unwrap().pivots.get_mut(1).unwrap();
         p.values_on_rows = false;
@@ -559,9 +559,19 @@ fn values_on_rows_round_trip() {
     let bytes = write_xlsx(&wb).unwrap();
     let t2 = String::from_utf8(unzip(&bytes).get("xl/pivotTables/pivotTable2.xml").unwrap().clone()).unwrap();
     assert!(!t2.contains("dataOnRows"), "{t2}");
-    assert_eq!(axis_xs(&t2, "colFields").first(), Some(&-2), "{t2}");
+    assert_eq!(axis_xs(&t2, "colFields").last(), Some(&-2), "{t2}");
     let (back, _) = read_xlsx(&bytes).unwrap();
-    assert_eq!(back.sheet(1).unwrap().pivots, wb.sheet(1).unwrap().pivots);
+    assert_eq!(back.sheet(1).unwrap().pivots[1].values_position, None);
+}
+
+#[test]
+fn values_ahead_of_column_fields_read_last() {
+    let table = r#"<pivotTableDefinition name="ValuesFirst" cacheId="1"><location ref="C1:F4"/><pivotFields><pivotField axis="axisCol"><items><item x="0"/><item x="1"/><item t="default"/></items></pivotField><pivotField dataField="1"/></pivotFields><colFields count="2"><field x="-2"/><field x="0"/></colFields><dataFields><dataField name="Sum of V" fld="1"/><dataField name="Count of V" fld="1" subtotal="count"/></dataFields></pivotTableDefinition>"#;
+    let (wb, _) = read_xlsx(&with_pivot(table, Some(GOOD_CACHE))).unwrap();
+    let pt = &wb.sheet(0).unwrap().pivots[0];
+    assert_eq!((pt.columns.len(), pt.values.len()), (1, 2));
+    assert!(!pt.values_on_rows);
+    assert_eq!(pt.values_position, None);
 }
 
 #[test]

@@ -1061,8 +1061,11 @@ pub fn compute(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Result<Out
         let r = g.push_row(RowKind::Header)?;
         row_header(&mut g, r);
         for (j, (_, vi)) in data_cols.iter().enumerate() {
-            if let Some(vi) = vi {
-                g.set(r, l + j, Value::text(val_name(*vi)), CellKind::Header, 0, None);
+            match vi {
+                Some(vi) => g.set(r, l + j, Value::text(val_name(*vi)), CellKind::Header, 0, None),
+                // Values on rows, no column field: the one data column is the grand total.
+                None if on_rows => g.set(r, l + j, Value::text("Total"), CellKind::Header, 0, None),
+                None => {}
             }
         }
     } else {

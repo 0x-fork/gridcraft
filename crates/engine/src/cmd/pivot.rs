@@ -87,7 +87,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Move Field",
             [],
             None,
-            "{pivot?, field (\"Σ Values\" moves the value fields between rows and columns), from: rows|columns|values|filters, to: rows|columns|values|filters, position?: index, replace?}",
+            "{pivot?, field (\"Σ Values\" moves the value fields between rows and columns; in columns it stays after the last field), from: rows|columns|values|filters, to: rows|columns|values|filters, position?: index, replace?}",
             has_doc,
             move_field
         ),
@@ -382,7 +382,9 @@ fn insert_axis_field(pt: &mut PivotTable, rows: bool, f: PivotField, position: O
     shift_values(pt, rows, at, true);
 }
 
-/// Moves Σ Values between Rows and Columns, or within one, to `position` (default: the end).
+/// Moves Σ Values between Rows and Columns, or within Rows, to `position` (default: the end).
+/// In Columns it always comes after the last column field: the column layout doesn't place it
+/// anywhere else yet.
 fn move_values_field(cmd: &str, pt: &mut PivotTable, from: &str, to: &str, position: Option<usize>) -> Result<Json> {
     let current = if pt.values_on_rows { "rows" } else { "columns" };
     if from != current {
@@ -392,8 +394,7 @@ fn move_values_field(cmd: &str, pt: &mut PivotTable, from: &str, to: &str, posit
         return Err(other("The field you are moving cannot be placed in that PivotTable area."));
     }
     pt.values_on_rows = to == "rows";
-    let n = if pt.values_on_rows { pt.rows.len() } else { pt.columns.len() };
-    pt.values_position = position.filter(|p| *p < n);
+    pt.values_position = position.filter(|p| pt.values_on_rows && *p < pt.rows.len());
     Ok(json!({"field": VALUES_FIELD, "to": to}))
 }
 
@@ -1331,8 +1332,20 @@ fn change_source(s: &mut Session, p: &Json) -> Result<Json> {
             }
             ok
         };
-        pt.rows.retain(|f| keep(&f.source_col, &mut dropped));
-        pt.columns.retain(|f| keep(&f.source_col, &mut dropped));
+        // Axis fields leave one by one so Σ Values keeps its place among the rest.
+        for rows in [true, false] {
+            let mut i = 0;
+            loop {
+                let list = if rows { &mut pt.rows } else { &mut pt.columns };
+                let Some(f) = list.get(i) else { break };
+                if keep(&f.source_col, &mut dropped) {
+                    i += 1;
+                } else {
+                    list.remove(i);
+                    shift_values(pt, rows, i, false);
+                }
+            }
+        }
         pt.values.retain(|f| keep(&f.source_col, &mut dropped));
         pt.filters.retain(|f| keep(&f.source_col, &mut dropped));
         Ok(json!({"source": source, "dropped": dropped}))
@@ -1807,6 +1820,12 @@ mod tests {
         assert_eq!(val(&s, "B13"), Value::Number(TOTAL));
         assert_eq!(text(&s, "A14"), "Total Sum of Units");
         assert_eq!(val(&s, "B14"), Value::Number(72.0));
+        // Tabular, no column field: "Total" heads the data column, as Excel saves it.
+        s.execute("pivot.layout", json!({"layout": "tabular"})).unwrap();
+        assert_eq!(text(&s, "A3"), "Region");
+        assert_eq!(text(&s, "B3"), "Values");
+        assert_eq!(text(&s, "C3"), "Total");
+        s.execute("pivot.layout", json!({"layout": "compact"})).unwrap();
         // Σ Values before Region: the value fields are the outer items.
         s.execute("pivot.moveField", json!({"field": "Values", "from": "rows", "to": "rows", "position": 0})).unwrap();
         assert_eq!(pt(&s).values_position, Some(0));
@@ -1839,6 +1858,36 @@ mod tests {
         assert_eq!(text(&s, "B3"), "Sum of Units");
         assert!(s.execute("pivot.moveField", json!({"field": "Σ Values", "from": "columns", "to": "filters"})).is_err());
         assert!(s.execute("pivot.moveField", json!({"field": "Σ Values", "from": "rows", "to": "columns"})).is_err());
+    }
+
+    #[test]
+    fn values_stay_last_in_columns() {
+        let mut s = sales();
+        s.execute("insert.pivotTable", json!({"rows": ["Product"], "columns": ["Region"], "values": ["Sales", "Units"]})).unwrap();
+        s.execute("pivot.moveField", json!({"field": "Σ Values", "from": "columns", "to": "columns", "position": 0})).unwrap();
+        let p = pt(&s);
+        assert!(!p.values_on_rows);
+        assert_eq!(p.values_position, None);
+        // Σ Values to Rows and back with a position: still last in Columns.
+        s.execute("pivot.moveField", json!({"field": "Σ Values", "from": "columns", "to": "rows"})).unwrap();
+        s.execute("pivot.moveField", json!({"field": "Σ Values", "from": "rows", "to": "columns", "position": 0})).unwrap();
+        assert_eq!(pt(&s).values_position, None);
+        assert_eq!(text(&s, "B5"), "Sum of Sales");
+        assert_eq!(text(&s, "C5"), "Sum of Units");
+    }
+
+    #[test]
+    fn change_source_keeps_values_ahead_of_its_field() {
+        let mut s = sales();
+        s.execute("insert.pivotTable", json!({"rows": ["Region", "Product"], "values": ["Sales", "Units"]})).unwrap();
+        s.execute("pivot.moveField", json!({"field": "Σ Values", "from": "columns", "to": "rows", "position": 1})).unwrap();
+        // The new source has no Region: Σ Values stays ahead of Product.
+        s.execute("pivot.changeSource", json!({"source": "Sheet1!B1:E13"})).unwrap();
+        let p = pt(&s);
+        assert_eq!(p.rows.len(), 1);
+        assert_eq!(p.values_position, Some(0));
+        assert_eq!(text(&s, "A4"), "Sum of Sales");
+        assert_eq!(text(&s, "A5"), "Apples");
     }
 
     #[test]

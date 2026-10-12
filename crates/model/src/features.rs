@@ -978,7 +978,8 @@ pub struct PivotTable {
     /// The Σ Values pseudo-field (it exists with two or more value fields) sits in Rows rather
     /// than Columns (Excel's "values on rows").
     pub values_on_rows: bool,
-    /// Position of Σ Values among the fields of its area (`None` = after the last).
+    /// Position of Σ Values among the row fields (`None` = after the last). Only used with
+    /// `values_on_rows`: in Columns Σ Values always comes after the last column field.
     pub values_position: Option<usize>,
 }
 
