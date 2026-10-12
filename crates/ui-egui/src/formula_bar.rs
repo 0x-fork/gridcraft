@@ -336,8 +336,7 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
     }
     // Column AutoComplete: the rest of the suggested entry, shown selected after the caret.
     if let Some(full) = &ed.completion
-        && full.len() > ed.text.len()
-        && let Some(rest) = full.get(ed.text.len()..)
+        && let Some(rest) = crate::editor::completion_rest(full, &ed.text)
     {
         let pos = resp.rect.left_top() + egui::vec2(output.galley.rect.width(), 0.0);
         let g = ui.painter().layout_no_wrap(
