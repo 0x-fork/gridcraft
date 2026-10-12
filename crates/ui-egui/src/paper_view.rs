@@ -921,6 +921,6 @@ mod tests {
         // Header/footer distances are measured from the top / bottom edge.
         assert_eq!(margin_from_drag(Edge::Header, 36.0, A4, m), Some(0.5));
         assert_eq!(margin_from_drag(Edge::Footer, f64::from(A4.1) - 18.0, A4, m), Some(0.25));
-        assert_eq!(margin_from_drag(Edge::Footer, -1e9, A4, m), Some(0.0));
+        assert_eq!(margin_from_drag(Edge::Footer, 1e9, A4, m), Some(0.0));
     }
 }
