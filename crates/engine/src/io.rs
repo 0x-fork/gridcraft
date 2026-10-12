@@ -144,7 +144,9 @@ fn rename_first_sheet(wb: &mut Workbook, path: &str) {
     let stem = std::path::Path::new(path).file_stem().and_then(|s| s.to_str()).unwrap_or("Sheet1");
     let clean: String = stem.chars().filter(|c| !matches!(c, ':' | '\\' | '/' | '?' | '*' | '[' | ']')).take(31).collect();
     let clean = clean.trim_matches('\'').to_string();
+    // "History" is reserved (see `Workbook::check_sheet_name`): keep the default name instead.
     if !clean.is_empty()
+        && !clean.eq_ignore_ascii_case("History")
         && let Some(sh) = wb.sheet_mut(0)
     {
         sh.name = clean;
@@ -432,6 +434,17 @@ mod tests {
         assert!(has_macros("book.xltm"), "a macro-enabled template keeps the VBA project");
         assert!(!has_macros("book.xltx"), "a macro-free template never carries a VBA project");
         assert!(wb.vba_project.is_some(), "the open workbook keeps its macros");
+    }
+
+    #[test]
+    fn csv_named_history_does_not_get_the_reserved_sheet_name() {
+        for file in ["History.csv", "hIsToRy.csv", "history.tsv"] {
+            let (wb, _) = open_bytes(file, b"1\n").unwrap();
+            let name = wb.sheets[0].name.clone();
+            assert!(wb.check_sheet_name(&name, Some(0)).is_ok(), "{file} opened as {name:?}");
+        }
+        let (wb, _) = open_bytes("Sales.csv", b"1\n").unwrap();
+        assert_eq!(wb.sheets[0].name, "Sales");
     }
 
     /// A minimal compound (CFB/OLE2) file — FAT in sector 0, directory in sector 1 — holding a
