@@ -902,3 +902,24 @@ fn union_series_references() {
     c.series[0].values = format!("{}Sheet1!$B$1,Sheet1!$B$2{}", "(".repeat(5000), ")".repeat(5000));
     let _ = resolve(&wb, 0, &c);
 }
+
+#[test]
+fn box_and_stock_charts_honour_the_gridlines_flag() {
+    // Horizontal full-width lines in the gridline colour are the value-axis gridlines.
+    let grid: Rgba = [217, 217, 217, 255];
+    let is_grid = |p: &Prim| match p {
+        Prim::Line { color, pts, .. } => *color == grid && pts.len() == 2 && pts[0][1] == pts[1][1] && pts[1][0] - pts[0][0] > 200.0,
+        _ => false,
+    };
+    let grids = |prims: &[Prim]| prims.iter().filter(|p| is_grid(p)).count();
+    for kind in [ChartKind::BoxWhisker, ChartKind::Stock, ChartKind::ColumnClustered] {
+        let mut d = sample(kind);
+        d.series.push(series("Close", &[10000.0, 12000.0, 9000.0, 14000.0, 20000.0, 16000.0], [90, 90, 90, 255], kind));
+        let mut c = chart(kind);
+        let on = render(&c, &d, 500.0, 350.0, &ApproxMeasure);
+        c.gridlines = false;
+        let off = render(&c, &d, 500.0, 350.0, &ApproxMeasure);
+        assert!(grids(&on) > 0, "{kind:?}: gridlines on must draw lines");
+        assert_eq!(grids(&off), 0, "{kind:?}: gridlines off must hide them");
+    }
+}
