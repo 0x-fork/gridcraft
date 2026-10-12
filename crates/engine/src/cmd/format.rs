@@ -241,7 +241,7 @@ pub(crate) fn apply_style(s: &mut Session, p: &Json, f: impl Fn(&mut Style)) -> 
                     let new = *cache.entry(*st).or_insert_with(|| cx.wb.styles.derive(*st, &f));
                     cx.sheet_mut(sheet)?.set_style(*c, new);
                 }
-                // Formatting changed these cells' fonts: re-fit their rows (Excel auto-fits).
+                // Formatting touched these cells: re-fit their rows (Excel auto-fits).
                 cx.fit_rows.extend(cells.iter().map(|(c, _)| (sheet, c.row)));
                 continue;
             }

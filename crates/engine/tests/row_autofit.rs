@@ -45,3 +45,17 @@ fn whole_row_format_does_not_resize_custom_height_rows() {
     s.execute("home.fontSize", json!({"range": "5:5", "size": 20})).unwrap();
     assert_eq!(s.doc().unwrap().wb.active().unwrap().row_height(4), 25.0, "custom-height rows keep their height");
 }
+
+#[test]
+fn whole_row_format_keeps_hidden_rows_hidden() {
+    let mut s = gridcraft_engine::Session::new();
+    s.new_workbook();
+    s.execute("range.setValues", json!({"range": "A5", "values": [["plain big bold"]]})).unwrap();
+    let before = s.doc().unwrap().wb.active().unwrap().row_height(4);
+    sheet_mut(&mut s).rows.entry(4).or_default().hidden = true;
+    s.execute("home.fontSize", json!({"range": "5:5", "size": 20})).unwrap();
+    let sh = s.doc().unwrap().wb.active().unwrap();
+    let info = sh.rows.get(&4).unwrap();
+    assert!(info.size.unwrap_or(before) > before + 10.0, "hidden row still grows to its font: before={before}, size={:?}", info.size);
+    assert!(info.hidden, "formatting a hidden row must not unhide it");
+}
