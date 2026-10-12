@@ -134,7 +134,8 @@ pub struct FileReport {
     pub path: String,
     /// GridCraft couldn't open the file: its message.
     pub error: Option<String>,
-    pub warnings: usize,
+    /// Import warnings, in the order the importer produced them.
+    pub warnings: Vec<String>,
     pub calc: CalcReport,
     pub round_trip: RoundTrip,
 }
@@ -280,7 +281,7 @@ fn check_inner(path: &str, bytes: &[u8], opts: &Options) -> FileReport {
             return report;
         }
     };
-    report.warnings = warnings.len();
+    report.warnings = warnings;
     let mut fresh = cached.clone();
     let mut calc = Calc::new();
     calc.recalc_all(&mut fresh);
@@ -1340,6 +1341,15 @@ mod tests {
         assert!(validate_package(b"not a zip").is_err());
         let own = gridcraft_engine::io::save_bytes(&book(&[("A1", "=1", n(1.0))]), "t.xlsx").unwrap();
         assert_eq!(validate_package(&own).unwrap(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn json_lists_warning_messages() {
+        let with = FileReport { path: "a.ods".into(), warnings: vec!["ODS data-only import".into()], ..Default::default() };
+        let without = FileReport { path: "b.xlsx".into(), ..Default::default() };
+        let v = report_json(&[with, without], &Options::default());
+        assert_eq!(v["files"][0]["warnings"], json!(["ODS data-only import"]));
+        assert_eq!(v["files"][1]["warnings"], json!([]));
     }
 
     #[test]
