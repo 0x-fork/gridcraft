@@ -968,3 +968,18 @@ fn trim_references() {
     t.set("K20", "=SUM(Q1:.Q9)");
     assert_eq!(t.get("K20"), Value::Error(CellError::Calc));
 }
+
+#[test]
+fn cell_width_is_the_column_width_dialog_value_rounded() {
+    // #735: Excel 365 values. Widths in px as `home.columnWidth {"chars"}` sets them
+    // (chars * 7 + 5): 10.71 -> 80, 12 -> 89, 10.57 -> 79, 2.86 -> 25; B keeps the default 8.43 (64).
+    let mut t = T::new();
+    let sh = t.wb.sheet_mut(0).unwrap();
+    for (col, px) in [(2, 80.0), (3, 89.0), (4, 79.0), (5, 25.0)] {
+        sh.cols.insert(col, gridcraft_model::LineInfo { size: Some(px), ..Default::default() });
+    }
+    for (at, col) in [("H1", "B"), ("H2", "C"), ("H3", "D"), ("H4", "E"), ("H5", "F")] {
+        t.set(at, &format!("=CELL(\"width\",{col}1)"));
+    }
+    assert_eq!([t.num("H1"), t.num("H2"), t.num("H3"), t.num("H4"), t.num("H5")], [8.0, 11.0, 12.0, 11.0, 3.0]);
+}
