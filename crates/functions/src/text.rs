@@ -5,7 +5,8 @@ use gridcraft_core::{CellError, Value, number_to_text};
 
 use crate::criteria::wildcard_find;
 use crate::util::{
-    A, MAX_TEXT, R, S, arg, array_val, as_array, boolean, has, num, num_val, opt_bool, opt_int, opt_num, round_half_away, scalar, text, text_val,
+    A, MAX_CELLS, MAX_TEXT, R, S, arg, array_val, as_array, boolean, has, num, num_val, opt_bool, opt_int, opt_num, round_half_away, scalar, text,
+    text_val,
 };
 use crate::{Arg, Ctx, FnSpec, VAR};
 
@@ -610,6 +611,9 @@ fn textsplit(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     }
     let ncols = rows.iter().map(Vec::len).max().unwrap_or(1).max(1);
     let nrows = rows.len();
+    if nrows.saturating_mul(ncols) > MAX_CELLS {
+        return Err(CellError::Num);
+    }
     let mut data = Vec::with_capacity(nrows * ncols);
     for r in rows {
         let n = r.len();
@@ -1131,6 +1135,13 @@ mod tests {
         assert_eq!(rows_of(&v), vec![vec![tv("a"), tv("b"), tv("c")]]);
         let v = ev("TEXTSPLIT", vec![t("a,b;c"), t(","), t(";"), b(false), n(0.0), t("-")]);
         assert_eq!(rows_of(&v)[1], vec![tv("c"), tv("-")]);
+    }
+
+    #[test]
+    fn split_rejects_oversized_padded_grid() {
+        // One row of 8000 columns followed by 8000 one-cell rows: the text is under the cell-text limit, the padded grid is not.
+        let text = format!("{}{}", "a,".repeat(8000), "b;".repeat(8000));
+        is_err(ev("TEXTSPLIT", vec![t(&text), t(","), t(";")]), CellError::Num);
     }
 
     #[test]
