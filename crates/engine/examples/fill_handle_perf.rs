@@ -2,6 +2,8 @@
 //! row-by-row `value_ref` loop from `grid.rs` vs. `Sheet::last_contiguous_nonempty`.
 //! `cargo run --release -p gridcraft-engine --example fill_handle_perf -- [rows]`
 
+#![allow(clippy::disallowed_methods)] // a native-only benchmark: wasm never runs it
+
 use std::time::Instant;
 
 use gridcraft_engine::Session;
