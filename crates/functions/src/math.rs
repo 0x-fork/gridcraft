@@ -957,7 +957,7 @@ fn criteria_mask(a: &[Arg], first_pair: usize, rows: usize, cols: usize) -> R<Ve
         if r.rows != rows || r.cols != cols {
             return Err(CellError::Value);
         }
-        let c = Criterion::parse(&crit.value.scalar());
+        let c = Criterion::parse_arg(&crit.value.scalar())?;
         for (m, v) in mask.iter_mut().zip(r.iter()) {
             if *m && !c.matches(v) {
                 *m = false;
@@ -1017,7 +1017,7 @@ fn minifs(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
 
 fn countif(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     let range = as_array(&crate::util::arg(a, 0)?.value);
-    let c = Criterion::parse(&crate::util::arg(a, 1)?.value.scalar());
+    let c = Criterion::parse_arg(&crate::util::arg(a, 1)?.value.scalar())?;
     num_val(range.iter().filter(|v| c.matches(v)).count() as f64)
 }
 
@@ -1026,7 +1026,7 @@ fn countif(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
 /// the evaluator does that resizing (it has the references), so cells line up one to one here.
 fn if_numbers(a: &[Arg]) -> R<Vec<f64>> {
     let range = as_array(&crate::util::arg(a, 0)?.value);
-    let c = Criterion::parse(&crate::util::arg(a, 1)?.value.scalar());
+    let c = Criterion::parse_arg(&crate::util::arg(a, 1)?.value.scalar())?;
     let sum_range = if has(a, 2) { Some(as_array(&crate::util::arg(a, 2)?.value)) } else { None };
     let mut out = Vec::new();
     for r in 0..range.rows {
@@ -1642,5 +1642,17 @@ mod tests {
         is_err(ev("SUMIFS", vec![rf(qty.clone()), rf(row(&[1.0, 2.0])), t("1")]), CellError::Value);
         is_err(ev("COUNTIFS", vec![rf(qty.clone()), t(">1"), rf(qty)]), CellError::Value);
         is_err(ev("SUMIF", vec![rf(col(&[1.0, 2.0])), t(">0"), rf(arr(vec![vec![Value::Error(NA)], vec![nv(1.0)]]))]), NA);
+    }
+
+    #[test]
+    fn criteria_longer_than_255_chars_are_value_errors() {
+        let ok = "x".repeat(255);
+        let long = "x".repeat(256);
+        let cells = arr(vec![vec![tv(&ok)], vec![tv(&long)]]);
+        let qty = col(&[1.0, 2.0]);
+        close(ev("COUNTIF", vec![rf(cells.clone()), t(&ok)]), 1.0);
+        is_err(ev("COUNTIF", vec![rf(cells.clone()), t(&long)]), CellError::Value);
+        close(ev("SUMIFS", vec![rf(qty.clone()), rf(cells.clone()), t(&ok)]), 1.0);
+        is_err(ev("SUMIFS", vec![rf(qty), rf(cells), t(&long)]), CellError::Value);
     }
 }

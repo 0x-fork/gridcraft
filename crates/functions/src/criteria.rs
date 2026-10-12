@@ -5,6 +5,9 @@ use std::cmp::Ordering;
 use gridcraft_core::parse::parse_number_text;
 use gridcraft_core::{CellError, Value, compare_numbers, compare_text};
 
+/// Longest text criterion COUNTIF and its relatives accept; a longer one is `#VALUE!`.
+const MAX_CRITERION_CHARS: usize = 255;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Op {
     Eq,
@@ -45,6 +48,16 @@ impl Criterion {
             Value::Empty => Criterion { op: Op::Eq, operand: Operand::Number(0.0), bare_empty: false },
             Value::Array(a) => Criterion::parse(a.data.first().unwrap_or(&Value::Empty)),
             Value::Text(t) => Criterion::parse_text(t),
+        }
+    }
+
+    /// Parses the criteria argument of COUNTIF(S), SUMIF(S), AVERAGEIF(S), MAXIFS and MINIFS:
+    /// like `parse`, but text longer than 255 characters is `#VALUE!`, as in Excel.
+    pub(crate) fn parse_arg(v: &Value) -> Result<Criterion, CellError> {
+        match v {
+            Value::Array(a) => Criterion::parse_arg(a.data.first().unwrap_or(&Value::Empty)),
+            Value::Text(t) if t.chars().nth(MAX_CRITERION_CHARS).is_some() => Err(CellError::Value),
+            other => Ok(Criterion::parse(other)),
         }
     }
 
