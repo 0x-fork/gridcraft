@@ -896,7 +896,7 @@ fn subtract_range(r: RangeRef, cut: &RangeRef) -> Vec<RangeRef> {
 }
 
 /// Removes the cells of `cuts` from every validation, keeping the rest of each rule's ranges.
-fn remove_validation_cells(validations: &mut Vec<Validation>, cuts: &[RangeRef]) {
+pub(super) fn remove_validation_cells(validations: &mut Vec<Validation>, cuts: &[RangeRef]) {
     for dv in validations.iter_mut() {
         for cut in cuts {
             dv.ranges = dv.ranges.iter().flat_map(|r| subtract_range(*r, cut)).collect();
@@ -1044,6 +1044,18 @@ fn formula_at(f: &str, first: CellRef, at: CellRef) -> String {
         )),
         Err(_) => f.to_string(),
     }
+}
+
+/// Moves the relative references of a rule formula written for `first` so it reads the same cells from `to`
+/// (pasting a rule); text without relative references (constants, literal lists) stays as typed.
+pub(super) fn move_rule_formula(f: &str, first: CellRef, to: CellRef) -> String {
+    if first == to {
+        return f.to_string();
+    }
+    let moved = formula_at(f, first, to);
+    let has_relative = gridcraft_formula::parse(f.trim_start_matches('=')).is_ok_and(|e| gridcraft_formula::print(&e) != moved);
+    let eq = if f.starts_with('=') { "=" } else { "" };
+    if has_relative { format!("{eq}{moved}") } else { f.to_string() }
 }
 
 fn compare_op(op: CfOperator, n: f64, a: Option<f64>, b: Option<f64>) -> bool {

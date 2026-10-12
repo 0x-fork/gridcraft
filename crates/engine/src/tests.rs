@@ -2795,3 +2795,32 @@ fn a_decrypted_workbook_never_overwrites_its_encrypted_original() {
     assert_eq!(std::fs::read(&path).unwrap(), bytes, "the encrypted original is untouched");
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn paste_special_validation_copies_the_rule() {
+    let mut s = s();
+    let ok = |s: &mut Session, cell: &str, input: &str| s.execute("data.validate", json!({"cell": cell, "input": input})).unwrap()["ok"] == true;
+    s.execute("cell.set", json!({"cell": "A1", "input": "5"})).unwrap();
+    s.execute("cell.set", json!({"cell": "C3", "input": "7"})).unwrap();
+    s.execute("data.validation", json!({"range": "A1", "type": "whole", "operator": "greater", "formula1": "0"})).unwrap();
+    s.execute("edit.copy", json!({"range": "A1"})).unwrap();
+    s.execute("edit.pasteSpecial", json!({"what": "formats", "at": "E5"})).unwrap();
+    assert!(ok(&mut s, "E5", "-1"));
+    s.execute("edit.pasteSpecial", json!({"what": "validation", "at": "C3"})).unwrap();
+    assert!(!ok(&mut s, "C3", "-1"));
+    assert!(ok(&mut s, "C3", "1"));
+    assert!(!ok(&mut s, "A1", "-1"));
+    assert_eq!(s.execute("cell.get", json!({"cell": "C3"})).unwrap()["text"], json!("7"));
+}
+
+#[test]
+fn paste_special_validation_moves_relative_references() {
+    let mut s = s();
+    let ok = |s: &mut Session, cell: &str, input: &str| s.execute("data.validate", json!({"cell": cell, "input": input})).unwrap()["ok"] == true;
+    s.execute("cell.set", json!({"cell": "A1", "input": "50"})).unwrap();
+    s.execute("data.validation", json!({"range": "A1", "type": "custom", "formula1": "=A1>10"})).unwrap();
+    s.execute("edit.copy", json!({"range": "A1"})).unwrap();
+    s.execute("edit.pasteSpecial", json!({"what": "validation", "at": "C3"})).unwrap();
+    assert!(!ok(&mut s, "C3", "5"), "the pasted rule checks C3, not A1");
+    assert!(ok(&mut s, "C3", "20"));
+}
