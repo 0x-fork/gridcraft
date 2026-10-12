@@ -104,6 +104,8 @@ pub struct GridState {
     pub hf_start: bool,
     /// The grid geometry of the last frame (hit-testing for agents and tests).
     pub geo: Option<Geo>,
+    /// The horizontal scrollbar's track in the sheet tab bar (hit-testing for tests).
+    pub hscroll: Option<Rect>,
 }
 
 impl GridState {
@@ -228,6 +230,13 @@ impl Geo {
         match &self.paper {
             Some(pg) => pg.row_y(row) as f32,
             None => (sh.row_top(row) - sh.row_top(self.fr)) as f32,
+        }
+    }
+    /// Scroll offset (in `scroll` units) at which `col` reaches the left of the scrolled area.
+    pub fn scroll_left_of(&self, sh: &Sheet, col: u32) -> f32 {
+        match &self.paper {
+            Some(pg) => pg.col_x(col) as f32,
+            None => (sh.col_left(col) - sh.col_left(self.fc)) as f32,
         }
     }
     /// Screen x for a logical x (and back): identity unless the sheet is right-to-left.
@@ -725,6 +734,63 @@ fn vertical_scrollbar(app: &mut SheetApp, ui: &mut egui::Ui, sh: &Sheet, geo: &G
     if next != scroll {
         if let Some(v) = app.view_mut() {
             v.scroll.y = next;
+        }
+        ui.ctx().request_repaint();
+    }
+}
+
+/// The horizontal counterpart of `vertical_scrollbar`, drawn in the sheet tab bar as in Excel. The tab
+/// bar is laid out before the grid, so this reads the last frame's geometry and leaves clamping the
+/// far end to the grid, which runs later in the same frame.
+pub(crate) fn horizontal_scrollbar(app: &mut SheetApp, ui: &mut egui::Ui, track: Rect, t: &Tokens) {
+    app.grid.hscroll = Some(track);
+    if track.height() <= 0.0 || track.width() <= 0.0 {
+        return;
+    }
+    let Some(geo) = app.grid.geo.clone() else { return };
+    let Some(wb) = app.session.active().map(|d| d.wb.clone()) else { return };
+    let Some(sh) = wb.active() else { return };
+    let visible = ((geo.cells.width() - geo.frozen_w) / geo.z).max(0.0);
+    let scroll = app.view().scroll.x;
+    let last = sh.used_range().map(|r| r.end.col.saturating_add(10)).unwrap_or(26).clamp(26, MAX_COLS - 1);
+    let content = geo.scroll_left_of(sh, last);
+    let extent = (content - visible).max(scroll).max(0.0);
+    let id = ui.id().with("hscroll");
+    let resp = ui.interact(track, id, Sense::click_and_drag());
+    let drag_id = id.with("extent");
+    if resp.drag_started() {
+        ui.ctx().data_mut(|d| d.insert_temp(drag_id, extent));
+    }
+    let extent = if resp.dragged() { ui.ctx().data(|d| d.get_temp::<f32>(drag_id)).unwrap_or(extent) } else { extent };
+    let thumb_w = (track.width() * visible / (extent + visible).max(1.0)).clamp(24.0_f32.min(track.width()), track.width());
+    let travel = track.width() - thumb_w;
+    let offset = if extent > 0.0 { travel * (scroll / extent).clamp(0.0, 1.0) } else { 0.0 };
+    // A right-to-left sheet scrolls towards the left, so its thumb starts at the right end.
+    let dir = if geo.rtl { -1.0 } else { 1.0 };
+    let thumb_left = if geo.rtl { track.right() - thumb_w - offset } else { track.left() + offset };
+    let thumb = Rect::from_min_size(pos2(thumb_left, track.top() + 3.0), vec2(thumb_w, (track.height() - 6.0).max(0.0)));
+    ui.painter().rect_filled(track, 0.0, t.tab_bar);
+    ui.painter().rect_filled(thumb, 4.0, if resp.hovered() || resp.dragged() { t.text_dim } else { t.text_disabled });
+    let mut next = scroll;
+    if resp.dragged() && travel > 0.0 {
+        next += dir * resp.drag_delta().x / travel * extent;
+    } else if resp.clicked()
+        && let Some(p) = resp.interact_pointer_pos()
+    {
+        if p.x < thumb.left() {
+            next -= dir * visible;
+        } else if p.x > thumb.right() {
+            next += dir * visible;
+        }
+    }
+    if resp.hovered() {
+        let d = ui.input(|i| i.smooth_scroll_delta);
+        next -= (if d.x != 0.0 { dir * d.x } else { d.y }) / geo.z;
+    }
+    next = next.max(0.0);
+    if next != scroll {
+        if let Some(v) = app.view_mut() {
+            v.scroll.x = next;
         }
         ui.ctx().request_repaint();
     }
