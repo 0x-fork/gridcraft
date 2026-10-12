@@ -249,6 +249,20 @@ fn unbracketed_this_row_column() {
 }
 
 #[test]
+fn struct_column_keeps_edge_spaces() {
+    // The spaces are part of the column name: `Table1[Qty ]` names `Qty `, never `Qty`.
+    let Expr::Struct(s) = parse("Table1[Qty ]").unwrap() else { panic!() };
+    assert_eq!(s.col_start.as_deref(), Some("Qty "));
+    let Expr::Struct(s) = parse("Table1[ Qty]").unwrap() else { panic!() };
+    assert_eq!(s.col_start.as_deref(), Some(" Qty"));
+    // Excel writes such a column in the double-bracket form.
+    assert_eq!(rt("Table1[Qty ]"), "Table1[[Qty ]]");
+    for f in ["Table1[[Qty ]]", "Table1[[ Sum for Q2 ]]", "Table1[[#Totals],[Qty ]]", "Table1[@[Qty ]]", "Table1[Unit Price]"] {
+        assert_eq!(rt(f), f);
+    }
+}
+
+#[test]
 fn trim_references() {
     for f in [
         "SUM(A1:.E10)",

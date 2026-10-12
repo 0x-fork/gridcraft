@@ -1019,6 +1019,36 @@ fn tables_and_structured_refs() {
 }
 
 #[test]
+fn structured_refs_to_columns_with_edge_spaces() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Item", "Qty "], ["a", 2], ["b", 3]]})).unwrap();
+    s.execute("insert.table", json!({"range": "A1:B3", "hasHeaders": true})).unwrap();
+    s.execute("table.totalRow", json!({"on": true, "table": "Table1"})).unwrap();
+    assert_eq!(v(&s, "B4"), Value::Number(5.0));
+    for (cell, input) in [
+        ("F1", "=SUM(Table1[Qty ])"),
+        ("F2", "=Table1[[#Totals],[Qty ]]"),
+        ("F3", "=SUBTOTAL(109,Table1[Qty ])"),
+        ("F4", "=SUM(Table1[[Qty ]])"),
+        ("F5", "=SUM(Table1[Qty])"),
+        ("C2", "=Table1[@[Qty ]]*10"),
+    ] {
+        s.execute("cell.set", json!({"cell": cell, "input": input})).unwrap();
+    }
+    let n = Value::Number;
+    assert_eq!([v(&s, "F1"), v(&s, "F2"), v(&s, "F3"), v(&s, "F4")], [n(5.0), n(5.0), n(5.0), n(5.0)]);
+    assert_eq!(v(&s, "F5"), Value::Error(gridcraft_core::CellError::Ref));
+    assert_eq!(v(&s, "C2"), n(20.0));
+    assert_eq!(s.execute("cell.get", json!({"cell": "F3"})).unwrap()["formula"], "=SUBTOTAL(109,Table1[[Qty ]])");
+
+    let r = s.execute("file.saveBytes", json!({"format": "xlsx"})).unwrap();
+    let b64 = r["base64"].as_str().unwrap().to_string();
+    s.execute("file.open", json!({"name": "x.xlsx", "base64": b64})).unwrap();
+    assert_eq!(s.execute("cell.get", json!({"cell": "F3"})).unwrap()["formula"], "=SUBTOTAL(109,Table1[[Qty ]])");
+    assert_eq!([v(&s, "F1"), v(&s, "F2"), v(&s, "F3")], [n(5.0), n(5.0), n(5.0)]);
+}
+
+#[test]
 fn slicer_filters_table() {
     let mut s = s();
     s.execute("range.setValues", json!({"range": "A1", "values": [["Region", "Qty"], ["East", 2], ["West", 5], ["East", 3], ["North", 1]]})).unwrap();
