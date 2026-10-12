@@ -570,14 +570,23 @@ pub(crate) fn apply_filter(wb: &mut Workbook, sheet: usize) {
     let Some(af) = sh.autofilter.clone() else { return };
     let r = af.range;
     let mut hide = Vec::new();
-    // Precompute per-column numbers for top10/average.
-    let mut col_stats: std::collections::HashMap<u32, (Vec<f64>, f64)> = std::collections::HashMap::new();
+    // Precompute per-column top10 threshold and average once, not per row.
+    let mut col_stats: std::collections::HashMap<u32, (Option<f64>, f64)> = std::collections::HashMap::new();
     for (off, c) in &af.criteria {
         if matches!(c, FilterCriterion::Top10 { .. } | FilterCriterion::AboveAverage(_)) {
             let col = r.start.col + off;
-            let nums: Vec<f64> = (r.start.row + 1..=r.end.row).filter_map(|row| sh.value(CellRef::new(row, col)).as_f64()).collect();
+            let mut nums: Vec<f64> = (r.start.row + 1..=r.end.row).filter_map(|row| sh.value(CellRef::new(row, col)).as_f64()).collect();
             let avg = if nums.is_empty() { 0.0 } else { nums.iter().sum::<f64>() / nums.len() as f64 };
-            col_stats.insert(*off, (nums, avg));
+            let thr = match c {
+                FilterCriterion::Top10 { bottom, percent, count } => {
+                    nums.sort_by(|a, b| if *bottom { a.partial_cmp(b) } else { b.partial_cmp(a) }.unwrap_or(Ordering::Equal));
+                    let k = if *percent { ((nums.len() as f64) * (*count as f64) / 100.0).ceil() as usize } else { *count as usize };
+                    let k = k.clamp(1, nums.len().max(1));
+                    nums.get(k - 1).copied()
+                }
+                _ => None,
+            };
+            col_stats.insert(*off, (thr, avg));
         }
     }
     for row in r.start.row + 1..=r.end.row {
@@ -604,13 +613,9 @@ pub(crate) fn apply_filter(wb: &mut Workbook, sheet: usize) {
                         None => x,
                     }
                 }
-                FilterCriterion::Top10 { bottom, percent, count } => match (v.as_f64(), col_stats.get(off)) {
-                    (Some(n), Some((nums, _))) => {
-                        let mut sorted = nums.clone();
-                        sorted.sort_by(|a, b| if *bottom { a.partial_cmp(b) } else { b.partial_cmp(a) }.unwrap_or(Ordering::Equal));
-                        let k = if *percent { ((sorted.len() as f64) * (*count as f64) / 100.0).ceil() as usize } else { *count as usize };
-                        let k = k.clamp(1, sorted.len().max(1));
-                        let thr = sorted.get(k - 1).copied().unwrap_or(n);
+                FilterCriterion::Top10 { bottom, .. } => match (v.as_f64(), col_stats.get(off)) {
+                    (Some(n), Some((thr, _))) => {
+                        let thr = thr.unwrap_or(n);
                         if *bottom { n <= thr } else { n >= thr }
                     }
                     _ => false,

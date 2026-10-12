@@ -805,6 +805,24 @@ fn sort_and_filter() {
     assert_eq!(r["hiddenRows"], 1);
 }
 
+/// Top 10 keeps the top or bottom N items or percent, ties at the threshold included.
+#[test]
+fn filter_top10_items_and_percent() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Score"], [5], [1], [9], [3], [9], [7], ["x"]]})).unwrap();
+    s.execute("selection.set", json!({"cell": "A1"})).unwrap();
+    s.execute("data.filter", json!({})).unwrap();
+    // Top 2 items: 9, 9 (the "x" text row is hidden too).
+    let r = s.execute("data.filterBy", json!({"column": "A", "top": {"count": 2}})).unwrap();
+    assert_eq!(r["hiddenRows"], 5);
+    // Bottom 2 items: 1, 3.
+    let r = s.execute("data.filterBy", json!({"column": "A", "top": {"count": 2, "bottom": true}})).unwrap();
+    assert_eq!(r["hiddenRows"], 5);
+    // Top 50 percent of 6 numbers = 3 items; the threshold 7 keeps 9, 9, 7.
+    let r = s.execute("data.filterBy", json!({"column": "A", "top": {"count": 50, "percent": true}})).unwrap();
+    assert_eq!(r["hiddenRows"], 4);
+}
+
 /// Turning the filter on with only the header row selected filters the data below it (#201).
 #[test]
 fn filter_on_a_selected_header_row_covers_the_data_below() {
