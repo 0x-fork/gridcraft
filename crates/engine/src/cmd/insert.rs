@@ -349,6 +349,9 @@ fn table_flag(s: &mut Session, p: &Json, which: &str) -> Result<Json> {
             "totals" => {
                 let v = on.unwrap_or(!t.totals_row);
                 if v != t.totals_row {
+                    if v && t.range.end.row.saturating_add(1) >= MAX_ROWS {
+                        return Err(EngineError::Other("There's no room below the table for the total row.".into()));
+                    }
                     t.totals_row = v;
                     if v {
                         t.range.end.row += 1;
