@@ -367,7 +367,7 @@ struct ComboState {
 }
 
 /// What the user did with an [`editable_combo`].
-enum ComboResult {
+pub(crate) enum ComboResult {
     None,
     /// A row was applied: clicked or Enter on the highlighted row.
     Picked(String),
@@ -378,7 +378,7 @@ enum ComboResult {
 /// Excel-style dropdown: a filter field (type to narrow the list) plus arrow/Enter selection.
 /// `items` are `(value, display)`; the value is what comes back. When `forced` (keytip invoke)
 /// or clicked, the popup opens, focuses the filter field, and selects its text.
-fn editable_combo(
+pub(crate) fn editable_combo(
     ui: &mut Ui,
     anchor: &egui::Response,
     salt: &'static str,
