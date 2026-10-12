@@ -454,9 +454,13 @@ fn toggle_filter(s: &mut Session, p: &Json) -> Result<Json> {
     if has {
         return edit(s, |cx| {
             let sh = cx.sheet_mut(sheet)?;
+            // Reveal only rows the filter hid; rows hidden by hand or by a collapsed group stay hidden.
+            let filtered: Vec<u32> = sh.rows.keys().copied().filter(|r| sh.is_row_filtered(*r)).collect();
             sh.autofilter = None;
-            for info in sh.rows.values_mut() {
-                info.hidden = false;
+            for r in filtered {
+                if let Some(info) = sh.rows.get_mut(&r) {
+                    info.hidden = false;
+                }
             }
             cx.structural = true;
             Ok(json!({"filter": false}))
@@ -1298,6 +1302,45 @@ mod tests {
         }
         assert!(ok(&mut s, "B1", "5"));
         assert!(!ok(&mut s, "B1", "150"));
+    }
+
+    #[test]
+    fn removing_an_autofilter_keeps_manually_hidden_and_collapsed_rows() {
+        let mut s = Session::new();
+        s.new_workbook();
+        s.execute("range.setValues", json!({"range": "A1", "values": [["H"], ["a"], ["b"], ["c"]]})).unwrap();
+        s.execute("range.setValues", json!({"range": "A10", "values": [["z"]]})).unwrap();
+        s.execute("data.group", json!({"rows": "2:4"})).unwrap();
+        s.execute("data.hideDetail", json!({"rows": "2:4"})).unwrap();
+        s.execute("home.hideRows", json!({"rows": "10:10"})).unwrap();
+        let hidden = |s: &Session| -> Vec<u32> {
+            let sh = s.doc().unwrap().wb.active().unwrap();
+            sh.rows.iter().filter(|(_, l)| l.hidden).map(|(r, _)| *r).collect()
+        };
+        let before = hidden(&s);
+        assert_eq!(before, [1, 2, 3, 9]);
+        s.execute("data.filter", json!({"range": "A1:A4"})).unwrap();
+        s.execute("data.filter", json!({"range": "A1:A4"})).unwrap();
+        assert!(s.doc().unwrap().wb.active().unwrap().autofilter.is_none());
+        assert_eq!(hidden(&s), before);
+        assert_eq!(row_state(&s, 4..=4), [(false, true)]);
+    }
+
+    #[test]
+    fn table_dropdown_setup_outside_the_table_keeps_manually_hidden_rows() {
+        let mut s = Session::new();
+        s.new_workbook();
+        s.execute("range.setValues", json!({"range": "A1", "values": [["H"], ["a"], ["b"], ["c"]]})).unwrap();
+        s.execute("range.setValues", json!({"range": "A10", "values": [["z"]]})).unwrap();
+        s.execute("insert.table", json!({"range": "A1:A4", "header": true})).unwrap();
+        s.execute("home.hideRows", json!({"rows": "3:3"})).unwrap();
+        s.execute("home.hideRows", json!({"rows": "10:10"})).unwrap();
+        s.execute("selection.set", json!({"range": "E1"})).unwrap();
+        // The table filter dropdown installs an AutoFilter on demand by toggling `data.filter` twice.
+        s.execute("data.filter", json!({"range": "A1:A4"})).unwrap();
+        s.execute("data.filter", json!({"range": "A1:A4"})).unwrap();
+        let sh = s.doc().unwrap().wb.active().unwrap();
+        assert_eq!(sh.rows.iter().filter(|(_, l)| l.hidden).map(|(r, _)| *r).collect::<Vec<_>>(), [2, 9]);
     }
 
     /// Rows 5:8 grouped, with 6:7 grouped again inside (0-based 4..=7 and 5..=6).
