@@ -162,3 +162,57 @@ fn insert_header_and_footer_switches_to_page_layout_view() {
     let e = h.state().grid.hf_edit.as_ref().expect("the header is being edited");
     assert_eq!((e.footer, e.section, e.texts[0].as_str()), (false, 1, "Left"));
 }
+
+fn margins(h: &Harness) -> [f32; 6] {
+    h.state().session.doc().unwrap().wb.active().unwrap().print.margins
+}
+
+fn mouse(h: &mut Harness, ev: Event) {
+    h.input_mut().events.push(ev);
+    h.step();
+}
+
+#[test]
+fn dragging_a_ruler_edge_previews_commits_on_release_as_one_undo_step_and_esc_cancels() {
+    let mut h = fixture();
+    let g = geo(&h);
+    let pg = g.paper.clone().unwrap();
+    let start_margins = margins(&h);
+    let ruler_y = h.state().grid.rect.unwrap().top() + 9.0;
+    let edge = pos2(screen(&g, pg.page_x(0) + pg.margins[0], 0.0).x, ruler_y);
+    // One inch further in = 96 layout pixels at 100% print scale; use the screen scale to be exact.
+    let per_inch = (72.0 / (pg.paper_pt.0 as f64 / pg.page_w)) as f32 * g.z;
+    let target = pos2(edge.x + per_inch, ruler_y);
+    h.run_steps(40);
+    mouse(&mut h, Event::PointerMoved(edge));
+    mouse(&mut h, Event::PointerButton { pos: edge, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    mouse(&mut h, Event::PointerMoved(pos2(edge.x + 5.0, ruler_y)));
+    mouse(&mut h, Event::PointerMoved(target));
+    h.run_steps(2);
+    // Live preview: the page content moved, the document did not change yet.
+    let live = geo(&h).paper.unwrap().margins[0];
+    assert!(live > pg.margins[0] + 1.0, "{live} vs {}", pg.margins[0]);
+    assert_eq!(margins(&h), start_margins);
+    let want = (start_margins[0] + 1.0 * 1.0).min(10.0);
+    mouse(&mut h, Event::PointerButton { pos: target, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    h.run_steps(3);
+    let after = margins(&h);
+    assert!((after[0] - want).abs() < 0.03, "{after:?} want left {want}");
+    assert_eq!(after[1..], start_margins[1..]);
+    // One undo step restores it.
+    h.state_mut().run("edit.undo", json!({})).unwrap();
+    h.run_steps(3);
+    assert_eq!(margins(&h), start_margins);
+    // Esc during a drag cancels: nothing is committed.
+    let g = geo(&h);
+    let pg = g.paper.clone().unwrap();
+    let edge = pos2(screen(&g, pg.page_x(0) + pg.margins[0], 0.0).x, ruler_y);
+    h.run_steps(40);
+    mouse(&mut h, Event::PointerMoved(edge));
+    mouse(&mut h, Event::PointerButton { pos: edge, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    mouse(&mut h, Event::PointerMoved(pos2(edge.x + per_inch, ruler_y)));
+    mouse(&mut h, Event::Key { key: Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE });
+    mouse(&mut h, Event::PointerButton { pos: edge, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+    h.run_steps(3);
+    assert_eq!(margins(&h), start_margins);
+}

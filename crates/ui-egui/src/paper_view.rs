@@ -284,6 +284,7 @@ pub(crate) fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Respo
         commit(app);
     }
     let Some(pg) = geo.paper.clone() else { return };
+    ruler_margins(app, ui, geo, &pg, sh, wb.active_sheet);
     if std::mem::take(&mut app.grid.hf_start) {
         begin(app, wb.active_sheet, sh, (pg.data_rows.0, pg.data_cols.0), HfZone { footer: false, section: 1 });
     }
@@ -594,6 +595,197 @@ pub(crate) fn paint_rulers(app: &SheetApp, p: &Painter, outer: Rect, geo: &Geo, 
     );
 }
 
+/// A page edge that can be dragged on a ruler.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Edge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+impl Edge {
+    /// Index into `PrintSettings::margins` / `PageGrid::margins`.
+    fn index(self) -> usize {
+        match self {
+            Edge::Left => 0,
+            Edge::Right => 1,
+            Edge::Top => 2,
+            Edge::Bottom => 3,
+        }
+    }
+    /// The `pageLayout.pageSetup` margin key.
+    fn key(self) -> &'static str {
+        ["left", "right", "top", "bottom"][self.index()]
+    }
+    fn label(self) -> &'static str {
+        ["Left Margin", "Right Margin", "Top Margin", "Bottom Margin"][self.index()]
+    }
+    fn horizontal(self) -> bool {
+        matches!(self, Edge::Left | Edge::Right)
+    }
+}
+
+/// A margin being dragged on a ruler: the page it started on and the previewed value (inches).
+#[derive(Clone, Debug)]
+pub struct RulerDrag {
+    pub sheet: usize,
+    pub edge: Edge,
+    /// Page column (horizontal ruler) or row (vertical ruler) the drag started on.
+    pub page: usize,
+    pub start_inches: f32,
+    pub inches: f32,
+}
+
+/// Content that must stay between the margins, in points.
+const MIN_CONTENT_PT: f64 = 36.0;
+/// Screen distance within which a ruler margin edge is grabbed.
+const EDGE_GRAB: f32 = 4.0;
+
+/// Margin (inches, rounded to 0.01) for an edge dragged to `rel_pt` points from the page's
+/// left/top edge. The margin stays on the page and leaves [`MIN_CONTENT_PT`] between the two
+/// margins of its axis. `None` for NaN/infinite input or a page without a size.
+pub fn margin_from_drag(edge: Edge, rel_pt: f64, page_pt: (f32, f32), margins_in: [f32; 4]) -> Option<f32> {
+    let page = f64::from(if edge.horizontal() { page_pt.0 } else { page_pt.1 });
+    if !rel_pt.is_finite() || !page.is_finite() || page <= 0.0 {
+        return None;
+    }
+    let other = f64::from(margins_in.get(edge.index() ^ 1).copied().filter(|v| v.is_finite())?).max(0.0) * 72.0;
+    let raw = match edge {
+        Edge::Left | Edge::Top => rel_pt,
+        Edge::Right | Edge::Bottom => page - rel_pt,
+    };
+    let max = (page - other - MIN_CONTENT_PT).max(0.0);
+    let pt = raw.clamp(0.0, max);
+    Some(((pt / 72.0 * 100.0).round() / 100.0) as f32)
+}
+
+/// The grid with a margin being dragged applied, so the page content follows the pointer.
+pub(crate) fn with_dragged_margin(app: &SheetApp, si: usize, pg: Arc<PageGrid>) -> Arc<PageGrid> {
+    let Some(d) = app.grid.ruler_drag.as_ref().filter(|d| d.sheet == si) else { return pg };
+    // Layout units per point (the print scale and pixel/point ratio).
+    let per_pt = pg.page_w / f64::from(pg.paper_pt.0);
+    let mut g = (*pg).clone();
+    let v = f64::from(d.inches) * 72.0 * per_pt;
+    if let Some(m) = g.margins.get_mut(d.edge.index()).filter(|_| v.is_finite() && per_pt.is_finite()) {
+        *m = v;
+    }
+    Arc::new(g)
+}
+
+/// Points per layout unit of the grid (paper size over the layout page size).
+fn pt_per_unit(pg: &PageGrid) -> Option<f64> {
+    let k = f64::from(pg.paper_pt.0) / pg.page_w;
+    (k.is_finite() && k > 0.0).then_some(k)
+}
+
+/// The margin edge of a visible page under `pos` on the horizontal (`h`) or vertical ruler.
+fn edge_at(geo: &Geo, pg: &PageGrid, pos: Pos2, h: bool) -> Option<(Edge, usize)> {
+    let ((i0, i1), (j0, j1)) = visible_pages(geo, pg);
+    let [ml, mr, mt, mb, ..] = pg.margins;
+    let mut best: Option<(f32, Edge, usize)> = None;
+    let mut consider = |d: f32, e: Edge, page: usize| {
+        if d <= EDGE_GRAB && best.is_none_or(|b| d < b.0) {
+            best = Some((d, e, page));
+        }
+    };
+    if h {
+        for j in j0..=j1.min(j0.saturating_add(200)) {
+            let (x, _, w, _) = pg.page_rect(0, j);
+            consider((screen(geo, x + ml, 0.0).x - pos.x).abs(), Edge::Left, j);
+            consider((screen(geo, x + w - mr, 0.0).x - pos.x).abs(), Edge::Right, j);
+        }
+    } else {
+        for i in i0..=i1.min(i0.saturating_add(200)) {
+            let (_, y, _, hh) = pg.page_rect(i, 0);
+            consider((screen(geo, 0.0, y + mt).y - pos.y).abs(), Edge::Top, i);
+            consider((screen(geo, 0.0, y + hh - mb).y - pos.y).abs(), Edge::Bottom, i);
+        }
+    }
+    best.map(|(_, e, p)| (e, p))
+}
+
+/// Dragging the margin edges on the rulers sets the page margins: a resize cursor and a tooltip
+/// on hover, a live preview while dragging, one `pageLayout.pageSetup` (one undo step) on
+/// release, Esc cancels.
+fn ruler_margins(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, pg: &PageGrid, sh: &Sheet, si: usize) {
+    let Some(outer) = app.grid.rect else { return };
+    if geo.rect.top() - outer.top() < RULER - 0.5 {
+        app.grid.ruler_drag = None;
+        return;
+    }
+    // Leaving the sheet or the view drops the drag.
+    if app.grid.ruler_drag.as_ref().is_some_and(|d| d.sheet != si) {
+        app.grid.ruler_drag = None;
+    }
+    let hr = Rect::from_min_max(pos2(geo.cells.left(), outer.top()), pos2(geo.cells.right(), outer.top() + RULER));
+    let vr = Rect::from_min_max(pos2(outer.left(), geo.cells.top()), pos2(outer.left() + RULER, geo.cells.bottom()));
+    let hresp = ui.interact(hr, egui::Id::new("ruler_margin_h"), egui::Sense::drag());
+    let vresp = ui.interact(vr, egui::Id::new("ruler_margin_v"), egui::Sense::drag());
+    let margins_in = |sh: &Sheet| -> [f32; 4] {
+        let m = |i: usize| sh.print.margins.get(i).copied().unwrap_or(0.5);
+        [m(0), m(1), m(2), m(3)]
+    };
+    let current = margins_in(sh);
+    let metric = metric(app);
+    let tip = |ui: &egui::Ui, app: &SheetApp, edge: Edge, inches: f32| {
+        let value = if metric { format!("{:.2} cm", inches * 2.54) } else { format!("{inches:.2} in") };
+        let text = format!("{}: {value}", app.ui.language.tr(edge.label()));
+        egui::Tooltip::always_open(ui.ctx().clone(), ui.layer_id(), egui::Id::new("ruler_margin_tip"), egui::PopupAnchor::Pointer).show(|ui| {
+            ui.label(text);
+        });
+    };
+    let cursor = |ui: &egui::Ui, edge: Edge| {
+        ui.ctx().set_cursor_icon(if edge.horizontal() { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::ResizeVertical });
+    };
+    if let Some(d) = app.grid.ruler_drag.clone() {
+        if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape)) {
+            app.grid.ruler_drag = None;
+            return;
+        }
+        cursor(ui, d.edge);
+        let down = ui.input(|i| i.pointer.primary_down());
+        let pos = ui.input(|i| i.pointer.latest_pos());
+        let mut cur = d.clone();
+        if let (Some(pos), Some(k)) = (pos, pt_per_unit(pg)) {
+            let rel = if d.edge.horizontal() {
+                let page_x = pg.page_x(d.page);
+                f64::from(geo.scroll.x) + f64::from((pos.x - geo.cells.left()) / geo.z) - page_x
+            } else {
+                let page_y = pg.page_y(d.page);
+                f64::from(geo.scroll.y) + f64::from((pos.y - geo.cells.top()) / geo.z) - page_y
+            };
+            if let Some(v) = margin_from_drag(d.edge, rel * k, pg.paper_pt, current) {
+                cur.inches = v;
+            }
+        }
+        if down {
+            tip(ui, app, cur.edge, cur.inches);
+            app.grid.ruler_drag = Some(cur);
+            ui.ctx().request_repaint();
+        } else {
+            app.grid.ruler_drag = None;
+            if (cur.inches - cur.start_inches).abs() > f32::EPSILON {
+                app.run_or_alert("pageLayout.pageSetup", json!({"sheet": si, "margins": {cur.edge.key(): cur.inches}}));
+            }
+        }
+        return;
+    }
+    for (resp, h) in [(&hresp, true), (&vresp, false)] {
+        let Some(pos) = resp.hover_pos().or_else(|| resp.interact_pointer_pos()) else { continue };
+        let origin = if resp.drag_started() { ui.input(|i| i.pointer.press_origin()).unwrap_or(pos) } else { pos };
+        let Some((edge, page)) = edge_at(geo, pg, origin, h) else { continue };
+        let value = current.get(edge.index()).copied().unwrap_or(0.5);
+        if resp.drag_started() {
+            app.grid.ruler_drag = Some(RulerDrag { sheet: si, edge, page, start_inches: value, inches: value });
+            cursor(ui, edge);
+        } else if resp.hovered() {
+            cursor(ui, edge);
+            tip(ui, app, edge, value);
+        }
+    }
+}
+
 /// The Header & Footer contextual ribbon tab.
 pub fn ribbon_tab(app: &mut SheetApp, ui: &mut egui::Ui) {
     use crate::widgets::big_button;
@@ -666,4 +858,33 @@ fn sep(ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let (r, _) = ui.allocate_exact_size(vec2(13.0, 72.0), egui::Sense::hover());
     ui.painter().line_segment([pos2(r.center().x, r.top() + 6.0), pos2(r.center().x, r.bottom() - 6.0)], Stroke::new(1.0, t.separator));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const A4: (f32, f32) = (595.0, 842.0);
+
+    #[test]
+    fn drag_maps_to_margins_and_clamps_inside_the_page() {
+        let m = [0.7, 0.7, 0.75, 0.75];
+        // 72 pt from the left edge is one inch; from the right edge the margin is measured inward.
+        assert_eq!(margin_from_drag(Edge::Left, 72.0, A4, m), Some(1.0));
+        assert_eq!(margin_from_drag(Edge::Right, f64::from(A4.0) - 36.0, A4, m), Some(0.5));
+        assert_eq!(margin_from_drag(Edge::Top, 108.0, A4, m), Some(1.5));
+        // Dragged off the page: never negative.
+        assert_eq!(margin_from_drag(Edge::Left, -50.0, A4, m), Some(0.0));
+        assert_eq!(margin_from_drag(Edge::Bottom, f64::from(A4.1) + 99.0, A4, m), Some(0.0));
+        // Dragged across the opposite margin: stops a minimum content width short of it.
+        let max = margin_from_drag(Edge::Left, 10_000.0, A4, m).unwrap();
+        assert!((f64::from(max) * 72.0 - (f64::from(A4.0) - 0.7 * 72.0 - MIN_CONTENT_PT)).abs() < 1.0, "{max}");
+        // Hostile input is ignored, not clamped to something arbitrary.
+        assert_eq!(margin_from_drag(Edge::Left, f64::NAN, A4, m), None);
+        assert_eq!(margin_from_drag(Edge::Left, f64::INFINITY, A4, m), None);
+        assert_eq!(margin_from_drag(Edge::Left, 10.0, (0.0, 0.0), m), None);
+        assert_eq!(margin_from_drag(Edge::Left, 10.0, A4, [0.7, f32::NAN, 0.7, 0.7]), None);
+        // Oversized opposite margin leaves nothing to drag into.
+        assert_eq!(margin_from_drag(Edge::Left, 300.0, A4, [0.0, 40.0, 0.0, 0.0]), Some(0.0));
+    }
 }

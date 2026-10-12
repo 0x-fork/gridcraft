@@ -100,6 +100,8 @@ pub struct GridState {
     pub paper: Option<crate::paper_view::PaperCache>,
     /// Header or footer being edited in place (Page Layout view).
     pub hf_edit: Option<crate::paper_view::HfEdit>,
+    /// A page margin being dragged on a ruler (Page Layout view); committed on release.
+    pub ruler_drag: Option<crate::paper_view::RulerDrag>,
     /// Insert › Header & Footer: start editing the first page's header once Page Layout view is up.
     pub hf_start: bool,
     /// The grid geometry of the last frame (hit-testing for agents and tests).
@@ -493,6 +495,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
         if paper {
             let probe = Geo::new(sh, grid_rect, scroll);
             if let Some(g) = crate::paper_view::grid_for(app, &wb, si, sh, probe.cells.size(), scroll) {
+                let g = crate::paper_view::with_dragged_margin(app, si, g);
                 return Geo::paged(sh, grid_rect, scroll, g);
             }
         }
