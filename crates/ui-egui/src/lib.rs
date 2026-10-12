@@ -344,6 +344,13 @@ impl SheetApp {
         }
         let r = self.session.run(id, params);
         self.after_engine();
+        // The new chart is selected, as after inserting any object, so Delete removes it, not its data.
+        if id == "insert.chart"
+            && let Ok(r) = &r
+            && let Some(chart) = r.get("chart").and_then(Json::as_u64).and_then(|id| u32::try_from(id).ok())
+        {
+            self.selected_chart = Some(chart);
+        }
         if id == "file.exportPdf"
             && let Ok(r) = &r
         {
