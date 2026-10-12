@@ -179,6 +179,10 @@ pub struct Services {
     /// source spreadsheet recorded as numbers stay numbers ("Rp10,000.00" → 10000). `None` from
     /// the host pastes the plain text alone.
     pub paste_html: Option<Box<dyn FnMut() -> Option<String>>>,
+    /// Read the system clipboard's plain text for the ribbon and menu Paste commands (Cmd/Ctrl+V
+    /// gets it from egui's `Event::Paste`). `None` from the host, or no service (web), pastes
+    /// GridCraft's own clipboard.
+    pub paste_text: Option<Box<dyn FnMut() -> Option<String>>>,
     /// Web: deliver a file to the user (name, bytes).
     pub download: Option<Box<dyn Fn(&str, &[u8])>>,
     /// Web: start an asynchronous file pick; the bytes arrive later in `inbox`.
@@ -390,6 +394,17 @@ impl SheetApp {
             None => json!({"text": text}),
         };
         self.run_or_alert("edit.paste", params);
+    }
+
+    /// Ribbon and menu Paste: paste the text on the system clipboard, as Cmd/Ctrl+V does. With no
+    /// text there, or no host clipboard (web), GridCraft's own clipboard is pasted.
+    pub fn paste_from_clipboard(&mut self) {
+        let text = self.services.paste_text.as_mut().and_then(|read| read()).filter(|t| !t.is_empty());
+        match text {
+            // Same line endings as egui's `Event::Paste` text.
+            Some(text) => self.paste_external(text.replace("\r\n", "\n")),
+            None => self.run_or_alert("edit.paste", json!({})),
+        }
     }
 
     /// Web: `file.exportPdf` without a path returns the PDF as base64; hand it to the browser as a download.

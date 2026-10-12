@@ -84,7 +84,6 @@ pub struct GridState {
     pub last_border: String,
     pub last_fill: String,
     pub last_font_color: String,
-    pub system_clipboard: Option<String>,
     pub trace: Option<serde_json::Value>,
     pub renaming_tab: Option<usize>,
     pub rename_text: String,
@@ -2651,6 +2650,7 @@ fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
                         "edit.copy" | "edit.cut" => {
                             app.copy_to_clipboard(ui.ctx(), id);
                         }
+                        "edit.paste" => app.paste_from_clipboard(),
                         other => app.run_or_alert(other, json!({})),
                     }
                 }
@@ -2893,6 +2893,7 @@ fn header_menu(app: &mut SheetApp, ui: &mut egui::Ui, was_open: bool) {
                         "edit.copy" | "edit.cut" => {
                             app.copy_to_clipboard(ui.ctx(), id);
                         }
+                        "edit.paste" => app.paste_from_clipboard(),
                         other => app.run_or_alert(other, json!({})),
                     }
                 }

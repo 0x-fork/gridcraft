@@ -3,9 +3,12 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use egui::{Event, OutputCommand};
+use egui::accesskit::Role;
+use egui::{Event, Modifiers, OutputCommand, PointerButton};
+use egui_kittest::kittest::Queryable as _;
 use gridcraft_engine::Session;
-use gridcraft_ui_egui::{Services, SheetApp};
+use gridcraft_engine::core::{CellRef, Value};
+use gridcraft_ui_egui::{Services, SheetApp, grid};
 use serde_json::json;
 
 fn harness(services: Services) -> egui_kittest::Harness<'static, SheetApp> {
@@ -115,4 +118,132 @@ fn copying_multiple_areas_copies_lined_up_areas_and_explains_the_rest() {
     assert!(!h.output().platform_output.commands.iter().any(|c| matches!(c, OutputCommand::CopyText(_))));
     assert_eq!(h.state().message.as_ref().map(|(_, text)| text.as_str()), Some("This action won't work on multiple selections."));
     assert_eq!(h.state().session.clipboard.as_ref().map(|c| c.areas.len()), Some(2), "the earlier copy stays");
+}
+
+#[test]
+fn clicking_the_ribbon_paste_button_or_its_menu_does_not_freeze() {
+    // #273: a click on Paste deadlocked the UI thread (a click-state query inside the egui context
+    // lock), so the frame never returned. Run the clicks on a worker and fail on a timeout instead of
+    // hanging the test run if that comes back.
+    let (done, finished) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let cell = value_at;
+        let mut h = harness(Services::default());
+        h.state_mut().run("edit.copy", json!({"range": "A1:B2"})).unwrap();
+        h.state_mut().run("selection.set", json!({"cell": "D4"})).unwrap();
+        // No host clipboard here (as on the web): GridCraft's own copy is pasted.
+        h.get_by_role_and_label(Role::Button, "Paste").click();
+        h.run_steps(3);
+        assert_eq!(cell(&h, "D4"), Some(Value::from("Name")));
+        assert_eq!(cell(&h, "E5"), Some(Value::number(42.0)));
+
+        // The secondary click opens the paste options menu; its items paste too.
+        h.state_mut().run("selection.set", json!({"cell": "G1"})).unwrap();
+        h.get_by_role_and_label(Role::Button, "Paste").click_secondary();
+        h.run_steps(3);
+        h.get_by_label("Paste Values").click();
+        h.run_steps(3);
+        assert_eq!(cell(&h, "G1"), Some(Value::from("Name")));
+        assert_eq!(cell(&h, "H2"), Some(Value::number(42.0)));
+        let _ = done.send(());
+    });
+    match finished.recv_timeout(std::time::Duration::from_secs(60)) {
+        Ok(()) => assert!(worker.join().is_ok()),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            if let Err(panic) = worker.join() {
+                std::panic::resume_unwind(panic);
+            }
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => panic!("clicking Paste froze the UI thread"),
+    }
+}
+
+type Harness = egui_kittest::Harness<'static, SheetApp>;
+
+fn value_at(h: &Harness, a1: &str) -> Option<Value> {
+    let at = gridcraft_engine::core::CellRef::parse(a1).unwrap();
+    h.state().session.active().and_then(|d| d.wb.active().map(|s| s.value(at)))
+}
+
+/// A host clipboard holding `text`, and how many times the app read it.
+fn system_clipboard(text: &str) -> (Rc<RefCell<(String, usize)>>, Services) {
+    let clipboard = Rc::new(RefCell::new((text.to_string(), 0)));
+    let read = clipboard.clone();
+    let services = Services {
+        paste_text: Some(Box::new(move || {
+            let mut clipboard = read.borrow_mut();
+            clipboard.1 += 1;
+            Some(clipboard.0.clone())
+        })),
+        ..Default::default()
+    };
+    (clipboard, services)
+}
+
+#[test]
+fn ribbon_paste_pastes_the_system_clipboard_like_cmd_v() {
+    // Text copied in another app: the Paste button pastes it, as Cmd/Ctrl+V does.
+    let (clipboard, services) = system_clipboard("x\t1\r\ny\t2\r\n");
+    let mut h = harness(services);
+    h.state_mut().run("selection.set", json!({"cell": "D4"})).unwrap();
+    h.get_by_role_and_label(Role::Button, "Paste").click();
+    h.run_steps(2);
+    assert_eq!(clipboard.borrow().1, 1, "one clipboard read per click");
+    assert_eq!(value_at(&h, "D4"), Some(Value::from("x")));
+    assert_eq!(value_at(&h, "E4"), Some(Value::number(1.0)));
+    assert_eq!(value_at(&h, "D5"), Some(Value::from("y")));
+    assert_eq!(value_at(&h, "E5"), Some(Value::number(2.0)));
+    assert!(h.state().message.is_none(), "{:?}", h.state().message);
+
+    // The clipboard text is GridCraft's own copy: the copy is pasted with its formulas.
+    h.state_mut().run("cell.set", json!({"cell": "A3", "input": "=B2*2"})).unwrap();
+    let copied = h.state_mut().run("edit.copy", json!({"range": "A3"})).unwrap();
+    clipboard.borrow_mut().0 = copied["text"].as_str().unwrap().to_string();
+    h.state_mut().run("selection.set", json!({"cell": "B9"})).unwrap();
+    h.get_by_role_and_label(Role::Button, "Paste").click();
+    h.run_steps(2);
+    let sh = h.state().session.active().unwrap().wb.active().unwrap();
+    assert_eq!(sh.cell(CellRef::parse("B9").unwrap()).unwrap().formula.as_ref().unwrap().text, "C8*2");
+
+    // Nothing on the system clipboard (an image, say): GridCraft's own copy is pasted.
+    clipboard.borrow_mut().0.clear();
+    h.state_mut().run("selection.set", json!({"cell": "B12"})).unwrap();
+    h.get_by_role_and_label(Role::Button, "Paste").click();
+    h.run_steps(2);
+    let sh = h.state().session.active().unwrap().wb.active().unwrap();
+    assert_eq!(sh.cell(CellRef::parse("B12").unwrap()).unwrap().formula.as_ref().unwrap().text, "C11*2");
+}
+
+#[test]
+fn paste_menu_items_paste_the_system_clipboard() {
+    let (clipboard, services) = system_clipboard("from menu");
+    let mut h = harness(services);
+    let ribbon = h.get_by_role_and_label(Role::Button, "Paste").rect();
+    let click_menu_paste = |h: &Harness| h.get_all_by_role_and_label(Role::Button, "Paste").find(|n| n.rect() != ribbon).unwrap().click();
+
+    // Home › Paste options menu › Paste.
+    h.state_mut().run("selection.set", json!({"cell": "D4"})).unwrap();
+    h.get_by_role_and_label(Role::Button, "Paste").click_secondary();
+    h.run_steps(2);
+    click_menu_paste(&h);
+    h.run_steps(2);
+    assert_eq!(value_at(&h, "D4"), Some(Value::from("from menu")));
+
+    // The cell's context menu › Paste.
+    clipboard.borrow_mut().0 = "from cell menu".into();
+    h.state_mut().run("selection.set", json!({"cell": "F6"})).unwrap();
+    let app = h.state();
+    let sh = app.session.active().unwrap().wb.active().unwrap();
+    let geo = grid::Geo::new(sh, app.grid.rect.unwrap(), app.view().scroll);
+    let pos = geo.cell_rect(sh, CellRef::parse("F6").unwrap()).center();
+    h.input_mut().events.push(Event::PointerMoved(pos));
+    for pressed in [true, false] {
+        h.input_mut().events.push(Event::PointerButton { pos, button: PointerButton::Secondary, pressed, modifiers: Modifiers::NONE });
+        h.run_steps(2);
+    }
+    assert!(h.state().grid.context_menu.is_some());
+    click_menu_paste(&h);
+    h.run_steps(2);
+    assert_eq!(value_at(&h, "F6"), Some(Value::from("from cell menu")));
+    assert_eq!(clipboard.borrow().1, 2);
 }

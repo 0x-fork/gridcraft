@@ -483,6 +483,8 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[(&str, &str, serde_json:
         if response.clicked() {
             if let Some(d) = id.strip_prefix("dialog:") {
                 app.open_dialog(d, p.clone());
+            } else if *id == "edit.paste" {
+                app.paste_from_clipboard();
             } else {
                 act(app, id, p.clone());
             }
@@ -495,17 +497,14 @@ fn home(app: &mut SheetApp, ui: &mut Ui) {
     let st = active_style(app);
     // Clipboard
     let paste = big_button(ui, Icon::Paste, "Paste", "Paste (⌘V)", true);
+    paste.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "Paste"));
     for sequence in
         keytip_table::group_extension(app.keytips.prefix().unwrap_or_default(), &["edit.paste", "edit.pasteSpecial", "dialog:pasteSpecial"])
     {
         keytip(app, ui, sequence, paste.rect.center_bottom());
     }
     if paste.clicked() {
-        if let Some(text) = app.grid.system_clipboard.take() {
-            app.paste_external(text);
-        } else {
-            act(app, "edit.paste", json!({}));
-        }
+        app.paste_from_clipboard();
     }
     let paste_keys = matches!(app.keytips.prefix(), Some("HV" | "E"));
     // Keep a keyboard-opened menu anchored to the button when a pointer click
