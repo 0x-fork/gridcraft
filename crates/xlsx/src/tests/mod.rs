@@ -4,6 +4,7 @@ mod array_export;
 mod csv_tests;
 mod encrypted_tests;
 mod fixtures;
+mod literal_category_roundtrip;
 mod malformed;
 mod ods_tests;
 mod passthrough_tests;

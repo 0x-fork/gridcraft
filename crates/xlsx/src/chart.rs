@@ -336,10 +336,46 @@ fn num_data(tag: &str, f: Option<&str>, wb: &Workbook, si: usize) -> String {
     s
 }
 
+/// Splits the inside of an array constant on `,` and `;` outside double quotes; inside quotes `""` is a literal quote.
+/// Unquoted items are trimmed; quoted ones keep the text between the quotes and drop the spaces around them.
+fn split_array_items(inner: &str) -> Vec<String> {
+    let mut items = Vec::new();
+    let mut cur = String::new();
+    let mut quoted = false;
+    let mut in_quote = false;
+    let mut chars = inner.chars().peekable();
+    let finish = |cur: &mut String, quoted: &mut bool| {
+        let text = std::mem::take(cur);
+        let item = if *quoted { text } else { text.trim().to_string() };
+        *quoted = false;
+        item
+    };
+    while let Some(c) = chars.next() {
+        match c {
+            '"' if in_quote && chars.peek() == Some(&'"') => {
+                cur.push('"');
+                chars.next();
+            }
+            '"' => {
+                if !quoted && cur.trim().is_empty() {
+                    cur.clear();
+                }
+                in_quote = !in_quote;
+                quoted = true;
+            }
+            ',' | ';' if !in_quote => items.push(finish(&mut cur, &mut quoted)),
+            c if quoted && !in_quote && c.is_whitespace() => {}
+            _ => cur.push(c),
+        }
+    }
+    items.push(finish(&mut cur, &mut quoted));
+    items
+}
+
 fn str_data(tag: &str, f: &str, wb: &Workbook, si: usize) -> String {
     let f = f.trim();
     if f.starts_with('{') {
-        let vals: Vec<String> = f.trim_matches(|c| c == '{' || c == '}').split([',', ';']).map(|v| v.trim().trim_matches('"').to_string()).collect();
+        let vals = split_array_items(f.trim_matches(|c| c == '{' || c == '}'));
         let mut s = format!("<c:{tag}><c:strLit><c:ptCount val=\"{}\"/>", vals.len());
         for (i, v) in vals.iter().enumerate() {
             let _ = write!(s, "<c:pt idx=\"{i}\"><c:v>{}</c:v></c:pt>", esc(v));
