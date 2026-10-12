@@ -247,6 +247,9 @@ pub struct SheetApp {
     /// Chart selected on the sheet (id).
     pub selected_chart: Option<u32>,
     pub started: f64,
+    /// Every unsaved workbook has been answered for quitting (or `app.quit` asked): the next
+    /// window close goes through.
+    pub allow_close: bool,
 }
 
 impl SheetApp {
@@ -288,6 +291,7 @@ impl SheetApp {
             shots: control::Shots::default(),
             selected_chart: None,
             started: now_ms(),
+            allow_close: false,
         }
     }
 
@@ -877,6 +881,45 @@ impl SheetApp {
         }
     }
 
+    /// Holds back a window close (the close button, Alt+F4, the OS quitting the app) while a
+    /// workbook has unsaved changes, and asks about them first.
+    fn guard_window_close(&mut self, ctx: &egui::Context) {
+        if self.allow_close || !ctx.input(|i| i.viewport().close_requested()) {
+            return;
+        }
+        // A cell still being edited is part of the workbook, as for File › Close.
+        if !self.commit_edit(0, 0, false, false) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            return;
+        }
+        if !self.session.documents().iter().any(|d| d.is_dirty()) {
+            return;
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        match self.dialog.as_mut() {
+            // Already asking about a workbook (File › Close): answering it now goes on to quit.
+            Some(d) if d.name() == "saveChanges" => {
+                d.values.insert("quit".into(), json!(true));
+            }
+            _ => self.continue_quit(ctx),
+        }
+    }
+
+    /// Asks about the next unsaved workbook before quitting, or closes the window once none is left.
+    pub(crate) fn continue_quit(&mut self, ctx: &egui::Context) {
+        match self.session.documents().iter().position(|d| d.is_dirty()) {
+            Some(i) => {
+                self.session.set_active(i);
+                let title = self.session.active().map(|d| d.display_title()).unwrap_or_default();
+                self.open_dialog("saveChanges", json!({"title": title, "quit": true}));
+            }
+            None => {
+                self.allow_close = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+    }
+
     /// Per-frame logic (control channel, screenshots). Call before `ui`.
     pub fn logic(&mut self, ctx: &egui::Context) {
         // A keytip control request lives one frame: the ribbon consumes it during `ui`, and
@@ -945,6 +988,7 @@ impl SheetApp {
             ctx.request_repaint();
         }
         control::poll(self, ctx);
+        self.guard_window_close(ctx);
         // Files read asynchronously (web file picker, dropped files).
         let arrived: Vec<(String, Vec<u8>)> = self
             .services
