@@ -701,6 +701,16 @@ fn stash_get(wb: &Workbook, key: &str) -> Json {
         .unwrap_or(json!({}))
 }
 
+/// Like `stash_get`, for the name-keyed lists (views, scripts): a stored value that is not a JSON object is treated as empty.
+fn stash_map(wb: &Workbook, key: &str) -> Json {
+    let v = stash_get(wb, key);
+    if v.is_object() {
+        v
+    } else {
+        json!({})
+    }
+}
+
 fn stash_set(wb: &mut Workbook, key: &str, v: &Json) {
     let text = v.to_string();
     let formula = format!("\"{}\"", text.replace('"', "\"\""));
@@ -723,7 +733,7 @@ pub(crate) fn keep_watch_list(from: &Workbook, to: &mut std::sync::Arc<Workbook>
 
 fn custom_views(s: &mut Session, p: &Json) -> Result<Json> {
     let d = s.doc()?;
-    let mut views = stash_get(&d.wb, VIEWS_NAME);
+    let mut views = stash_map(&d.wb, VIEWS_NAME);
     if let Some(name) = str_param(p, "save") {
         let sh = d.wb.active().ok_or(EngineError::NoDocument)?;
         views[name] = json!({"sheet": d.wb.active_sheet, "selection": d.selection.a1(), "zoom": sh.zoom, "freeze": sh.freeze});
@@ -938,7 +948,7 @@ fn new_script(s: &mut Session, p: &Json) -> Result<Json> {
         return Err(bad("automate.newScript", "`commands` must be an array"));
     }
     edit(s, |cx| {
-        let mut all = stash_get(&cx.wb, SCRIPTS_NAME);
+        let mut all = stash_map(&cx.wb, SCRIPTS_NAME);
         all[name.as_str()] = cmds.clone();
         stash_set(&mut cx.wb, SCRIPTS_NAME, &all);
         Ok(json!({"name": name}))
@@ -977,7 +987,7 @@ fn run_script(s: &mut Session, p: &Json) -> Result<Json> {
 fn delete_script(s: &mut Session, p: &Json) -> Result<Json> {
     let name = str_param(p, "name").ok_or_else(|| bad("automate.deleteScript", "missing `name`"))?.to_string();
     edit(s, |cx| {
-        let mut all = stash_get(&cx.wb, SCRIPTS_NAME);
+        let mut all = stash_map(&cx.wb, SCRIPTS_NAME);
         if let Some(o) = all.as_object_mut() {
             o.remove(&name);
         }
