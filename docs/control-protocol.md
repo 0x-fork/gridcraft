@@ -68,6 +68,9 @@ see [`mcp.md`](mcp.md) and [`cli.md`](cli.md).
 
 ### Native printing
 
+Desktop `engine.commands {"search":"print"}` (and connected MCP `list_commands`)
+lists `ui.printSettings` and `ui.printSubmit` with their parameter and result fields.
+
 `engine.execute` can call `ui.printSettings` with `{}` to inspect the printer list, selected
 printer, copies, duplex, grayscale, discovery/submission status and backend receipt/error.
 `{"refresh":true}` starts background discovery; poll the same command until `discovering` is
