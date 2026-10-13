@@ -456,11 +456,8 @@ fn pie_starts_at_twelve_clockwise() {
 #[test]
 fn negative_values_put_axis_below_zero() {
     let c = chart(ChartKind::ColumnClustered);
-    let d = ChartData {
-        palette: vec![],
-        categories: vec![],
-        series: vec![series("N", &[-5.0, 3.0, -2.0], [1, 2, 3, 255], ChartKind::ColumnClustered)],
-    };
+    let d =
+        ChartData { palette: vec![], categories: vec![], series: vec![series("N", &[-5.0, 3.0, -2.0], [1, 2, 3, 255], ChartKind::ColumnClustered)] };
     let prims = render(&c, &d, 400.0, 300.0, &ApproxMeasure);
     let t = texts(&prims);
     assert!(t.iter().any(|s| s.starts_with('-') || s.starts_with("($") || s.starts_with("-$")), "{t:?}");
@@ -901,7 +898,7 @@ fn treemap_and_histogram_shapes() {
 #[test]
 fn histogram_boundary_values_match_interval_labels() {
     let heights = |vals: &[f64]| -> Vec<f32> {
-        let d = ChartData { categories: vec![], series: vec![series("h", vals, [10, 20, 30, 255], ChartKind::Histogram)] };
+        let d = ChartData { palette: vec![], categories: vec![], series: vec![series("h", vals, [10, 20, 30, 255], ChartKind::Histogram)] };
         let prims = render(&chart(ChartKind::Histogram), &d, 600.0, 400.0, &ApproxMeasure);
         prims.iter().filter_map(|p| if let Prim::Rect { h, fill: Some([10, 20, 30, 255]), .. } = p { Some(*h) } else { None }).collect()
     };
@@ -964,8 +961,13 @@ fn box_and_stock_charts_honour_the_gridlines_flag() {
         let off = render(&c, &d, 500.0, 350.0, &ApproxMeasure);
         assert!(grids(&on) > 0, "{kind:?}: gridlines on must draw lines");
         assert_eq!(grids(&off), 0, "{kind:?}: gridlines off must hide them");
+    }
+}
+
+#[test]
 fn funnel_value_labels_follow_the_data_labels_flag() {
     let data = ChartData {
+        palette: vec![],
         categories: vec!["a".into(), "b".into(), "c".into()],
         series: vec![series("S", &[11111.0, 22222.0, 33333.0], [20, 96, 130, 255], ChartKind::Funnel)],
     };
@@ -982,6 +984,10 @@ fn funnel_value_labels_follow_the_data_labels_flag() {
     for cat in ["a", "b", "c"] {
         assert!(texts(&off).contains(&cat));
         assert!(texts(&on).contains(&cat));
+    }
+}
+
+#[test]
 fn pie_points_follow_workbook_theme() {
     let mut wb = Workbook::new();
     wb.theme.colors[4] = 0x4F6D8A;
@@ -1024,6 +1030,9 @@ fn pie_points_follow_workbook_theme() {
     assert_eq!(legend.len(), 40);
     assert_eq!(legend.get(37), Some(&series_color(&wb.theme, 37)));
     assert_ne!(series_color(&wb.theme, 37), series_color(&gridcraft_model::Theme::default(), 37));
+}
+
+#[test]
 fn area_charts_draw_source_value_labels_only_when_enabled() {
     for kind in [ChartKind::Area, ChartKind::AreaStacked] {
         let d = sample(kind);

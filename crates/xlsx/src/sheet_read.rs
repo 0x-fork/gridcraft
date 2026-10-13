@@ -598,11 +598,8 @@ fn read_cf(cx: &mut Ctx<'_>, e: &El, sheet: &mut Sheet) {
         let f0 = formulas.first().cloned().unwrap_or_default();
         let text = r.attr("text").unwrap_or("").to_string();
         // The x14 id that links a data bar to its Excel 2010 extension (solid fill lives there).
-        let ext_id = r
-            .child("extLst")
-            .and_then(|l| l.kids("ext").find_map(|x| x.child("id")))
-            .map(|i| i.text.trim().to_string())
-            .filter(|i| !i.is_empty());
+        let ext_id =
+            r.child("extLst").and_then(|l| l.kids("ext").find_map(|x| x.child("id"))).map(|i| i.text.trim().to_string()).filter(|i| !i.is_empty());
         let rule = match r.attr("type").unwrap_or("") {
             "cellIs" => CfRule::CellIs { op: cf_op(r.attr("operator")), a: f0, b: formulas.get(1).cloned(), style },
             "expression" => CfRule::Expression { formula: f0, style },

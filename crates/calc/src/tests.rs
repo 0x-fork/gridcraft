@@ -571,6 +571,9 @@ fn functions_given_by_name() {
     // A LET variable of that name is still the variable.
     t.set("J1", "=LET(ABS,LAMBDA(x,x*10),SUM(MAP(B1:B3,ABS)))");
     assert_eq!(t.num("J1"), 20.0);
+}
+
+#[test]
 fn lambda_argument_count() {
     let mut t = T::new();
     t.wb.names.push(gridcraft_model::DefinedName {
@@ -1134,6 +1137,8 @@ fn cell_width_is_the_column_width_dialog_value_rounded() {
         t.set(at, &format!("=CELL(\"width\",{col}1)"));
     }
     assert_eq!([t.num("H1"), t.num("H2"), t.num("H3"), t.num("H4"), t.num("H5")], [8.0, 11.0, 12.0, 11.0, 3.0]);
+}
+
 /// Expected results are Excel's, from Apache POI's `DGet.xls` (rows 46-49): a criteria cell holding
 /// a formula under a label that names no field is evaluated for every record.
 #[test]
@@ -1184,6 +1189,8 @@ fn database_functions_with_computed_criteria() {
     assert_eq!(t.num("B51"), 1.0);
     assert_eq!(t.num("B52"), 7.0);
     assert_eq!(t.num("B53"), 4.0);
+}
+
 #[test]
 fn offset_extreme_arguments_return_ref() {
     let wb = Workbook::new();

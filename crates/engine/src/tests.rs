@@ -1086,6 +1086,9 @@ fn structured_refs_to_columns_with_edge_spaces() {
     s.execute("file.open", json!({"name": "x.xlsx", "base64": b64})).unwrap();
     assert_eq!(s.execute("cell.get", json!({"cell": "F3"})).unwrap()["formula"], "=SUBTOTAL(109,Table1[[Qty ]])");
     assert_eq!([v(&s, "F1"), v(&s, "F2"), v(&s, "F3")], [n(5.0), n(5.0), n(5.0)]);
+}
+
+#[test]
 fn table_rename_keeps_a_defined_name_with_the_same_name() {
     let mut s = s();
     s.execute("range.setValues", json!({"range": "A1", "values": [["Qty"], [7]]})).unwrap();
@@ -3054,6 +3057,9 @@ fn subtotal_109_recalculates_when_row_height_or_autofit_reveals_rows() {
     assert_eq!(v(&s, "C1"), Value::Number(9.0));
     s.execute("home.autofitRowHeight", json!({"rows": "2:3"})).unwrap();
     assert_eq!(v(&s, "C1"), Value::Number(15.0));
+}
+
+#[test]
 fn paste_special_validation_copies_the_rule() {
     let mut s = s();
     let ok = |s: &mut Session, cell: &str, input: &str| s.execute("data.validate", json!({"cell": cell, "input": input})).unwrap()["ok"] == true;

@@ -1096,18 +1096,15 @@ fn default_font_survives_a_round_trip() {
     );
     let saved = write_xlsx(&read_xlsx(&file).unwrap().0).unwrap();
     assert_eq!(font0(&saved), (Some("12".into()), Some("Calibri".into()), Some("2".into()), Some("minor".into())));
+}
+
 #[test]
 fn solid_data_bar_survives_with_sparklines_and_gradient_neighbours() {
     let mut wb = Workbook::new();
     let s = wb.sheet_mut(0).unwrap();
     s.set_value(at("A1"), Value::Number(1.0));
-    let bar = |gradient: bool, max: CfValueKind| CfRule::DataBar {
-        min: CfValueKind::Min,
-        max,
-        color: Color::Rgb(0x638EC6),
-        gradient,
-        show_value: true,
-    };
+    let bar =
+        |gradient: bool, max: CfValueKind| CfRule::DataBar { min: CfValueKind::Min, max, color: Color::Rgb(0x638EC6), gradient, show_value: true };
     let rules = [(true, "A1", CfValueKind::Max), (false, "B1", CfValueKind::Formula("$C$1".into())), (false, "D1:D3", CfValueKind::Number(9.0))];
     for (i, (gradient, range, max)) in rules.into_iter().enumerate() {
         s.cond_formats.push(CondFormat { ranges: vec![rr(range)], rule: bar(gradient, max), priority: i as u32 + 1, stop_if_true: false });
@@ -1122,6 +1119,9 @@ fn solid_data_bar_survives_with_sparklines_and_gradient_neighbours() {
     let b = &back.sheets[0];
     assert_eq!(b.cond_formats, wb.sheets[0].cond_formats);
     assert_eq!(b.sparklines.len(), 1);
+}
+
+#[test]
 fn doc_props_keep_boundary_whitespace() {
     let mut wb = Workbook::new();
     wb.props = DocProps {

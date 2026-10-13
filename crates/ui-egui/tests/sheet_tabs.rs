@@ -71,7 +71,8 @@ fn opening_and_activating_late_sheets_reveals_their_tabs() {
 fn navigation_arrows_reveal_the_selected_tab() {
     let mut h = harness(700.0, 0);
     let (_, clip) = tab(&h, "Tab00").unwrap();
-    let next = pos2(clip.left() - 20.0, clip.center().y);
+    // The Next arrow sits left of the All Sheets button (24 px) and the 8 px gap before the tabs.
+    let next = pos2(clip.left() - 44.0, clip.center().y);
     for _ in 0..29 {
         click(&mut h, next);
     }
@@ -129,7 +130,8 @@ fn hidden_sheets_long_names_and_window_resize_keep_active_tab_visible() {
     h.state_mut().run("sheet.activate", json!({"sheet":29})).unwrap();
     h.run_steps(20);
     assert_visible(&h, name);
-    h.set_size(vec2(500.0, 120.0));
+    // Narrow, but still wide enough for the long tab next to the arrows and the All Sheets button.
+    h.set_size(vec2(560.0, 120.0));
     h.run_steps(20);
     assert_visible(&h, name);
     h.set_size(vec2(1000.0, 120.0));

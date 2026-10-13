@@ -10,6 +10,9 @@ fn quoted_sheet_qualified_name_keeps_quotes() {
     assert_eq!(rt("'My Sheet'!Total"), "'My Sheet'!Total");
     assert_eq!(rt("'Data'!Total"), "Data!Total");
     assert_eq!(rt("'It''s'!Total+1"), "'It''s'!Total+1");
+}
+
+#[test]
 fn intersection_with_deleted_operand_reparses() {
     // Deleting the columns of an intersection operand prints `A1:B2 #REF!`; that text must parse back.
     assert_eq!(rt("A1:B2 #REF!"), "A1:B2 #REF!");

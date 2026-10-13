@@ -236,6 +236,8 @@ fn every_draw_method_survives_hostile_numbers() {
     assert!(!c.contains("NaN") && !c.contains("inf"));
     let pdf = d.finish();
     check_xref(&pdf);
+}
+
 /// Decodes the `<FEFF…>` hex string following `key` in the file bytes.
 fn utf16_entry(pdf: &[u8], key: &str) -> String {
     let at = find(pdf, key.as_bytes()).unwrap() + key.len();

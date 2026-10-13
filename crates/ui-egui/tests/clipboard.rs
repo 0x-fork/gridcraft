@@ -139,6 +139,9 @@ fn enter_pastes_the_copied_cells_and_ends_copy_mode() {
     h.key_press(egui::Key::Enter);
     h.run_steps(2);
     assert_eq!(h.state().session.active().map(|d| d.selection.active.a1()), Some("D6".to_string()));
+}
+
+#[test]
 fn clicking_the_ribbon_paste_button_or_its_menu_does_not_freeze() {
     // #273: a click on Paste deadlocked the UI thread (a click-state query inside the egui context
     // lock), so the frame never returned. Run the clicks on a worker and fail on a timeout instead of

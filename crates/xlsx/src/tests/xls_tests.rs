@@ -535,6 +535,9 @@ fn formulas_using_a_skipped_name_keep_their_saved_results() {
     assert_eq!(v(&wb, 0, "B6"), Value::Number(60.0));
     assert_eq!(ftext(&wb, "B7").as_deref(), Some("Local*2"));
     assert!(report.warnings.iter().any(|w| w.contains("defined names") && w.contains("saved results")), "{:?}", report.warnings);
+}
+
+#[test]
 fn reads_iterative_calculation_settings() {
     // CalcMode, CalcCount, CalcIter and CalcDelta repeat in every worksheet substream; here only
     // the first sheet carries them, so the sheet after it must not reset them to the defaults.
@@ -554,6 +557,9 @@ fn reads_iterative_calculation_settings() {
     // Without the records: Excel's defaults, iteration off.
     let (wb, _) = read_xls(&compound("Workbook", &sample(false))).unwrap();
     assert_eq!(wb.calc, gridcraft_model::CalcSettings::default());
+}
+
+#[test]
 fn a_format_shorter_than_its_count_keeps_its_characters() {
     // A FORMAT whose cch is one more than the characters in the record (seen in real files):
     // Excel opens them, the record's characters are the format code.
