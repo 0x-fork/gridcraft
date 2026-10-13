@@ -59,6 +59,14 @@ pub fn serial_from_unix_ms(ms: f64) -> f64 {
     25569.0 + ms / 86_400_000.0
 }
 
+/// Converts a 1900-system serial (as the clock supplies it) to the serial of the same instant in `sys`.
+pub fn serial_in_system(sys: DateSystem, serial_1900: f64) -> f64 {
+    match sys {
+        DateSystem::D1900 => serial_1900,
+        DateSystem::D1904 => serial_1900 - 1462.0,
+    }
+}
+
 pub fn civil_from_days(z: i64) -> (i32, u32, u32) {
     let z = z + 719468;
     let era = if z >= 0 { z } else { z - 146096 } / 146097;
