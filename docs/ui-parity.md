@@ -1,5 +1,6 @@
 # UI parity
 
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (horizontal scrollbar in the sheet tab bar, #840) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (Ctrl+wheel zoom steps along a ladder through 100%) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (sheet-tab navigation reveals the selected tab without interrupting manual scrolling) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (Alt+Down opens AutoFilter header menus) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
@@ -62,7 +63,7 @@ this logic, with one undo step.
 | Move and resize charts, pictures and shapes | charts can't be resized (#190) |
 | Context menus on row/column headers, sheet tabs, charts, shapes | headers and tabs done; objects partial |
 | Quick Analysis (Ctrl+Q) | missing |
-| Smooth scrolling, scrollbars | done; vertical scrollbar added 10-09 (#73); horizontal scrollbar reported missing (#176) |
+| Smooth scrolling, scrollbars | done; vertical scrollbar added 10-09 (#73); horizontal scrollbar in the tab bar (60/40 split, drag, track click pages) 10-13 (#176, #840); the tabs/scrollbar split can't be dragged yet |
 | Text overflow into empty neighbours, wrap, rotation, shrink to fit | done |
 
 ## Keyboard
@@ -164,6 +165,7 @@ scrollbar bugs 2–4 · pixel/feel pass against observed Excel 7–12.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | Horizontal scrollbar in the sheet tab bar: drag, track click pages, frozen columns excluded from the page (#840) |
 | 2026-10-12 | minor | Ctrl+wheel zoom steps along a ladder of percentages about 20% apart that never skips 100%, gliding to each step with animations on, so a notch out undoes a notch in (it drifted: 100 → 122 → 101); Excel steps 15 points, see decisions.md |
 | 2026-10-12 | minor | Page Layout view: left/right/top/bottom margins are dragged on the rulers (#792) |
 | 2026-10-12 | minor | Alt+Down opens the active filter header's existing popup, with validation priority and mirrored anchoring on right-to-left sheets (part of #441) |
