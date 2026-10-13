@@ -233,7 +233,9 @@ fn digit_indices(toks: &[Tok], range: std::ops::Range<usize>) -> Vec<usize> {
 /// Renders a non-negative number through a number section.
 pub(crate) fn render_number(sec: &Section, v: f64) -> Out {
     let mut x = v.abs();
-    if sec.percent > 0 {
+    // Observed: `%` in a scientific section is only a literal (`#%e+#` shows 123456.789 as
+    // `1%e+5`).
+    if sec.percent > 0 && !sec.exp {
         x *= 100f64.powi(sec.percent.min(20));
     }
     if sec.scale > 0 {
@@ -267,7 +269,9 @@ pub(crate) fn render_number(sec: &Section, v: f64) -> Out {
             let exp_idx = digit_indices(toks, e_at + 1..n);
             let step = int_idx.len().max(1) as i32;
             let (mut e, int_s, frac_s) = if x == 0.0 {
-                (0i32, String::new(), "0".repeat(frac_idx.len()))
+                // Observed: zero shows `0` in every integer placeholder, `#` and `?` too
+                // (`#.#E+#` gives `0.E+0`, `####.####E+#` gives `0000.E+0`).
+                (0i32, "0".repeat(int_idx.len()), "0".repeat(frac_idx.len()))
             } else {
                 let (digits, xe) = decimal_digits(x);
                 let mut e = xe - xe.rem_euclid(step);
@@ -286,26 +290,30 @@ pub(crate) fn render_number(sec: &Section, v: f64) -> Out {
             if int_s.is_empty() && frac_s.chars().all(|c| c == '0') {
                 e = 0;
             }
-            let mut head = String::from(if upper { "E" } else { "e" });
-            if e < 0 {
-                head.push('-');
+            let head = if upper { "E" } else { "e" };
+            let sign = if e < 0 {
+                "-"
             } else if plus {
-                head.push('+');
-            }
-            let width = exp_idx.iter().filter(|&&i| matches!(toks.get(i), Some(Tok::Digit('0')))).count().min(20);
-            let digits = format!("{:0w$}", e.unsigned_abs(), w = width);
+                "+"
+            } else {
+                ""
+            };
+            let digits = e.unsigned_abs().to_string();
+            // The sign sits right before the exponent digits, after any literal that follows the
+            // `E` (observed: `|0|e+|0|` shows `|1|e|+5|`); `?` pads the digits with spaces.
             match exp_idx.first() {
                 Some(&first) => {
                     if let Some(p) = pieces.get_mut(e_at) {
-                        *p = head;
+                        *p = head.to_string();
                     }
-                    if let Some(p) = pieces.get_mut(first) {
-                        *p = digits;
+                    if let Some(b) = before.get_mut(first) {
+                        *b = sign.to_string();
                     }
+                    fill_int(toks, &exp_idx, &digits, false, false, &mut pieces);
                 }
                 None => {
                     if let Some(p) = pieces.get_mut(e_at) {
-                        *p = head + &digits;
+                        *p = format!("{head}{sign}{digits}");
                     }
                 }
             }
