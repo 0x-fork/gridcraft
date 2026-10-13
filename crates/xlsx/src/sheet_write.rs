@@ -81,7 +81,7 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
     let tables: Vec<(&Table, Vec<String>)> = sheet
         .tables
         .iter()
-        .filter(|t| t.range.height() > t.header_row as u32 + t.totals_row as u32 || (t.header_row && !t.totals_row && t.range.height() >= 1))
+        .filter(|t| t.range.height() > t.header_row as u32 + t.totals_row as u32 || (t.header_row && t.range.height() > t.totals_row as u32))
         .map(|t| (t, table_columns(t)))
         .collect();
     for (t, cols) in &tables {
