@@ -145,7 +145,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         }
     };
     let mut report = ReadReport::default();
-    let g = globals(&stream, &mut budget)?;
+    let g = globals(&stream, &mut budget, &mut report)?;
 
     let mut wb = Workbook::new();
     wb.sheets.clear();
@@ -212,7 +212,7 @@ fn bof(rec: &Record<'_>) -> Result<(u16, u16), IoError> {
     Ok((c.u16()?, c.u16()?))
 }
 
-fn globals(stream: &[u8], budget: &mut Budget) -> Result<Globals, IoError> {
+fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Result<Globals, IoError> {
     let mut recs = Records::new(stream, 0);
     let first = recs.next_record()?.ok_or_else(|| invalid("empty Workbook stream"))?;
     let (vers, dt) = bof(&first)?;
@@ -257,7 +257,15 @@ fn globals(stream: &[u8], budget: &mut Budget) -> Result<Globals, IoError> {
             0x000E => g.precision_as_displayed = c.u16()? == 0,
             0x041E => {
                 let ifmt = c.u16()?;
-                let code = c.string()?;
+                let cch = usize::from(c.u16()?);
+                let high = c.u8()? & 1 != 0;
+                // Some writers count one character more than the record holds; Excel opens
+                // those files, so keep the characters that are there.
+                let fit = c.remaining() / if high { 2 } else { 1 };
+                if cch > fit {
+                    report.warn("Some number formats were shorter than their declared length; the characters present were kept.");
+                }
+                let code = c.chars(cch.min(fit), high)?;
                 budget.text(code.len())?;
                 g.formats.insert(ifmt, code);
             }
@@ -398,7 +406,9 @@ struct SheetState<'g> {
     shared: HashMap<CellRef, Parsed>,
     arrays: HashMap<CellRef, (RangeRef, Parsed)>,
     last_formula: Option<CellRef>,
-    pending_string: Option<CellRef>,
+    /// The cell waiting for its String record, with its style: a blank cell isn't stored, so a
+    /// formula kept as its value may have no cell to receive the text.
+    pending_string: Option<(CellRef, StyleId)>,
     dropped: usize,
     unsupported: Vec<&'static str>,
     calc: CalcSettings,
@@ -517,9 +527,9 @@ fn worksheet(
     }
     // Shared and array formulas: their definitions follow the first cell that uses them.
     let (arrays, shared) = (std::mem::take(&mut st.arrays), std::mem::take(&mut st.shared));
-    for p in std::mem::take(&mut st.pending) {
+    let pending = std::mem::take(&mut st.pending);
+    for p in &pending {
         if let Some((range, f)) = arrays.get(&p.anchor) {
-            // The other cells of an array formula keep only their values.
             if p.pos == p.anchor {
                 st.attach(p.pos, f, Mode::Cell, Some(*range));
             }
@@ -527,6 +537,16 @@ fn worksheet(
             st.attach(p.pos, f, Mode::Shared, None);
         } else {
             st.unsupported("a shared formula that is missing from the file");
+        }
+    }
+    // The other cells of a legacy array formula hold only cached results: dropped, as when an
+    // .xlsx is read, so that the formula fills its range on recalculation. If the formula itself
+    // couldn't be imported, they keep their values.
+    for p in &pending {
+        let filled = st.sheet.cell(p.anchor).and_then(|c| c.formula.as_ref()).and_then(|f| f.array).is_some_and(|r| r.contains(p.pos));
+        if p.pos != p.anchor && filled {
+            let style = st.sheet.style_id(p.pos);
+            st.sheet.cells.set(p.pos, Cell { value: Value::Empty, formula: None, style });
         }
     }
     if st.dropped > 0 {
@@ -604,11 +624,13 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         }
         0x0006 => formula_cell(&mut c, st, budget)?,
         0x0207 => {
-            if let Some(pos) = st.pending_string.take() {
+            if let Some((pos, style)) = st.pending_string.take() {
                 let s = c.string()?;
                 budget.text(s.len())?;
                 if let Some(cell) = st.sheet.cells.get_mut(pos) {
                     cell.value = Value::from(s);
+                } else {
+                    st.sheet.cells.set(pos, Cell { value: Value::from(s), formula: None, style });
                 }
             }
         }
@@ -756,7 +778,7 @@ fn formula_cell(c: &mut Cursor<'_, '_>, st: &mut SheetState<'_>, budget: &mut Bu
     st.sheet.cells.set(pos, Cell { value, formula: None, style });
     st.last_formula = Some(pos);
     if string_result {
-        st.pending_string = Some(pos);
+        st.pending_string = Some((pos, style));
     }
     // PtgExp: part of a shared or array formula anchored at another cell.
     if f.rgce.len() == 5 && f.rgce.first() == Some(&0x01) {
