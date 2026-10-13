@@ -393,13 +393,14 @@ pub(crate) fn editable_combo(
     items: &[(&str, String)],
     forced: bool,
 ) -> ComboResult {
-    combo_popup(ui, anchor, salt, current_value, items, forced, true)
+    combo_popup(ui, anchor, salt, current_value, items, forced, true, None)
 }
 
 /// The dropdown of [`editable_combo`] without the filter field: the whole list, picked by click or
-/// arrows and Enter.
-fn list_combo(ui: &mut Ui, anchor: &egui::Response, salt: &'static str, current_value: &str, items: &[(&str, String)]) -> ComboResult {
-    combo_popup(ui, anchor, salt, current_value, items, false, false)
+/// arrows and Enter. It drops directly below `under` and is as wide as it, like Excel's Font Size
+/// list under its box.
+fn list_combo(ui: &mut Ui, anchor: &egui::Response, under: Rect, salt: &'static str, current_value: &str, items: &[(&str, String)]) -> ComboResult {
+    combo_popup(ui, anchor, salt, current_value, items, false, false, Some(under))
 }
 
 fn combo_popup(
@@ -410,6 +411,7 @@ fn combo_popup(
     items: &[(&str, String)],
     forced: bool,
     filter: bool,
+    under: Option<Rect>,
 ) -> ComboResult {
     let popup_id = anchor.id.with("popup");
     let state_id = anchor.id.with(salt).with("__combo_state");
@@ -424,7 +426,12 @@ fn combo_popup(
     }
     st.was_open = open_now;
     let mut result = ComboResult::None;
-    egui::Popup::menu(anchor).open_memory(popup_command(forced, anchor.clicked())).show(|ui| {
+    let mut popup = egui::Popup::menu(anchor).open_memory(popup_command(forced, anchor.clicked()));
+    if let Some(r) = under {
+        popup = popup.anchor(r).align(egui::RectAlign::BOTTOM_START).width(r.width());
+    }
+    let row_w = under.map_or(220.0, |r| r.width() - 12.0);
+    popup.show(|ui| {
         // Arrows and Enter navigate the list, not the filter field's cursor. Capture them and
         // strip them from the input so the TextEdit never sees them.
         let (mut down, mut up, mut enter) = (false, false, false);
@@ -474,7 +481,7 @@ fn combo_popup(
         egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
             for i in &filtered {
                 let (value, disp) = &items[*i];
-                let row = ui.add(egui::Button::selectable(*i as i32 == st.sel, egui::RichText::new(disp)).min_size(vec2(220.0, 20.0)));
+                let row = ui.add(egui::Button::selectable(*i as i32 == st.sel, egui::RichText::new(disp)).min_size(vec2(row_w, 20.0)));
                 if row.clicked() {
                     result = ComboResult::Picked(value.to_string());
                 }
@@ -1114,8 +1121,21 @@ fn size_combo(app: &mut SheetApp, ui: &mut Ui, st: &Style) {
     let field = egui::Id::new("gridcraft.font_size_box");
     let draft = field.with("draft");
     let mut text = ui.data_mut(|d| d.get_temp::<String>(draft)).unwrap_or_else(|| current.clone());
-    let gap = std::mem::replace(&mut ui.spacing_mut().item_spacing.x, 0.0);
-    let out = egui::TextEdit::singleline(&mut text).id(field).font(theme::ui_font(12.5)).desired_width(30.0).show(ui);
+    // One frame like the Font name box beside it (same fill, border, height and corners), with the
+    // text field and the dropdown arrow inside it, as in Excel.
+    let (frame, _) = ui.allocate_exact_size(vec2(52.0, 24.0), egui::Sense::hover());
+    // Painted once the field's focus and hover are known, but beneath the field and the arrow.
+    let bg = ui.painter().add(egui::Shape::Noop);
+    let text_rect = Rect::from_min_max(frame.min, egui::pos2(frame.right() - 16.0, frame.bottom()));
+    let arrow_rect = Rect::from_min_max(egui::pos2(frame.right() - 16.0, frame.top() + 1.0), egui::pos2(frame.right() - 1.0, frame.bottom() - 1.0));
+    let mut field_ui =
+        ui.new_child(egui::UiBuilder::new().max_rect(text_rect.shrink2(vec2(6.0, 0.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    let out = egui::TextEdit::singleline(&mut text)
+        .id(field)
+        .font(theme::ui_font(12.5))
+        .frame(egui::Frame::NONE)
+        .desired_width(text_rect.width() - 12.0)
+        .show(&mut field_ui);
     let resp = out.response;
     control_keytip(app, ui, &resp, "home.fontSize");
     if invoke(app, "home.fontSize") {
@@ -1140,13 +1160,17 @@ fn size_combo(app: &mut SheetApp, ui: &mut Ui, st: &Style) {
     } else {
         ui.data_mut(|d| d.remove::<String>(draft));
     }
-    let arrow = icon_button(ui, Icon::Chevron, t.text_dim, "Font Size", vec2(14.0, 24.0));
-    ui.spacing_mut().item_spacing.x = gap;
+    let mut arrow_ui = ui.new_child(egui::UiBuilder::new().max_rect(arrow_rect));
+    let arrow = icon_button(&mut arrow_ui, Icon::Chevron, t.text_dim, "Font Size", arrow_rect.size());
+    let visuals = ui.style().visuals.clone();
+    let looks = if resp.has_focus() || ui.rect_contains_pointer(frame) { &visuals.widgets.hovered } else { &visuals.widgets.inactive };
+    let stroke = if resp.has_focus() { visuals.selection.stroke } else { looks.bg_stroke };
+    ui.painter().set(bg, egui::epaint::RectShape::new(frame, looks.corner_radius, looks.weak_bg_fill, stroke, egui::StrokeKind::Inside));
     arrow.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "Font Size"));
     let sizes = [8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 36.0, 48.0, 72.0];
     let labels: Vec<String> = sizes.iter().map(|s| format!("{}", *s as i32)).collect();
     let items: Vec<(&str, String)> = labels.iter().map(|s| (s.as_str(), s.clone())).collect();
-    if let ComboResult::Picked(value) = list_combo(ui, &arrow, "size", &current, &items)
+    if let ComboResult::Picked(value) = list_combo(ui, &arrow, frame, "size", &current, &items)
         && let Ok(v) = value.parse::<f32>()
     {
         act(app, "home.fontSize", json!({"size": v}));
