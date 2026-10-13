@@ -1,5 +1,6 @@
 # File-format parity
 
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-12 · **Change:** trivial (CSV and TSV export is capped at 512 MiB and refuses a larger used range with an error (#528); previously minor: CSV save keeps the separator it was opened with) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 > **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-12 · **Change:** minor (`.xls` import reads the calculation settings) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 > **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-12 · **Change:** minor (editable ink round-trips as DrawingML geometry) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 > **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-12 · **Change:** minor (`.xls` array formulas fill their range on recalculation) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
@@ -44,9 +45,9 @@ and repair-free opening remain unverified.
 
 | Format | Excel | GridCraft read | GridCraft write | Notes |
 |---|---|---|---|---|
-| `.csv` UTF-8 / Windows / Mac / MS-DOS | R/W | yes (UTF-8 and UTF-16 BOMs, UTF-8, Windows-1252 fallback; delimiter detection) | yes (UTF-8 without BOM, CRLF; a file opened as CSV is saved with the separator it was read with, so a `;` file stays `;`; otherwise `,`) | Excel writes the **displayed** values; we write raw values. No encoding choice on save. Re-import of a single-column export splits text (#127) |
+| `.csv` UTF-8 / Windows / Mac / MS-DOS | R/W | yes (UTF-8 and UTF-16 BOMs, UTF-8, Windows-1252 fallback; delimiter detection) | yes (UTF-8 without BOM, CRLF; a file opened as CSV is saved with the separator it was read with, so a `;` file stays `;`; otherwise `,`) | Excel writes the **displayed** values; we write raw values. No encoding choice on save. Re-import of a single-column export splits text (#127) A used range that would write more than 512 MiB (two far-apart cells span the whole rectangle) is refused with an error instead of being expanded (#528). |
 | `.txt` tab-delimited, Unicode text | R/W | yes (`.txt`, `.tsv`, `.tab`) | yes | Text Import Wizard options partly via Text to Columns |
-| `.csv` UTF-8 / Windows / Mac / MS-DOS | R/W | yes (UTF-8 and UTF-16 BOMs, UTF-8, Windows-1252 fallback; delimiter detection) | yes (UTF-8 without BOM, CRLF) | Writes the **displayed** values like Excel (number formats applied, formula results, never column-width `#####`). No encoding choice on save. Re-import of a single-column export splits text (#127) |
+| `.csv` UTF-8 / Windows / Mac / MS-DOS | R/W | yes (UTF-8 and UTF-16 BOMs, UTF-8, Windows-1252 fallback; delimiter detection) | yes (UTF-8 without BOM, CRLF) | Writes the **displayed** values like Excel (number formats applied, formula results, never column-width `#####`). No encoding choice on save. Re-import of a single-column export splits text (#127) A used range that would write more than 512 MiB (two far-apart cells span the whole rectangle) is refused with an error instead of being expanded (#528). |
 | `.txt` tab-delimited, Unicode text | R/W | yes (`.txt`, `.tsv`, `.tab`) | yes (displayed values) | Text Import Wizard options partly via Text to Columns |
 | `.prn` formatted text (space-delimited) | R/W | no | no | |
 | `.dif`, `.slk` (SYLK) | R/W | no | no | Small, legacy |
@@ -88,6 +89,7 @@ refresh. Counted under features (Get & Transform, ~10% ready), not here.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-12 | trivial | CSV and TSV export is capped at 512 MiB and refuses a larger used range with an error (#528) |
 | 2026-10-12 | minor | `.xls` import reads the calculation settings (CalcMode, CalcIter, CalcCount, CalcDelta, CalcPrecision), so circular models calculate instead of showing `#CIRC!` (#724) |
 | 2026-10-12 | minor | Ink paths and editing survive XLSX save/reopen; strict polyline import and malformed-input controls |
 | 2026-10-12 | minor | `.xls` import: the other cells of an array formula ({=FREQUENCY(...)}, {=TREND(...)}) drop their cached results, as `.xlsx` import does, so the formula fills its range on recalculation instead of showing `#SPILL!` against its own old values; 79 fewer mismatching formulas and 16 fewer round-trip differences over 4,224 real-world files |

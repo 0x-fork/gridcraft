@@ -132,6 +132,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-10-12 | CSV and tab-separated export is capped at 512 MiB: a sheet whose used range would expand to more (two cells far apart, such as A1 and XFD1048576, are 16 GiB of commas) is refused with the rows, columns and limit, before anything is allocated or written (#528) |
 | 2026-10-12 | PDF writer hardening: text width cannot overflow, all-zero dash arrays and negative or NaN stroke widths are sanitised, non-finite sizes and positions draw nothing (#812) |
 | 2026-10-12 | PDF export writes the document title and author as UTF-16BE when they are not ASCII, so viewers show accents, currency signs and non-Latin text correctly (#813) |
 | 2026-10-12 | `TEXT()` over a range and chart labels parse each number format code once instead of once per value (#806) |
@@ -186,6 +187,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-12 | trivial | Progress log: CSV export size cap (#528) |
 | 2026-10-12 | minor | Progress log: margins dragged on the Page Layout rulers (#792) |
 | 2026-10-12 | minor | Ink preservation across XLSX save/reopen (ink portion of #551) |
 | 2026-10-12 | minor | Desktop File > Print now discovers printers and submits PDF jobs through pinned craft-print with printer choice, copies, duplex and grayscale; browser printing and PDF export remain available. Remaining print parity includes page ranges and driver-specific tray/options UI; physical printer fidelity needs hardware validation. |
