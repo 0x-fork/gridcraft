@@ -901,19 +901,74 @@ pub fn validate_package(bytes: &[u8]) -> Result<Vec<String>, String> {
 }
 
 /// Every relationship kind (last segment of the type, the same in the transitional and strict
-/// namespaces) in the package's relationship parts, keyed in lower case.
+/// namespaces) in the package's relationship parts, keyed in lower case. Relationships that carry
+/// nothing are left out, as a save may rightly drop them: a link to a place in the workbook
+/// (`#Sheet1!A1`, written as a cell's `location`) and a target part with nothing in it.
 fn relationship_kinds(bytes: &[u8]) -> Result<BTreeMap<String, String>, String> {
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| format!("not a zip package: {e}"))?;
+    let names = zip_names(&mut zip);
+    let by_key: HashMap<String, &String> = names.iter().map(|n| (part_key(n), n)).collect();
     let mut kinds = BTreeMap::new();
-    for n in zip_names(&mut zip).into_iter().filter(|n| part_key(n).ends_with(".rels")) {
-        let Ok(els) = read_zip_part(&mut zip, &n).and_then(|xml| xml_elements(&xml)) else { continue };
+    for n in names.iter().filter(|n| part_key(n).ends_with(".rels")) {
+        let Some(src_dir) = rels_source_dir(&part_key(n)) else { continue };
+        let Ok(els) = read_zip_part(&mut zip, n).and_then(|xml| xml_elements(&xml)) else { continue };
         for (_, attrs) in els.iter().filter(|(el, _)| el == "Relationship") {
-            if let Some(kind) = attr(attrs, "Type").and_then(|t| t.rsplit('/').next()) {
-                kinds.entry(kind.to_ascii_lowercase()).or_insert_with(|| kind.to_string());
+            let Some(kind) = attr(attrs, "Type").and_then(|t| t.rsplit('/').next()) else { continue };
+            let target = attr(attrs, "Target").unwrap_or("");
+            if kind.eq_ignore_ascii_case("hyperlink") && target.starts_with('#') {
+                continue;
             }
+            let external = attr(attrs, "TargetMode").is_some_and(|m| m.eq_ignore_ascii_case("External"));
+            if !external
+                && let Some(part) = by_key.get(&resolve_target(&src_dir, target).to_ascii_lowercase())
+                && !holds_something(&mut zip, part, kind)
+            {
+                continue;
+            }
+            kinds.entry(kind.to_ascii_lowercase()).or_insert_with(|| kind.to_string());
         }
     }
     Ok(kinds)
+}
+
+/// The directory of the part a rels part describes: `xl` for `xl/_rels/workbook.xml.rels`, the
+/// empty string for the package's `_rels/.rels`.
+fn rels_source_dir(key: &str) -> Option<String> {
+    let (dir, _) = key.strip_suffix(".rels")?.rsplit_once('/')?;
+    Some(dir.strip_suffix("_rels")?.trim_end_matches('/').to_string())
+}
+
+/// Whether a part has content: an element under its root, or for comments (whose authors list
+/// comes first) a comment, for VML a shape. Read only as far as needed; an unreadable part counts.
+fn holds_something(zip: &mut Zip<'_>, name: &str, kind: &str) -> bool {
+    use quick_xml::events::Event;
+    let Ok(f) = zip.by_name(name) else { return true };
+    let mut reader = quick_xml::Reader::from_reader(std::io::BufReader::new(f.take(MAX_XML_PART)));
+    let wanted: Option<&[u8]> = match kind.to_ascii_lowercase().as_str() {
+        "comments" => Some(b"comment"),
+        "vmldrawing" => Some(b"shape"),
+        _ => None,
+    };
+    let mut buf = Vec::new();
+    let mut in_root = false;
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+                let found = match wanted {
+                    Some(w) => local_name(e.name().as_ref()) == w,
+                    None => in_root,
+                };
+                if found {
+                    return true;
+                }
+                in_root = true;
+            }
+            Ok(Event::Eof) => return false,
+            Ok(_) => {}
+            Err(_) => return true,
+        }
+        buf.clear();
+    }
 }
 
 // ---------------------------------------------------------------- output
@@ -1371,42 +1426,96 @@ mod tests {
         assert_eq!(validate_package(&own).unwrap(), Vec::<String>::new());
     }
 
-    /// `bytes` with `extra` relationships added to the workbook's rels part and `parts` added.
-    fn with_workbook_rels(bytes: &[u8], extra: &str, parts: &[(&str, &str)]) -> Vec<u8> {
+    const WB_RELS: &str = "xl/_rels/workbook.xml.rels";
+    const SHEET_RELS: &str = "xl/worksheets/_rels/sheet1.xml.rels";
+    const MADE_UP: &str = r#"<Relationship Id="rId90" Type="http://example.com/relationships/madeUp" Target="madeUp.xml"/>"#;
+    /// Not empty: an empty part isn't a loss.
+    const MADE_UP_PART: (&str, &str) = ("xl/madeUp.xml", "<madeUp><item/></madeUp>");
+
+    /// `bytes` with relationships added to rels parts (created when missing) and `parts` added.
+    fn with_rels(bytes: &[u8], rels: &[(&str, &str)], parts: &[(&str, &str)]) -> Vec<u8> {
         let mut src = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
         let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let mut pending: Vec<(&str, &str)> = rels.to_vec();
         for i in 0..src.len() {
             let mut f = src.by_index(i).unwrap();
             let name = f.name().to_string();
             let mut body = String::new();
             f.read_to_string(&mut body).unwrap();
-            if name == "xl/_rels/workbook.xml.rels" {
-                body = body.replace("</Relationships>", &format!("{extra}</Relationships>"));
+            if let Some(at) = pending.iter().position(|(r, _)| *r == name) {
+                body = body.replace("</Relationships>", &format!("{}</Relationships>", pending.remove(at).1));
             }
             out.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
             out.write_all(body.as_bytes()).unwrap();
         }
-        for (name, body) in parts {
-            out.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+        let created = pending.iter().map(|(r, extra)| {
+            (*r, format!(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{extra}</Relationships>"#))
+        });
+        for (name, body) in created.collect::<Vec<_>>().iter().map(|(n, b)| (*n, b.as_str())).chain(parts.iter().copied()) {
+            out.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
             out.write_all(body.as_bytes()).unwrap();
         }
         out.finish().unwrap().into_inner()
     }
 
+    /// The `package` examples of checking `source`.
+    fn package_of(source: &[u8]) -> Vec<String> {
+        let r = check_bytes("t.xlsx", source, &Options::default());
+        r.round_trip.categories.iter().find(|c| c.name == "package").unwrap().examples.clone()
+    }
+
+    fn plain() -> Vec<u8> {
+        gridcraft_engine::io::save_bytes(&book(&[("A1", "1", n(1.0))]), "t.xlsx").unwrap()
+    }
+
     #[test]
     fn package_reports_relationship_kinds_the_output_lost() {
-        let plain = gridcraft_engine::io::save_bytes(&book(&[("A1", "1", n(1.0))]), "t.xlsx").unwrap();
         // A kind GridCraft doesn't know is dropped on save; a calculation chain is never written
         // (Excel rebuilds it), so its absence isn't a loss.
-        let source = with_workbook_rels(
-            &plain,
-            r#"<Relationship Id="rId90" Type="http://example.com/relationships/madeUp" Target="madeUp.xml"/><Relationship Id="rId91" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" Target="calcChain.xml"/>"#,
-            &[("xl/madeUp.xml", "<madeUp/>"), ("xl/calcChain.xml", "<calcChain/>")],
+        let calc_chain = r#"<Relationship Id="rId91" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" Target="calcChain.xml"/>"#;
+        let source = with_rels(&plain(), &[(WB_RELS, &format!("{MADE_UP}{calc_chain}"))], &[MADE_UP_PART, ("xl/calcChain.xml", "<calcChain/>")]);
+        assert_eq!(package_of(&source), ["lost relationship madeUp"]);
+        assert!(check_bytes("t.xlsx", &plain(), &Options::default()).round_trip.is_clean());
+    }
+
+    // In the three tests below the made-up kind stays lost, so the comparison is known to run.
+
+    #[test]
+    fn an_internal_link_written_as_a_relationship_is_not_a_loss() {
+        // openpyxl writes `#Sheet1!B2` as an external relationship; GridCraft writes `location`.
+        let link = r##"<Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="#Sheet1!B2" TargetMode="External"/>"##;
+        let source = with_rels(&plain(), &[(WB_RELS, MADE_UP), (SHEET_RELS, link)], &[MADE_UP_PART]);
+        assert_eq!(package_of(&source), ["lost relationship madeUp"]);
+    }
+
+    #[test]
+    fn comments_without_a_comment_are_not_a_loss() {
+        let rels = r#"<Relationship Id="rId6" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="../comments1.xml"/><Relationship Id="rId7" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing" Target="../drawings/vmlDrawing1.vml"/>"#;
+        let comments = r#"<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><authors><author>A</author></authors><commentList/></comments>"#;
+        let vml = r#"<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office"><o:shapelayout><o:idmap data="1"/></o:shapelayout><v:shapetype id="_x0000_t202" path="m,l,21600r21600,l21600,xe"><v:path gradientshapeok="t"/></v:shapetype></xml>"#;
+        let source = with_rels(
+            &plain(),
+            &[(WB_RELS, MADE_UP), (SHEET_RELS, rels)],
+            &[MADE_UP_PART, ("xl/comments1.xml", comments), ("xl/drawings/vmlDrawing1.vml", vml)],
         );
-        let r = check_bytes("t.xlsx", &source, &Options::default());
-        let package = r.round_trip.categories.iter().find(|c| c.name == "package").unwrap();
-        assert_eq!(package.examples, ["lost relationship madeUp"]);
-        assert!(check_bytes("t.xlsx", &plain, &Options::default()).round_trip.is_clean());
+        assert_eq!(package_of(&source), ["lost relationship madeUp"]);
+    }
+
+    #[test]
+    fn empty_drawings_and_person_lists_are_not_a_loss() {
+        let drawing = r#"<Relationship Id="rId8" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/>"#;
+        let person =
+            r#"<Relationship Id="rId92" Type="http://schemas.microsoft.com/office/2017/10/relationships/person" Target="persons/person.xml"/>"#;
+        let source = with_rels(
+            &plain(),
+            &[(WB_RELS, &format!("{MADE_UP}{person}")), (SHEET_RELS, drawing)],
+            &[
+                MADE_UP_PART,
+                ("xl/drawings/drawing1.xml", r#"<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"/>"#),
+                ("xl/persons/person.xml", r#"<personList xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments"/>"#),
+            ],
+        );
+        assert_eq!(package_of(&source), ["lost relationship madeUp"]);
     }
 
     #[test]
