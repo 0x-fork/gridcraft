@@ -1073,8 +1073,13 @@ fn toggle_checkbox(s: &mut Session, p: &Json) -> Result<Json> {
     })
 }
 
+/// Copy of the params that is always a JSON object, so keys can be assigned; any other JSON value counts as no params (like null).
+fn object_params(p: &Json) -> Json {
+    Json::Object(p.as_object().cloned().unwrap_or_default())
+}
+
 fn theme_colors(s: &mut Session, p: &Json) -> Result<Json> {
-    let mut params = p.clone();
+    let mut params = object_params(p);
     if params.get("name").is_none() {
         params["name"] = json!(s.doc()?.wb.theme.name.clone());
     }
@@ -1095,7 +1100,7 @@ fn background(s: &mut Session, p: &Json) -> Result<Json> {
             Ok(Json::Null)
         });
     }
-    let mut params = p.clone();
+    let mut params = object_params(p);
     params["alt"] = json!("Sheet background");
     params["at"] = json!("A1");
     s.execute("insert.picture", params)
@@ -1111,7 +1116,7 @@ fn draw_border(s: &mut Session, p: &Json) -> Result<Json> {
         "outline" => "outside",
         _ => "all",
     };
-    let mut params = p.clone();
+    let mut params = object_params(p);
     params["preset"] = json!(preset);
     s.execute("home.borders", params)
 }
