@@ -75,10 +75,11 @@ fn round_dir(x: f64, digits: i32, up: bool) -> f64 {
     }
     let s = clean(scaled);
     let r = if up { s.ceil() } else { s.floor() };
-    // r == 0 with an infinite scale would be 0 * inf = NaN (#NUM!); the result is simply zero.
+    // Toward zero, r == 0 with an infinite scale would be 0 * inf = NaN (#NUM!); the result is simply
+    // zero. Away from zero the true result (10^309 or more) is not a number, so ROUNDUP stays #NUM!.
     let out = if !neg {
         clean(r / f)
-    } else if r == 0.0 {
+    } else if r == 0.0 && !up {
         0.0
     } else {
         r * f
