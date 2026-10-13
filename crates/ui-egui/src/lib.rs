@@ -258,6 +258,9 @@ pub struct SheetApp {
     /// text noted for an unpublished cut); `None` after a copy, or once the clipboard is seen
     /// holding other text. Once the cut has been pasted, Paste leaves this text alone.
     cut_text: Option<String>,
+    /// A run of Tabs: (doc uid, sheet, column it started in, cell the last Tab landed on).
+    /// Enter on that cell goes to the next row in the starting column, as in Excel (#911).
+    tab_run: Option<(u64, usize, u32, CellRef)>,
     pub started: f64,
 }
 
@@ -301,6 +304,7 @@ impl SheetApp {
             selected_chart: None,
             clipboard_text_at_copy: None,
             cut_text: None,
+            tab_run: None,
             started: now_ms(),
         }
     }
@@ -951,11 +955,26 @@ impl SheetApp {
     /// Enter/Tab move inside a multi-cell selection, otherwise to the next cell.
     pub fn move_after_enter(&mut self, dr: i64, dc: i64) {
         let multi = self.session.active().is_some_and(|d| !d.selection.is_single_cell());
+        // Any other move (arrows, clicks, another sheet) leaves the selection off the cell the
+        // last Tab landed on, which ends the run.
+        let here = self.session.active().map(|d| (d.uid, d.wb.active_sheet, d.selection.active));
+        let run = self.tab_run.take().filter(|&(uid, sheet, _, at)| here == Some((uid, sheet, at)));
         if multi {
             let fwd = dr > 0 || dc > 0;
             let _ = self.session.run("selection.next", json!({"forward": fwd, "byRow": dc != 0}));
+        } else if let (Some((_, _, col, at)), 1, 0) = (run, dr, dc) {
+            let back = i64::from(col) - i64::from(at.col);
+            let _ = self.session.run("selection.move", json!({"dr": 1, "dc": back}));
         } else {
             let _ = self.session.run("selection.move", json!({"dr": dr, "dc": dc}));
+            if dr == 0 && dc != 0 {
+                let start = run.map(|r| r.2);
+                self.tab_run = self.session.active().and_then(|d| {
+                    let (uid, sheet) = (d.uid, d.wb.active_sheet);
+                    let col = start.or(here.map(|h| h.2.col))?;
+                    Some((uid, sheet, col, d.selection.active))
+                });
+            }
         }
         self.grid.ensure_visible = true;
     }
