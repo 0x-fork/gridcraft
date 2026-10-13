@@ -301,3 +301,25 @@ fn trim_references_adjust() {
     let refs: Vec<String> = parse("SUM(Sheet2!A1:.B5)").unwrap().references().iter().map(|r| printer::reference_a1(r)).collect();
     assert_eq!(refs, ["Sheet2!A1:B5"]);
 }
+
+#[test]
+fn prints_long_flat_chain_without_deep_recursion() {
+    // Small stack: a recursive printer overflows long before 20000 levels.
+    let handle = std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(|| {
+            let mut e = Expr::Number(1.0);
+            for _ in 0..20000 {
+                e = Expr::Binary(BinOp::Add, Box::new(e), Box::new(Expr::Number(1.0)));
+            }
+            let text = print(&e);
+            let r1c1 = print_r1c1(&e, gridcraft_core::CellRef { row: 0, col: 0 });
+            // Dropping the deep tree recurses; leak it so only the printer is under test.
+            std::mem::forget(e);
+            (text, r1c1)
+        })
+        .expect("spawn");
+    let (text, r1c1) = handle.join().expect("printer must not overflow the stack");
+    assert_eq!(text, vec!["1"; 20001].join("+"));
+    assert_eq!(r1c1, text);
+}
