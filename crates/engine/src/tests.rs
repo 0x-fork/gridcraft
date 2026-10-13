@@ -1171,6 +1171,22 @@ fn insert_and_delete_cells_never_shift_part_of_a_table() {
 }
 
 #[test]
+fn table_names_with_a_hyphen_are_rejected() {
+    let mut s = Session::new();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Qty"], [7]]})).unwrap();
+    let e = s.execute("insert.table", json!({"range": "A1:A2", "header": true, "name": "A-B"})).unwrap_err();
+    assert!(e.to_string().contains("not valid"), "{e}");
+    assert!(s.doc().unwrap().wb.table("A-B").is_none());
+    s.execute("insert.table", json!({"range": "A1:A2", "header": true, "name": "Sales"})).unwrap();
+    let e = s.execute("table.rename", json!({"table": "Sales", "name": "A-B"})).unwrap_err();
+    assert!(e.to_string().contains("not valid"), "{e}");
+    assert!(s.doc().unwrap().wb.table("Sales").is_some());
+    assert!(s.execute("table.rename", json!({"table": "Sales", "name": ".AB"})).is_err());
+    s.execute("table.rename", json!({"table": "Sales", "name": "A_B"})).unwrap();
+    assert!(s.doc().unwrap().wb.table("A_B").is_some());
+}
+
+#[test]
 fn undo_and_redo_keep_the_watch_window_list() {
     // Found by the command-sequence fuzzer: the list lives in the workbook but isn't an edit, so
     // undoing an earlier edit swapped in a snapshot without it.
