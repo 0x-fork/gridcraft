@@ -225,6 +225,25 @@ fn delete_key_removes_the_selected_chart() {
 }
 
 #[test]
+fn inserted_chart_is_selected_so_delete_removes_it() {
+    // #668, #256: after Insert › Chart the selection stayed on the source cells, so Delete
+    // cleared the data and left the chart behind.
+    let mut session = blank();
+    session.execute("range.setValues", json!({"range": "A1:B2", "values": [[1, 2], [3, 4]]})).unwrap();
+    session.execute("selection.set", json!({"range": "A1:B2"})).unwrap();
+    let mut h = harness(session);
+
+    let id = h.state_mut().run("insert.chart", json!({"type": "column"})).unwrap()["chart"].as_u64().unwrap() as u32;
+    h.run_steps(2);
+    assert_eq!(h.state().selected_chart, Some(id), "the new chart is selected");
+
+    key(&mut h, Key::Delete, Modifiers::NONE);
+
+    assert!(h.state().session.active().unwrap().wb.active().unwrap().charts.is_empty());
+    assert_eq!(value(&h, "A1"), Value::Number(1.0));
+}
+
+#[test]
 fn renders_every_ribbon_tab_without_panicking() {
     let mut s = Session::new();
     s.execute("file.new", json!({"sample": "sales"})).unwrap();
