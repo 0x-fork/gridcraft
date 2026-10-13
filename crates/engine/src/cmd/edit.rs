@@ -219,11 +219,8 @@ fn cell_set(s: &mut Session, p: &Json) -> Result<Json> {
         Some(c) => c,
         None => s.doc()?.selection.active,
     };
-    let input = str_param(p, "input")
-        .or_else(|| str_param(p, "value"))
-        .map(str::to_string)
-        .or_else(|| p.get("value").map(json_to_input))
-        .ok_or_else(|| bad("cell.set", "missing `input` (or `value`)"))?;
+    // Both spellings take a string, number or boolean, as typed (#697).
+    let input = p.get("input").or_else(|| p.get("value")).map(json_to_input).ok_or_else(|| bad("cell.set", "missing `input` (or `value`)"))?;
     let array = bool_param(p, "array").unwrap_or(false);
     let d = s.doc()?;
     if let Some(sh) = d.wb.sheet(sheet)
@@ -1596,6 +1593,23 @@ fn begin_edit(s: &mut Session, _: &Json) -> Result<Json> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cell_set_takes_numbers_for_input_and_value() {
+        // #697: a JSON number for `input` used to clear the cell instead of entering it.
+        let mut s = Session::new();
+        s.new_workbook();
+        s.execute("cell.set", json!({"cell": "A1", "input": 123.5})).unwrap();
+        s.execute("cell.set", json!({"cell": "A2", "value": 77})).unwrap();
+        s.execute("cell.set", json!({"cell": "A3", "input": true})).unwrap();
+        s.execute("cell.set", json!({"cell": "A4", "input": "=A1+A2"})).unwrap();
+        let get = |s: &mut Session, a: &str| s.execute("cell.get", json!({"cell": a})).unwrap();
+        assert_eq!(get(&mut s, "A1")["value"], json!(123.5));
+        assert_eq!(get(&mut s, "A2")["value"], json!(77.0));
+        assert_eq!(get(&mut s, "A3")["value"], json!(true));
+        assert_eq!(get(&mut s, "A4")["value"], json!(200.5));
+        assert!(s.execute("cell.set", json!({"cell": "A5"})).is_err());
+    }
 
     #[test]
     fn legacy_array_entry() {
