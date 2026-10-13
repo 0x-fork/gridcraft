@@ -1001,7 +1001,10 @@ fn cartesian(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx, horizonta
                         top.push([c, vpos(t, &sc)]);
                         base.push([c, vpos(b, &sc)]);
                         // Source values (not stack totals), just above the top edge like the line labels.
-                        if labels_on && sp.is_some() && let Some(v) = s.values.get(j).copied().flatten() {
+                        if labels_on
+                            && sp.is_some()
+                            && let Some(v) = s.values.get(j).copied().flatten()
+                        {
                             area_labels.push((c, vpos(t, &sc) - 5.0, fmt.format(v, None)));
                         }
                     }
