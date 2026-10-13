@@ -2643,6 +2643,14 @@ fn conditional_format_styles_take_hex_colours_and_quoted_values() {
     s.execute("home.conditionalFormat", json!({"range": "A1", "rule": {"type": "expression", "formula": "=TRUE", "style": internal}})).unwrap();
     let st = style(&rule(&s, 0));
     assert_eq!((st.fill.fg, st.borders.left.color), (Color::Rgb(0xFFF2CC), Color::Rgb(0xC00000)));
+    // `"none"` is no fill (the format only sets the font), as `home.fillColor` reads it.
+    s.execute(
+        "home.conditionalFormat",
+        json!({"range": "A1", "rule": {"type": "expression", "formula": "=TRUE", "style": {"fill": "none", "font": {"bold": true}}}}),
+    )
+    .unwrap();
+    let st = style(&rule(&s, 0));
+    assert_eq!((st.fill, st.font.bold), (Fill::default(), true));
     // Keys that would be dropped, leaving a rule that shows nothing, are refused.
     let n = s.doc().unwrap().wb.active().unwrap().cond_formats.len();
     for bad in [json!({"preset": "greenFill"}), json!({"fillColor": "#FFF2CC"}), json!({"fill": "#nothex"}), json!("bold")] {

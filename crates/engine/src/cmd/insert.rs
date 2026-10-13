@@ -1274,8 +1274,8 @@ fn is_string_literal(v: &str) -> bool {
 /// A conditional format's `style` as the model's `Style` JSON (`font`, `fill`, `borders`, `align`,
 /// `num_fmt`, `protection`, merged over the default by the caller), where a colour may also be
 /// written as `format_range` takes it (`"#RRGGBB"`, `{theme, tint}`, `"auto"`) and `fill` may be a
-/// colour alone (a solid fill). An unknown key is an error rather than dropped: dropped, it left a
-/// rule with an empty format that matches and shows nothing.
+/// colour alone (a solid fill) or `"none"` (no fill). An unknown key is an error rather than
+/// dropped: dropped, it left a rule with an empty format that matches and shows nothing.
 fn cf_style_json(st: &Json) -> Result<Json> {
     const KEYS: [&str; 6] = ["font", "fill", "borders", "align", "num_fmt", "protection"];
     let err = |m: String| bad("home.conditionalFormat", m);
@@ -1299,7 +1299,10 @@ fn cf_style_json(st: &Json) -> Result<Json> {
         color(c, "font.color")?;
     }
     if let Some(fill) = st.get_mut("fill") {
-        if fill.is_string() || fill.get("theme").is_some() {
+        // `"none"` (or `"auto"`) is no fill, as `home.fillColor` reads it, not a solid automatic one.
+        if fill.is_string() && super::format::color_param(Some(fill)) == Some(Color::Auto) {
+            *fill = serde_json::to_value(Fill::default()).map_err(|e| EngineError::Other(e.to_string()))?;
+        } else if fill.is_string() || fill.get("theme").is_some() {
             *fill = json!({"pattern": "Solid", "fg": fill.clone()});
         }
         if let Some(f) = fill.as_object_mut() {
