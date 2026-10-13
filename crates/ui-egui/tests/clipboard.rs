@@ -428,3 +428,36 @@ fn cmd_v_after_a_pasted_cut_does_not_paste_the_cut_text_again() {
     assert_eq!(value_at(&h, "D4"), Some(Value::from("Name")));
     assert!(h.state().toast.is_some() || h.state().message.is_some(), "Paste reports there is nothing to paste");
 }
+
+#[test]
+fn the_cut_text_pastes_again_once_the_clipboard_has_held_other_text() {
+    // Once other text has been pasted, the clipboard has moved on from the cut: the same text
+    // copied again later (from another app, or a cell editor) is a new copy and pastes.
+    let mut h = harness(Services::default());
+    h.state_mut().run("selection.set", json!({"cell": "A1"})).unwrap();
+    h.input_mut().events.push(Event::Cut);
+    h.step();
+    let text = h
+        .output()
+        .platform_output
+        .commands
+        .iter()
+        .find_map(|c| match c {
+            OutputCommand::CopyText(text) => Some(text.clone()),
+            _ => None,
+        })
+        .expect("the cut is published");
+    h.run_steps(2);
+    h.state_mut().run("selection.set", json!({"cell": "D4"})).unwrap();
+    h.input_mut().events.push(Event::Paste(text.clone()));
+    h.run_steps(2);
+    assert_eq!(value_at(&h, "D4"), Some(Value::from("Name")), "the cut moves A1");
+    h.state_mut().run("selection.set", json!({"cell": "G1"})).unwrap();
+    h.input_mut().events.push(Event::Paste("other".into()));
+    h.run_steps(2);
+    assert_eq!(value_at(&h, "G1"), Some(Value::from("other")));
+    h.state_mut().run("selection.set", json!({"cell": "H1"})).unwrap();
+    h.input_mut().events.push(Event::Paste(text.replace('\n', "\r\n")));
+    h.run_steps(2);
+    assert_eq!(value_at(&h, "H1"), Some(Value::from("Name")), "the same text copied afresh pastes");
+}

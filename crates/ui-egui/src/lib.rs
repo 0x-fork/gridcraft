@@ -255,8 +255,8 @@ pub struct SheetApp {
     /// text, GridCraft's copy is the newer one and Paste uses it.
     clipboard_text_at_copy: Option<String>,
     /// The system clipboard's text right after GridCraft's last cut (the published text, or the
-    /// text noted for an unpublished cut); `None` after a copy. Once the cut has been pasted, Paste
-    /// leaves this text alone.
+    /// text noted for an unpublished cut); `None` after a copy, or once the clipboard is seen
+    /// holding other text. Once the cut has been pasted, Paste leaves this text alone.
     cut_text: Option<String>,
     pub started: f64,
 }
@@ -414,10 +414,15 @@ impl SheetApp {
     ///
     /// Excel pastes a cut once: after GridCraft's cut has been pasted, the system clipboard text
     /// that came with it is not pasted again over the moved block; GridCraft's own (empty)
-    /// clipboard is pasted instead, which reports "Nothing to paste.".
+    /// clipboard is pasted instead, which reports "Nothing to paste.". Other text means the
+    /// clipboard has moved on, so the cut's text is forgotten and pastes normally later.
     pub fn paste_external(&mut self, text: String) {
-        if self.session.clipboard.is_none() && Self::same_clipboard_text(Some(&text), self.cut_text.as_deref()) {
-            return self.run_or_alert("edit.paste", json!({}));
+        if Self::same_clipboard_text(Some(&text), self.cut_text.as_deref()) {
+            if self.session.clipboard.is_none() {
+                return self.run_or_alert("edit.paste", json!({}));
+            }
+        } else {
+            self.cut_text = None;
         }
         let html = self.services.paste_html.as_mut().and_then(|read| read());
         let params = match html {
