@@ -143,7 +143,7 @@ pub(crate) fn read_xls_with(bytes: &[u8], mut budget: Budget) -> Result<(Workboo
         }
     };
     let mut report = ReadReport::default();
-    let g = globals(&stream, &mut budget)?;
+    let g = globals(&stream, &mut budget, &mut report)?;
 
     let mut wb = Workbook::new();
     wb.sheets.clear();
@@ -205,7 +205,7 @@ fn bof(rec: &Record<'_>) -> Result<(u16, u16), IoError> {
     Ok((c.u16()?, c.u16()?))
 }
 
-fn globals(stream: &[u8], budget: &mut Budget) -> Result<Globals, IoError> {
+fn globals(stream: &[u8], budget: &mut Budget, report: &mut ReadReport) -> Result<Globals, IoError> {
     let mut recs = Records::new(stream, 0);
     let first = recs.next_record()?.ok_or_else(|| invalid("empty Workbook stream"))?;
     let (vers, dt) = bof(&first)?;
@@ -249,7 +249,15 @@ fn globals(stream: &[u8], budget: &mut Budget) -> Result<Globals, IoError> {
             0x0022 => g.date1904 = c.u16()? == 1,
             0x041E => {
                 let ifmt = c.u16()?;
-                let code = c.string()?;
+                let cch = usize::from(c.u16()?);
+                let high = c.u8()? & 1 != 0;
+                // Some writers count one character more than the record holds; Excel opens
+                // those files, so keep the characters that are there.
+                let fit = c.remaining() / if high { 2 } else { 1 };
+                if cch > fit {
+                    report.warn("Some number formats were shorter than their declared length; the characters present were kept.");
+                }
+                let code = c.chars(cch.min(fit), high)?;
                 budget.text(code.len())?;
                 g.formats.insert(ifmt, code);
             }
