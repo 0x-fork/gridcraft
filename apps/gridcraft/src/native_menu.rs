@@ -216,6 +216,7 @@ impl NativeMenu {
         ]);
         let _ = menu.append(&app_menu);
         let mut theme_items = Vec::new();
+        let mut window_menu = None;
         for (title, entries) in tree() {
             let sub = Submenu::new(title, true);
             for (label, id, acc) in entries {
@@ -238,8 +239,17 @@ impl NativeMenu {
                 let _ = sub.append(&item);
             }
             let _ = menu.append(&sub);
+            if title == "Window" {
+                window_menu = Some(sub);
+            }
         }
         menu.init_for_nsapp();
+        // NSApp's windowsMenu is where macOS adds Move & Resize, Fill and Center, the targets of the
+        // system tiling shortcuts (Fn+Ctrl+arrows, Fn+F). Only once the menu is NSApp's: muda looks
+        // the submenu up in the installed main menu.
+        if let Some(window) = window_menu {
+            window.set_as_windows_menu_for_nsapp();
+        }
         let (tx, rx) = channel();
         let ctx = ctx.clone();
         MenuEvent::set_event_handler(Some(move |e: MenuEvent| {
