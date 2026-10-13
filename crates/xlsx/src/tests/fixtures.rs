@@ -495,3 +495,28 @@ fn text_box_formatting_is_read_and_written() {
     assert_eq!(rgb(g.text_outline.map(|o| o.0)), rgb(f.text_outline.map(|o| o.0)));
     assert_eq!(g.text_outline.map(|o| o.1), Some(1.5));
 }
+
+/// `_xludf.` marks a user-defined call even when a built-in has the same name; dropping it turns
+/// the call into the built-in, and `_xludf.EOMONTH()` into a call Excel repairs away (#726).
+#[test]
+fn user_defined_function_prefix_round_trips() {
+    let cases =
+        [("A1", "_xludf.EOMONTH()"), ("A2", "_xludf.CONCAT(\"a\",\"b\")"), ("A3", "_xludf.SUM(1,2)"), ("A4", "MYUDF(1)"), ("A5", "_xludf.MYUDF(1)")];
+    let rows: String = cases
+        .iter()
+        .enumerate()
+        .map(|(i, (a, f))| format!(r#"<row r="{}"><c r="{a}"><f>{}</f></c></row>"#, i + 1, f.replace('"', "&quot;")))
+        .collect();
+    let (wb, _) = read_xlsx(&minimal(&format!("<sheetData>{rows}</sheetData>"), &[], "", "")).unwrap();
+    let s = wb.sheet(0).unwrap();
+    for (a, f) in cases {
+        assert_eq!(s.cell(at(a)).unwrap().formula.as_ref().unwrap().text, f, "read {a}");
+    }
+    let bytes = crate::write_xlsx(&wb).unwrap();
+    let mut pkg = crate::package::Package::open(&bytes).unwrap();
+    let sheet = pkg.read_xml("xl/worksheets/sheet1.xml").unwrap().unwrap();
+    for (a, f) in cases {
+        let cell = sheet.child("sheetData").unwrap().kids("row").flat_map(|r| r.kids("c")).find(|c| c.attr("r") == Some(a)).unwrap();
+        assert_eq!(cell.child("f").unwrap().text, f, "written {a}");
+    }
+}
