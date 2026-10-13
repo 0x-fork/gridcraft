@@ -432,6 +432,7 @@ impl Dialog {
                     Text { key: "timeline", label: "Timeline range (blank: first column of the selection):" },
                     Text { key: "values", label: "Values range (blank: second column of the selection):" },
                     Text { key: "end", label: "Forecast end (date or number; blank: a third of the history):" },
+                    Text { key: "forecastStart", label: "Forecast start (a date or number in the history; blank: after the last point):" },
                     Check { key: "confidenceInterval", label: "Confidence interval" },
                     Text { key: "confidence", label: "Confidence level (%):" },
                     Text { key: "seasonality", label: "Seasonality (auto, 0 for none, or a season length):" },
