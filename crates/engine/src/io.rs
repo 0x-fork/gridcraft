@@ -498,6 +498,8 @@ mod tests {
         }
         let (wb, _) = open_bytes("Sales.csv", b"1\n").unwrap();
         assert_eq!(wb.sheets[0].name, "Sales");
+    }
+
     /// A save that can't be put in place (here a folder already has the workbook's name, as
     /// with a file another app holds locked) fails without leaving `<name>.sctmp` behind.
     #[cfg(not(target_arch = "wasm32"))]
