@@ -132,6 +132,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-10-12 | PDF writer hardening: text width cannot overflow, all-zero dash arrays and negative or NaN stroke widths are sanitised, non-finite sizes and positions draw nothing (#812) |
 | 2026-10-12 | PDF export writes the document title and author as UTF-16BE when they are not ASCII, so viewers show accents, currency signs and non-Latin text correctly (#813) |
 | 2026-10-12 | `TEXT()` over a range and chart labels parse each number format code once instead of once per value (#806) |
 | 2026-10-12 | SUBTOTAL(109) over hidden rows recalculates after Row Height, AutoFit Row Height and Ungroup reveal rows (found by the command-sequence fuzz) |
