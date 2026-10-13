@@ -1036,6 +1036,11 @@ mod tests {
         close(ev("SEARCH", vec![t("~*"), t("a*b")]), 2.0);
         is_err(ev("SEARCH", vec![t("z"), t("abc")]), CellError::Value);
         is_err(ev("SEARCH", vec![t("a"), t("abc"), n(5.0)]), CellError::Value);
+        close(ev("SEARCH", vec![t("b"), t("\u{130}b")]), 2.0);
+        close(ev("SEARCH", vec![t("B"), t("\u{130}b")]), 2.0);
+        close(ev("SEARCH", vec![t("b?"), t("a\u{130}bc")]), 3.0);
+        close(ev("SEARCH", vec![t("i"), t("a\u{130}bc")]), 2.0);
+        is_err(ev("SEARCH", vec![t("b"), t("a\u{130}bc"), n(4.0)]), CellError::Value);
         for f in ["FIND", "SEARCH"] {
             close(ev(f, vec![t(""), t("abc"), n(3.0)]), 3.0);
             is_err(ev(f, vec![t(""), t("abc"), n(4.0)]), CellError::Value);
