@@ -1187,7 +1187,7 @@ fn insert_and_delete_cells_never_shift_part_of_a_table() {
 
 #[test]
 fn table_names_with_a_hyphen_are_rejected() {
-    let mut s = Session::new();
+    let mut s = s();
     s.execute("range.setValues", json!({"range": "A1", "values": [["Qty"], [7]]})).unwrap();
     let e = s.execute("insert.table", json!({"range": "A1:A2", "header": true, "name": "A-B"})).unwrap_err();
     assert!(e.to_string().contains("not valid"), "{e}");
