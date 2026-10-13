@@ -132,6 +132,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-10-12 | XLSX chart sheets are kept on open and save: the sheet, its drawing and chart (with style and colours) are written back unchanged in their place among the worksheets, and left out when the sheet they plot is deleted or renamed or a worksheet took their name (#727) |
 | 2026-10-12 | CSV and tab-separated export is capped at 512 MiB: a sheet whose used range would expand to more (two cells far apart, such as A1 and XFD1048576, are 16 GiB of commas) is refused with the rows, columns and limit, before anything is allocated or written (#528) |
 | 2026-10-12 | PDF writer hardening: text width cannot overflow, all-zero dash arrays and negative or NaN stroke widths are sanitised, non-finite sizes and positions draw nothing (#812) |
 | 2026-10-12 | PDF export writes the document title and author as UTF-16BE when they are not ASCII, so viewers show accents, currency signs and non-Latin text correctly (#813) |
@@ -187,6 +188,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-12 | trivial | Progress log: XLSX chart sheets kept on save (#727) |
 | 2026-10-12 | trivial | Progress log: CSV export size cap (#528) |
 | 2026-10-12 | minor | Progress log: margins dragged on the Page Layout rulers (#792) |
 | 2026-10-12 | minor | Ink preservation across XLSX save/reopen (ink portion of #551) |
