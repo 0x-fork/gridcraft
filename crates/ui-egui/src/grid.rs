@@ -20,6 +20,42 @@ pub const COL_HEADER_H: f32 = 21.0;
 /// which matches desktop spreadsheet density (a default 20 px row is 16 pt tall).
 pub const DISPLAY_SCALE: f32 = 0.8;
 
+/// The zoom percentages a Ctrl+wheel notch steps between: four per doubling (about 20% apart),
+/// so 25, 50, 100, 200 and 400 are on it. Excel steps 15 points a notch instead; the status bar's
+/// Zoom In / Zoom Out buttons keep their 10% steps.
+pub const WHEEL_ZOOM_LADDER: [u16; 22] = [10, 12, 15, 18, 21, 25, 30, 35, 42, 50, 60, 70, 85, 100, 120, 140, 170, 200, 240, 280, 340, 400];
+
+/// Seconds without Ctrl+wheel input after which part of a notch turned so far is forgotten.
+const WHEEL_ZOOM_IDLE: f64 = 0.75;
+
+/// The zoom one Ctrl+wheel notch goes to from `zoom`: the next step on [`WHEEL_ZOOM_LADDER`] in
+/// that direction, skipping a step less than 5% away (121% out goes to 100%, not 120%), but never
+/// 100% or the 10% / 400% limits (99% or 101% towards 100% goes to 100%).
+pub fn wheel_zoom_step(zoom: u16, zoom_in: bool) -> u16 {
+    let zoom = zoom.clamp(10, 400);
+    let z = u32::from(zoom);
+    let far = |l: u32| if zoom_in { l * 100 >= z * 105 } else { l * 105 <= z * 100 };
+    let mut ahead = WHEEL_ZOOM_LADDER.iter().copied().filter(|&l| if zoom_in { l > zoom } else { l < zoom }).collect::<Vec<_>>();
+    if !zoom_in {
+        ahead.reverse();
+    }
+    let limit = ahead.last().copied().unwrap_or(zoom);
+    ahead.into_iter().find(|&l| l == 100 || far(u32::from(l))).unwrap_or(limit)
+}
+
+/// One frame of the zoom gliding from `from` to `to` percent: the share `t` (0–1) of the way,
+/// measured as a ratio so zooming in and out feel alike, and at least one percent, so it arrives.
+pub fn zoom_glide_step(from: u16, to: u16, t: f32) -> u16 {
+    let (f, g) = (f32::from(from.max(1)), f32::from(to.max(1)));
+    let next = (f * (g / f).powf(t.clamp(0.0, 1.0))).round();
+    let next = if next.is_finite() { next.clamp(f32::from(from.min(to)), f32::from(from.max(to))) as u16 } else { to };
+    match (next == from, from.cmp(&to)) {
+        (true, std::cmp::Ordering::Less) => from + 1,
+        (true, std::cmp::Ordering::Greater) => from - 1,
+        _ => next,
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum Drag {
     #[default]
@@ -109,6 +145,34 @@ pub struct GridState {
     pub hf_start: bool,
     /// The grid geometry of the last frame (hit-testing for agents and tests).
     pub geo: Option<Geo>,
+    /// Ctrl+wheel zoom in progress (see [`WheelZoom`]).
+    pub wheel_zoom: Option<WheelZoom>,
+}
+
+/// Ctrl+wheel zoom for one (doc uid, sheet). egui eases a notch in over several frames and
+/// fine-grained wheels send parts of one, so the turning is counted in notches, and each whole
+/// notch steps [`WHEEL_ZOOM_LADDER`]. With animations on the zoom then glides to that step.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WheelZoom {
+    pub place: (u64, usize),
+    /// Turned so far towards the next step, in notches (+ in, − out).
+    pub notches: f32,
+    /// When `notches` last changed.
+    pub time: f64,
+    /// The step the zoom is gliding to, and the percentage set last on the way.
+    pub glide: Option<(u16, u16)>,
+}
+
+impl WheelZoom {
+    /// The state for `place` showing `zoom` percent: fresh for another document or sheet, and
+    /// without its glide if the zoom was changed some other way since the glide set it.
+    fn at(app: &SheetApp, place: (u64, usize), zoom: u16, now: f64) -> WheelZoom {
+        let mut w = app.grid.wheel_zoom.filter(|w| w.place == place).unwrap_or(WheelZoom { place, notches: 0.0, time: now, glide: None });
+        if w.glide.is_some_and(|(_, shown)| shown != zoom) {
+            w.glide = None;
+        }
+        w
+    }
 }
 
 impl GridState {
@@ -522,8 +586,34 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     let (scroll_delta, zoom_delta, modifiers, now) = ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.modifiers, i.time));
     if (resp.hovered() || resp.contains_pointer()) && !crate::text_box::contains_pointer(app, ui.ctx()) {
         if zoom_delta != 1.0 {
-            let z = (sh.zoom as f32 * zoom_delta).clamp(10.0, 400.0).round();
-            let _ = app.session.run("view.zoom", json!({"percent": z}));
+            // egui's zoom factor is e^(speed × points); one notch is `line_scroll_speed` points.
+            let notch = ui.ctx().options(|o| o.input_options.scroll_zoom_speed * o.input_options.line_scroll_speed);
+            let turned = zoom_delta.ln() / notch;
+            let mut zooming = WheelZoom::at(app, place, sh.zoom, now);
+            if now - zooming.time > WHEEL_ZOOM_IDLE {
+                zooming.notches = 0.0;
+            }
+            if turned.is_finite() {
+                zooming.notches = (zooming.notches + turned).clamp(-32.0, 32.0);
+            }
+            zooming.time = now;
+            // A notch steps once 60% of it has turned, and the rest of it brings `notches` back to
+            // about 0. (Past half, so what's left after a step can't step back.) Steps count from
+            // where a glide is going, not from where it has got to.
+            let from = zooming.glide.map_or(sh.zoom, |(to, _)| to);
+            let mut z = from;
+            while zooming.notches >= 0.6 {
+                z = wheel_zoom_step(z, true);
+                zooming.notches -= 1.0;
+            }
+            while zooming.notches <= -0.6 {
+                z = wheel_zoom_step(z, false);
+                zooming.notches += 1.0;
+            }
+            if z != from {
+                zooming.glide = Some((z, sh.zoom));
+            }
+            app.grid.wheel_zoom = Some(zooming);
         } else if scroll_delta != egui::Vec2::ZERO {
             let z = if paper { make_geo(app, view.scroll).z } else { sh.zoom as f32 / 100.0 * DISPLAY_SCALE };
             let mut d = scroll_delta;
@@ -537,6 +627,22 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
             }
             view.scroll -= d / z;
         }
+    }
+    // The zoom glides to its step like egui eases a wheel notch (90% of the way in 0.1 s), or goes
+    // there at once without animations (as for the selection outline below: View › Animations
+    // off, egui's off in the headless harness, or a screenshot on its way).
+    let mut zooming = WheelZoom::at(app, place, sh.zoom, now);
+    if let Some((to, shown)) = zooming.glide {
+        let glides = app.ui.animations && ui.ctx().global_style().animation_time > 0.0 && !app.shots.in_flight();
+        let share = egui::emath::exponential_smooth_factor(0.9, 0.1, ui.input(|i| i.stable_dt).min(0.1));
+        let z = if glides { zoom_glide_step(shown, to, share) } else { to };
+        let _ = app.session.run("view.zoom", json!({"percent": z}));
+        zooming.glide = (z != to).then_some((to, z));
+        ui.ctx().request_repaint();
+    }
+    // Store a glide's progress, or that it stopped.
+    if app.grid.wheel_zoom.is_some_and(|w| w.glide.is_some()) {
+        app.grid.wheel_zoom = Some(zooming);
     }
     view.scroll = view.scroll.max(egui::Vec2::ZERO);
     let (mut max_x, mut max_y) = (sh.col_left(MAX_COLS - 20) as f32, sh.row_top(MAX_ROWS - 40) as f32);
@@ -3146,6 +3252,69 @@ mod selection_fill_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wheel_zoom_steps_along_the_ladder_and_stops_at_100() {
+        for (from, zoom_in, to) in [
+            (100, true, 120),
+            (120, false, 100),
+            (100, false, 85),
+            // Between steps, the next one each way (Excel: 112% goes to 115% or 100%).
+            (112, true, 120),
+            (112, false, 100),
+            // A step less than 5% away is skipped…
+            (121, false, 100),
+            (86, false, 70),
+            (139, true, 170),
+            // …but never 100% or a limit.
+            (99, true, 100),
+            (101, false, 100),
+            (96, true, 100),
+            (385, true, 400),
+            (11, false, 10),
+            (400, true, 400),
+            (10, false, 10),
+            // Out-of-range zooms (from a file) come into range first.
+            (5, true, 12),
+            (1000, false, 340),
+            (0, false, 10),
+            (u16::MAX, true, 400),
+        ] {
+            assert_eq!(wheel_zoom_step(from, zoom_in), to, "{from}% {}", if zoom_in { "in" } else { "out" });
+        }
+        // Every step on the ladder is 15–25% from the next, and a notch in then out returns.
+        // (The glide between steps is `zoom_glide_moves_by_ratio_and_always_arrives`.)
+        for w in WHEEL_ZOOM_LADDER.windows(2) {
+            let ratio = f32::from(w[1]) / f32::from(w[0]);
+            assert!((1.15..=1.25).contains(&ratio), "{w:?}");
+            assert_eq!(wheel_zoom_step(w[0], true), w[1]);
+            assert_eq!(wheel_zoom_step(w[1], false), w[0]);
+        }
+    }
+
+    #[test]
+    fn zoom_glide_moves_by_ratio_and_always_arrives() {
+        // A third of the way per frame, as at 60 frames a second.
+        for (from, to) in [(100, 120), (120, 100), (10, 12), (340, 400), (400, 10), (85, 100)] {
+            let (mut z, mut frames) = (from, 0);
+            while z != to {
+                let next = zoom_glide_step(z, to, 0.32);
+                assert!(next != z && next.abs_diff(to) < z.abs_diff(to), "{from} → {to}: {z} then {next}");
+                z = next;
+                frames += 1;
+                assert!(frames < 40, "{from} → {to} arrives");
+            }
+            assert!(frames >= 2, "{from} → {to} glides over more than one frame ({frames})");
+        }
+        assert_eq!(zoom_glide_step(100, 120, 0.32), 106, "a third of the way by ratio");
+        assert_eq!(zoom_glide_step(120, 100, 0.32), 113);
+        // No progress asked or nonsense: still a percent closer, or straight there.
+        assert_eq!(zoom_glide_step(100, 120, 0.0), 101);
+        assert_eq!(zoom_glide_step(120, 100, f32::NAN), 100);
+        assert_eq!(zoom_glide_step(100, 120, 5.0), 120);
+        assert_eq!(zoom_glide_step(120, 120, 0.5), 120);
+        assert_eq!(zoom_glide_step(0, 10, 0.5), 3);
+    }
 
     #[test]
     fn center_across_run_stops_at_first_non_continuing_column() {
