@@ -2657,6 +2657,56 @@ fn notes_comments_and_links_survive_a_json_save() {
     assert_eq!(after.cells, before.cells);
 }
 
+/// Insert › Link sorts a target as Excel's dialog does: a sheet reference, a defined name or `#…` is
+/// a place in this document, anything else an existing file or web page. A file saved as a
+/// `location` opens nothing in Excel (#800).
+#[test]
+fn links_to_files_are_saved_as_external_relationships() {
+    use std::io::Read;
+    let mut s = s();
+    s.execute("formulas.defineName", json!({"name": "Price", "refersTo": "=Sheet1!$A$1"})).unwrap();
+    s.execute("insert.table", json!({"range": "F1:G3", "name": "Sales"})).unwrap();
+    s.execute("home.insertSheet", json!({"name": "Q#1"})).unwrap();
+    s.execute("sheet.activate", json!({"sheet": 0})).unwrap();
+    let links = [
+        ("A1", "Source.xlsx", true),
+        ("A2", r"C:\Temp\Book.xlsx", true),
+        ("A3", r"..\Reports\Q1.xlsx", true),
+        ("A4", "Other.xlsx#Sheet1!A2", true),
+        ("A5", "https://example.com/a.xlsx", true),
+        ("A6", "Sheet1!B2", false),
+        ("A7", "#Sheet1!B3", false),
+        ("A8", "Price", false),
+        ("A9", "'Sheet1'!C4:D5", false),
+        ("A10", "Sales", false),
+        ("A11", "'Q#1'!B2", false),
+    ];
+    for (cell, target, _) in links {
+        s.execute("insert.link", json!({"cell": cell, "target": target})).unwrap();
+    }
+    let bytes = gridcraft_xlsx::write_xlsx(&s.doc().unwrap().wb).unwrap();
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes.clone())).unwrap();
+    let mut part = |name: &str| {
+        let mut text = String::new();
+        zip.by_name(name).unwrap().read_to_string(&mut text).unwrap();
+        text
+    };
+    let (sheet, rels) = (part("xl/worksheets/sheet1.xml"), part("xl/worksheets/_rels/sheet1.xml.rels"));
+    for (cell, target, external) in links {
+        let file = target.split_once('#').map_or(target, |(f, _)| f);
+        let as_rel = format!("Target=\"{file}\" TargetMode=\"External\"");
+        let as_location = format!("location=\"{}\"", target.trim_start_matches('#'));
+        assert_eq!(rels.contains(&as_rel), external, "{cell} {target}: {rels}");
+        assert_eq!(sheet.contains(&as_location), !external, "{cell} {target}: {sheet}");
+    }
+    assert!(sheet.contains("location=\"Sheet1!A2\""), "{sheet}");
+    let (back, _) = gridcraft_xlsx::read_xlsx(&bytes).unwrap();
+    for (cell, target, external) in links {
+        let h = &back.sheet(0).unwrap().hyperlinks[&CellRef::parse(cell).unwrap()];
+        assert_eq!((h.target.as_str(), h.external), (target.trim_start_matches('#'), external), "{cell}");
+    }
+}
+
 #[test]
 fn vertical_alignment_commands_and_roundtrip() {
     let mut s = s();
