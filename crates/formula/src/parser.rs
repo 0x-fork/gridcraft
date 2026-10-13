@@ -362,6 +362,10 @@ impl Parser {
         if w.chars().next().is_some_and(|c| c.is_ascii_digit()) {
             return Err(self.err(format!("unexpected `{w}`")));
         }
+        // A function passed by name is saved as `_xleta.SUM`.
+        if let Some(f) = w.get(..7).filter(|p| p.eq_ignore_ascii_case("_xleta.")).and_then(|_| w.get(7..)) {
+            return Ok(Expr::Name(f.to_ascii_uppercase()));
+        }
         Ok(Expr::Name(w.to_string()))
     }
 
