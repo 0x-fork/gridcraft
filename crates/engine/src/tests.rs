@@ -1618,6 +1618,17 @@ fn replacing_a_spilling_formula_clears_its_spill() {
 }
 
 #[test]
+fn clearing_a_spill_past_65536_cells_updates_a_late_dependent() {
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "=SEQUENCE(65537)"})).unwrap();
+    s.execute("cell.set", json!({"cell": "C1", "input": "=A65536"})).unwrap();
+    s.execute("cell.set", json!({"cell": "C2", "input": "=A65537"})).unwrap();
+    assert_eq!(v(&s, "C2"), Value::Number(65537.0));
+    s.execute("cell.set", json!({"cell": "A1", "input": "5"})).unwrap();
+    assert_eq!((v(&s, "C1"), v(&s, "C2")), (Value::Number(0.0), Value::Number(0.0)));
+}
+
+#[test]
 fn range_ending_in_index_recalculates() {
     let mut s = s();
     s.execute("cell.set", json!({"cell": "B6", "input": "=SUM(C3:INDEX(B9:C11,2,2))"})).unwrap();
@@ -2503,6 +2514,15 @@ fn fill_series_month_clamps_to_month_end() {
     // Mid-month seeds are untouched.
     let s = series_date("2026-01-15", "A1:A4", "month");
     assert_eq!(v(&s, "A4"), ymd(2026, 4, 15));
+}
+
+#[test]
+fn fill_series_weekday_out_of_range_step_errors() {
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "45000"})).unwrap();
+    let r = s.execute("edit.fillSeries", json!({"range": "A1:A2", "direction": "columns", "type": "date", "dateUnit": "weekday", "step": 1e12}));
+    assert!(r.is_err());
+    assert_eq!(v(&s, "A2"), Value::Empty);
 }
 
 #[test]

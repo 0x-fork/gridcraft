@@ -502,6 +502,38 @@ fn let_lambda() {
 }
 
 #[test]
+fn lambda_argument_count() {
+    let mut t = T::new();
+    t.wb.names.push(gridcraft_model::DefinedName {
+        name: "AddPair".into(),
+        scope: None,
+        formula: "LAMBDA(a,b,a+b)".into(),
+        comment: String::new(),
+        hidden: false,
+    });
+    t.calc.rebuild(&t.wb);
+    let omit = "LAMBDA(x,y,IF(ISOMITTED(y),\"Missing\",x+y))";
+    t.set("A1", "=LAMBDA(a,b,a+b)(2)");
+    t.set("A2", "=LAMBDA(a,b,a+b)(2,3,4)");
+    t.set("A3", &format!("={omit}(1,)"));
+    t.set("A4", &format!("={omit}(1)"));
+    t.set("A5", &format!("={omit}(1,2)"));
+    t.set("A6", "=LAMBDA(7)()");
+    t.set("A7", "=AddPair(2)");
+    t.set("A8", "=AddPair(2,3)");
+    assert_eq!(t.get("A1"), Value::Error(CellError::Value));
+    assert_eq!(t.get("A2"), Value::Error(CellError::Value));
+    assert_eq!(t.get("A3"), Value::Text("Missing".into()));
+    assert_eq!(t.get("A4"), Value::Error(CellError::Value));
+    assert_eq!(t.num("A5"), 3.0);
+    assert_eq!(t.num("A6"), 7.0);
+    assert_eq!(t.get("A7"), Value::Error(CellError::Value));
+    assert_eq!(t.num("A8"), 5.0);
+    t.set("A9", "=LAMBDA(x,ISOMITTED(x))()");
+    assert_eq!(t.get("A9"), Value::Bool(true));
+}
+
+#[test]
 fn names_and_sheets() {
     let mut t = T::new();
     t.wb.names.push(gridcraft_model::DefinedName { name: "Rate".into(), scope: None, formula: "0.5".into(), comment: String::new(), hidden: false });
@@ -560,6 +592,29 @@ fn subtotal_skips_hidden() {
     t.set("B2", "=SUBTOTAL(9,A1:A3)");
     assert_eq!(t.num("B1"), 4.0);
     assert_eq!(t.num("B2"), 6.0);
+}
+
+#[test]
+fn subtotal_109_skips_nested_subtotal() {
+    let mut t = T::new();
+    t.set("A1", "2");
+    t.set("A2", "=SUBTOTAL(9,A1)");
+    t.set("C1", "=SUBTOTAL(109,A1:A2)");
+    t.set("C2", "=SUBTOTAL(9,A1:A2)");
+    t.set("C3", "=SUBTOTAL(109,A1)");
+    assert_eq!(t.num("C1"), 2.0);
+    assert_eq!(t.num("C2"), 2.0);
+    assert_eq!(t.num("C3"), 2.0);
+    // Manually hidden rows are still left out by 109 only.
+    let mut t = T::new();
+    t.set("A1", "1");
+    t.set("A2", "2");
+    t.set("A3", "=SUBTOTAL(9,A1:A2)");
+    t.wb.sheet_mut(0).unwrap().rows.insert(1, gridcraft_model::LineInfo { hidden: true, ..Default::default() });
+    t.set("B1", "=SUBTOTAL(109,A1:A3)");
+    t.set("B2", "=SUBTOTAL(9,A1:A3)");
+    assert_eq!(t.num("B1"), 1.0);
+    assert_eq!(t.num("B2"), 3.0);
 }
 
 /// SUBTOTAL leaves out rows a filter hides for every function number, while 1-11 keep rows

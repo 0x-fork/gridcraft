@@ -47,6 +47,17 @@ impl Dialog {
         &self.name
     }
 
+    /// Sets a form value. In Zoom, a Magnification choice is also the percentage `view.zoom` stores.
+    pub(crate) fn set_value(&mut self, key: &str, value: Json) {
+        if self.name == "zoom"
+            && key == "preset"
+            && let Some(p) = value.as_str().and_then(|s| s.parse::<f64>().ok())
+        {
+            self.values.insert("percent".into(), json!(p));
+        }
+        self.values.insert(key.into(), value);
+    }
+
     fn form(name: &str, title: &str, command: &'static str, fields: Vec<Field>, defaults: Json) -> Dialog {
         Dialog {
             name: name.into(),
@@ -370,20 +381,26 @@ impl Dialog {
                 ],
                 json!({"header": "", "footer": "&CPage &P of &N"}),
             ),
-            "pageSetup" => Dialog::form(
-                "pageSetup",
-                "Page Setup",
-                "pageLayout.margins",
-                vec![
-                    Number { key: "left", label: "Left margin (in):" },
-                    Number { key: "right", label: "Right margin (in):" },
-                    Number { key: "top", label: "Top margin (in):" },
-                    Number { key: "bottom", label: "Bottom margin (in):" },
-                    Number { key: "header", label: "Header (in):" },
-                    Number { key: "footer", label: "Footer (in):" },
-                ],
-                json!({"left": 0.7, "right": 0.7, "top": 0.75, "bottom": 0.75, "header": 0.3, "footer": 0.3}),
-            ),
+            "pageSetup" => {
+                // Opens on the active sheet's saved margins, so OK without edits rewrites them unchanged.
+                let m = app.session.active().and_then(|d| d.wb.active()).map(|s| s.print.margins).unwrap_or([0.7, 0.7, 0.75, 0.75, 0.3, 0.3]);
+                // Round off f32 noise so the form shows 0.1, not 0.10000000149.
+                let [left, right, top, bottom, header, footer] = m.map(|v| (f64::from(v) * 1e4).round() / 1e4);
+                Dialog::form(
+                    "pageSetup",
+                    "Page Setup",
+                    "pageLayout.margins",
+                    vec![
+                        Number { key: "left", label: "Left margin (in):" },
+                        Number { key: "right", label: "Right margin (in):" },
+                        Number { key: "top", label: "Top margin (in):" },
+                        Number { key: "bottom", label: "Bottom margin (in):" },
+                        Number { key: "header", label: "Header (in):" },
+                        Number { key: "footer", label: "Footer (in):" },
+                    ],
+                    json!({"left": left, "right": right, "top": top, "bottom": bottom, "header": header, "footer": footer}),
+                )
+            }
             "textToColumns" => Dialog::form(
                 "textToColumns",
                 "Convert Text to Columns",
@@ -575,7 +592,7 @@ impl Dialog {
                     },
                     Text { key: "errorMessage", label: "Error message:" },
                 ],
-                json!({"type": "list", "operator": "between", "ignoreBlank": true, "dropdown": true, "errorStyle": "stop"}),
+                validation_defaults(app),
             ),
             "cfQuick" => {
                 let ty = p("type").as_str().unwrap_or("cellIs").to_string();
@@ -805,6 +822,36 @@ impl Dialog {
         };
         Some(d)
     }
+}
+
+/// Initial values of the Data Validation form: the rule stored on the active cell, so OK without
+/// edits keeps it; a plain list rule when the cell has none.
+fn validation_defaults(app: &SheetApp) -> Json {
+    let mut v = json!({"type": "list", "operator": "between", "ignoreBlank": true, "dropdown": true, "errorStyle": "stop"});
+    let Some(doc) = app.session.active() else { return v };
+    let Some(dv) = doc.wb.active().and_then(|s| s.validations.iter().find(|d| d.ranges.iter().any(|r| r.contains(doc.selection.active)))) else {
+        return v;
+    };
+    // The enums serialize as their variant names; the command takes them in camelCase.
+    let camel = |x: Json| {
+        let name = x.as_str().unwrap_or_default();
+        let mut chars = name.chars();
+        chars.next().map(|c| c.to_lowercase().chain(chars).collect::<String>()).unwrap_or_default()
+    };
+    v["type"] = json!(camel(json!(dv.kind)));
+    v["operator"] = json!(camel(json!(dv.op)));
+    v["errorStyle"] = json!(camel(json!(dv.error_style)));
+    v["formula1"] = json!(dv.f1);
+    if let Some(f2) = &dv.f2 {
+        v["formula2"] = json!(f2);
+    }
+    v["ignoreBlank"] = json!(dv.allow_blank);
+    v["dropdown"] = json!(dv.in_cell_dropdown);
+    v["inputTitle"] = json!(dv.input_title);
+    v["inputMessage"] = json!(dv.input_message);
+    v["errorTitle"] = json!(dv.error_title);
+    v["errorMessage"] = json!(dv.error_message);
+    v
 }
 
 fn abs(r: &gridcraft_engine::core::RangeRef) -> String {
@@ -1288,7 +1335,7 @@ fn form_fields(ui: &mut egui::Ui, d: &mut Dialog) {
                         let cur = d.values.get(key).and_then(Json::as_str).unwrap_or("").to_string();
                         for (val, text) in options {
                             if ui.radio(cur == val, text).clicked() {
-                                d.values.insert(key.into(), json!(val));
+                                d.set_value(key, json!(val));
                             }
                         }
                     });
@@ -2459,4 +2506,37 @@ fn spelling(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, open: &mut bo
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn data_validation_opens_on_the_rule_of_the_active_cell() {
+        let mut session = gridcraft_engine::Session::default();
+        session.new_workbook();
+        let mut app = SheetApp::new(session, Default::default());
+        app.run("data.validation", json!({"range": "A1", "type": "whole", "operator": "greater", "formula1": "5"})).unwrap();
+        let d = Dialog::open(&mut app, "dataValidation", json!({})).unwrap();
+        assert_eq!(d.values["type"], "whole");
+        assert_eq!(d.values["operator"], "greater");
+        assert_eq!(d.values["formula1"], "5");
+        // OK without edits keeps the rule: 6 is accepted, 4 is rejected.
+        app.run(d.command.unwrap(), build_params(&d)).unwrap();
+        let doc = app.session.active().unwrap();
+        let at = gridcraft_engine::core::CellRef::new(0, 0);
+        assert!(gridcraft_engine::cmd::data::check_validation(&doc.wb, 0, at, "6").is_none());
+        assert!(gridcraft_engine::cmd::data::check_validation(&doc.wb, 0, at, "4").is_some());
+    }
+
+    #[test]
+    fn data_validation_without_a_rule_opens_on_a_blank_list() {
+        let mut session = gridcraft_engine::Session::default();
+        session.new_workbook();
+        let mut app = SheetApp::new(session, Default::default());
+        let d = Dialog::open(&mut app, "dataValidation", json!({})).unwrap();
+        assert_eq!(d.values["type"], "list");
+        assert!(d.values.get("formula1").is_none());
+    }
 }
