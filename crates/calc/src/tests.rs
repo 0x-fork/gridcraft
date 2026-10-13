@@ -428,6 +428,37 @@ fn references_functions() {
 }
 
 #[test]
+fn indirect_r1c1_out_of_bounds() {
+    for reference in ["R[9223372036854775807]C", "RC[9223372036854775807]", "R[4294967296]C", "R[4294967291]C", "R[2000000]C", "RC[20000]"] {
+        let mut t = T::new();
+        t.set("D5", &format!("=ROW(INDIRECT(\"{reference}\",FALSE))"));
+        assert_eq!(t.get("D5"), Value::Error(CellError::Ref), "{reference}");
+    }
+}
+
+#[test]
+fn indirect_r1c1_past_the_sheet_does_not_fall_back_to_a1() {
+    let mut t = T::new();
+    t.set("RC16385", "78");
+    for reference in ["RC16385", "rc16385", "RC1:RC16385"] {
+        t.set("D5", &format!("=INDIRECT(\"{reference}\",FALSE)"));
+        assert_eq!(t.get("D5"), Value::Error(CellError::Ref), "{reference}");
+    }
+}
+
+#[test]
+fn indirect_r1c1_valid_references() {
+    let mut t = T::new();
+    t.set("E6", "11");
+    t.set("A1", "22");
+    t.set("D4", "33");
+    for (reference, expected) in [("R[1]C[1]", 11.0), ("R1C1", 22.0), ("R[-1]C", 33.0)] {
+        t.set("D5", &format!("=INDIRECT(\"{reference}\",FALSE)"));
+        assert_eq!(t.num("D5"), expected, "{reference}");
+    }
+}
+
+#[test]
 fn relative_names() {
     let mut t = T::new();
     // As files store them: relative to A1. `Left` is the cell to the left, `Above3` the three
