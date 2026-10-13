@@ -132,6 +132,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-10-12 | Number formats: a fraction denominator with 65,536 zeros no longer crashes; format codes are capped at 255 characters like Excel (longer codes display as General, `TEXT` gives `#VALUE!`) (#807) |
 | 2026-10-12 | Security: cell hyperlinks open only http, https and mailto, after a confirmation; other schemes (file:, smb:, UNC, custom handlers) are refused (#777, part 1) |
 | 2026-10-12 | Deleting several Ctrl-selected rows or columns removes them all in one undo step (#758) |
 | 2026-10-12 | XLSX chart sheets are kept on open and save: the sheet, its drawing and chart (with style and colours) are written back unchanged in their place among the worksheets, and left out when the sheet they plot is deleted or renamed or a worksheet took their name (#727) |
