@@ -927,7 +927,32 @@ fn validation(s: &mut Session, p: &Json) -> Result<Json> {
         "time" => ValidationKind::Time,
         "textLength" => ValidationKind::TextLength,
         "custom" => ValidationKind::Custom,
-        _ => ValidationKind::Any,
+        "any" => ValidationKind::Any,
+        // An unknown type used to give an "any value" rule, saved as `type="none"`: no validation.
+        other => return Err(bad("data.validation", format!("unknown type `{other}` (any, whole, decimal, list, date, time, textLength, custom)"))),
+    };
+    const OPERATORS: [&str; 12] = [
+        "between",
+        "notBetween",
+        "equal",
+        "notEqual",
+        "greater",
+        "greaterThan",
+        "less",
+        "lessThan",
+        "greaterOrEqual",
+        "greaterThanOrEqual",
+        "lessOrEqual",
+        "lessThanOrEqual",
+    ];
+    if let Some(op) = str_param(p, "operator").filter(|op| !OPERATORS.contains(op)) {
+        return Err(bad("data.validation", format!("unknown operator `{op}` ({})", OPERATORS.join(", "))));
+    }
+    let error_style = match str_param(p, "errorStyle") {
+        None | Some("stop") => ErrorStyle::Stop,
+        Some("warning") => ErrorStyle::Warning,
+        Some("information") => ErrorStyle::Information,
+        Some(other) => return Err(bad("data.validation", format!("unknown errorStyle `{other}` (stop, warning, information)"))),
     };
     let f1 = str_param(p, "formula1").unwrap_or("");
     let f1 = if kind == ValidationKind::List { list_source(f1) } else { f1.trim_start_matches('=').to_string() };
@@ -944,11 +969,7 @@ fn validation(s: &mut Session, p: &Json) -> Result<Json> {
         show_input: true,
         error_title: str_param(p, "errorTitle").unwrap_or("").into(),
         error_message: str_param(p, "errorMessage").unwrap_or("").into(),
-        error_style: match str_param(p, "errorStyle") {
-            Some("warning") => ErrorStyle::Warning,
-            Some("information") => ErrorStyle::Information,
-            _ => ErrorStyle::Stop,
-        },
+        error_style,
         show_error: true,
     };
     edit(s, |cx| {
@@ -1462,5 +1483,33 @@ mod tests {
         let (reopened, _) = gridcraft_xlsx::read_xlsx(&gridcraft_xlsx::write_xlsx(&wb).unwrap()).unwrap();
         check(&reopened);
         assert_eq!(sheet_xml(&reopened), xml, "a second save writes the same rules");
+    }
+
+    #[test]
+    fn a_rule_with_an_unknown_type_operator_or_error_style_is_refused() {
+        // A typo used to give a rule that validates nothing (`type="none"`) or the wrong check,
+        // with no error.
+        let mut s = Session::new();
+        s.new_workbook();
+        for params in [
+            json!({"range": "A1", "type": "lst", "formula1": "\"a,b\""}),
+            json!({"range": "A1", "type": "whole", "operator": "greaterthan", "formula1": "1"}),
+            json!({"range": "A1", "type": "whole", "operator": ">", "formula1": "1"}),
+            json!({"range": "A1", "type": "list", "formula1": "\"a,b\"", "errorStyle": "warn"}),
+        ] {
+            let e = s.execute("data.validation", params.clone()).unwrap_err().to_string();
+            assert!(e.contains("unknown"), "{params}: {e}");
+        }
+        assert!(s.doc().unwrap().wb.active().unwrap().validations.is_empty());
+        for params in [
+            json!({"range": "A1", "type": "any"}),
+            json!({"range": "A2", "type": "whole", "operator": "greaterThan", "formula1": "1"}),
+            json!({"range": "A3", "type": "list", "formula1": "\"a,b\"", "errorStyle": "warning"}),
+        ] {
+            s.execute("data.validation", params).unwrap();
+        }
+        let sh = s.doc().unwrap().wb.active().unwrap().clone();
+        assert_eq!(sh.validations.len(), 3);
+        assert!(check_validation(&s.doc().unwrap().wb, 0, CellRef::parse("A2").unwrap(), "0").is_some());
     }
 }
