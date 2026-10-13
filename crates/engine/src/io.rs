@@ -102,6 +102,8 @@ fn open_plain(name: &str, bytes: &[u8]) -> Result<(Workbook, Vec<String>)> {
     let import = match sniffed {
         gridcraft_xlsx::Format::Ods => Some(FileKind::Ods),
         gridcraft_xlsx::Format::Xlsb => Some(FileKind::Xlsb),
+        // An XLSX package is never read as ODS/XLSB just because of its name.
+        gridcraft_xlsx::Format::Xlsx => None,
         _ => kind.filter(|k| matches!(k, FileKind::Ods | FileKind::Xlsb)),
     };
     if let Some(import) = import {
@@ -109,7 +111,8 @@ fn open_plain(name: &str, bytes: &[u8]) -> Result<(Workbook, Vec<String>)> {
         let (wb, report) = read(bytes).map_err(|e| EngineError::Other(format!("We can't import '{name}': {e}")))?;
         return Ok((wb, report.warnings));
     }
-    if sniffed == gridcraft_xlsx::Format::Xlsx || kind == Some(FileKind::Xlsx) {
+    // Text named `.xlsx` is read as text.
+    if sniffed == gridcraft_xlsx::Format::Xlsx || (kind == Some(FileKind::Xlsx) && sniffed != gridcraft_xlsx::Format::Csv) {
         let (wb, report) = gridcraft_xlsx::read_xlsx(bytes).map_err(|e| EngineError::Other(format!("We can't open '{name}': {e}")))?;
         return Ok((wb, report.warnings));
     }
@@ -631,5 +634,20 @@ mod tests {
             ),
             "{types}"
         );
+    }
+
+    #[test]
+    fn content_wins_over_a_mismatched_extension() {
+        let mut wb = Workbook::new();
+        wb.sheet_mut(0).unwrap().set_value(CellRef::new(0, 0), gridcraft_core::Value::Number(7.0));
+        let package = save_bytes(&wb, "book.xlsx").unwrap();
+        for name in ["book.xlsx", "book.ods", "book.xlsb", "book.csv"] {
+            let (opened, _) = open_bytes(name, &package).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(opened.sheet(0).unwrap().value(CellRef::new(0, 0)), gridcraft_core::Value::Number(7.0), "{name}");
+        }
+        for name in ["data.xlsx", "data.csv"] {
+            let (opened, _) = open_bytes(name, b"a,b\n1,2\n").unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(opened.sheet(0).unwrap().value(CellRef::new(0, 1)), gridcraft_core::Value::text("b"), "{name}");
+        }
     }
 }
