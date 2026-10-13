@@ -245,3 +245,49 @@ fn closing_the_window_can_save_first_and_a_saved_workbook_closes_at_once() {
     assert_eq!(wb.active().unwrap().value(CellRef::new(0, 0)), Value::Number(123.0), "Save wrote the change before closing");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+fn pdf_picker_harness(dir: &std::path::Path) -> (Arc<Mutex<Vec<String>>>, egui_kittest::Harness<'static, SheetApp>) {
+    let asked = Arc::new(Mutex::new(Vec::<String>::new()));
+    let (capture, target) = (asked.clone(), dir.to_path_buf());
+    let h = harness(Services {
+        pick_save: Some(Box::new(move |suggested| {
+            capture.lock().unwrap().push(suggested.to_string());
+            Some(target.join("Report.xlsx").to_string_lossy().into_owned())
+        })),
+        ..Default::default()
+    });
+    (asked, h)
+}
+
+#[test]
+fn the_palette_export_as_pdf_asks_where_to_save() {
+    let dir = std::env::temp_dir().join(format!("gridcraft-export-pdf-palette-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (asked, mut h) = pdf_picker_harness(&dir);
+    h.state_mut().run("cell.set", serde_json::json!({"cell": "A1", "input": "42"})).unwrap();
+    // The palette and menus go through run_or_alert.
+    h.state_mut().run_or_alert("file.exportPdf", serde_json::json!({}));
+    assert!(asked.lock().unwrap().first().is_some_and(|s| s.ends_with(".pdf")), "the picker is offered a .pdf name");
+    assert!(std::fs::read(dir.join("Report.pdf")).unwrap().starts_with(b"%PDF-"), "the PDF is written, whatever extension the picker returned");
+    assert!(h.state().message.is_none());
+    let d = h.state().session.active().unwrap();
+    assert!(d.path.is_none(), "a PDF is a copy, not the workbook's file");
+    // Other params survive the round trip through the picker.
+    h.state_mut().run_or_alert("file.exportPdf", serde_json::json!({"range": "nope"}));
+    assert!(h.state().message.is_some(), "a bad range is reported, not swallowed");
+    // A path in the params skips the picker.
+    let before = asked.lock().unwrap().len();
+    let named = dir.join("Named.pdf");
+    h.state_mut().run_or_alert("file.exportPdf", serde_json::json!({"path": named.to_string_lossy()}));
+    assert_eq!(asked.lock().unwrap().len(), before);
+    assert!(named.exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_cancelled_export_pdf_picker_writes_nothing() {
+    let mut h = harness(Services { pick_save: Some(Box::new(|_| None)), ..Default::default() });
+    h.state_mut().run_or_alert("file.exportPdf", serde_json::json!({}));
+    assert!(h.state().message.is_none());
+    assert!(h.state_mut().session.take_ui_requests().is_empty());
+}
