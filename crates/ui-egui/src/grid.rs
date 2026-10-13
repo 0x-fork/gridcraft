@@ -1377,6 +1377,26 @@ fn range_in_pane(r: RangeRef, rows: (u32, u32), cols: (u32, u32)) -> bool {
     r.start.row <= rows.1 && r.end.row >= rows.0 && r.start.col <= cols.1 && r.end.col >= cols.0
 }
 
+/// The four sides of a `width` wide outline centred on `rect`, cut to `clip` (a little beyond it).
+///
+/// A stroked rectangle that spans a whole column (20 million points tall) loses its precision in
+/// the tessellator and its left and right sides vanish; sides filled from rectangles that stay
+/// near the viewport do not. Sides wholly outside `clip` are left out.
+pub(crate) fn outline_bands(rect: Rect, width: f32, clip: Rect) -> Vec<Rect> {
+    if !rect.is_finite() || !clip.is_finite() {
+        return Vec::new();
+    }
+    let h = width / 2.0;
+    let clip = clip.expand(width * 2.0);
+    let sides = [
+        Rect::from_min_max(pos2(rect.left() - h, rect.top() - h), pos2(rect.left() + h, rect.bottom() + h)),
+        Rect::from_min_max(pos2(rect.right() - h, rect.top() - h), pos2(rect.right() + h, rect.bottom() + h)),
+        Rect::from_min_max(pos2(rect.left() - h, rect.top() - h), pos2(rect.right() + h, rect.top() + h)),
+        Rect::from_min_max(pos2(rect.left() - h, rect.bottom() - h), pos2(rect.right() + h, rect.bottom() + h)),
+    ];
+    sides.into_iter().map(|s| s.intersect(clip)).filter(|s| s.is_finite() && s.width() > 0.0 && s.height() > 0.0).collect()
+}
+
 /// `outline` is where the current area's border is drawn this frame (see `selection_glide`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn paint_selection(
@@ -1419,7 +1439,9 @@ pub(crate) fn paint_selection(
         }
     }
     if cur_here {
-        p.rect_stroke(outline.expand(0.5), 0.0, Stroke::new(2.0, t.sel_border), StrokeKind::Middle);
+        for side in outline_bands(outline.expand(0.5), 2.0, p.clip_rect()) {
+            p.rect_filled(side, 0.0, t.sel_border);
+        }
     }
     if active_here && sel.ranges.len() > 1 {
         p.rect_stroke(active, 0.0, Stroke::new(1.0, t.sel_border), StrokeKind::Inside);
@@ -3292,5 +3314,29 @@ mod pane_tests {
         let handle = geo.range_rect(&sh, rng(5, 3, 6, 4)).right_bottom();
         assert!(handle.x < split.x);
         assert!(!geo.range_panes(rng(6, 4, 6, 4)).iter().any(|r| r.contains(handle)));
+    }
+}
+
+#[cfg(test)]
+mod outline_band_tests {
+    use super::*;
+
+    #[test]
+    fn whole_column_outline_keeps_left_and_right_sides_near_viewport() {
+        let clip = Rect::from_min_max(pos2(0.0, 0.0), pos2(800.0, 600.0));
+        let col = Rect::from_min_max(pos2(100.0, 40.0), pos2(180.0, 20_971_540.0));
+        let sides = outline_bands(col, 2.0, clip);
+        // Left, right and top (in view); the bottom is 20 million points away.
+        assert_eq!(sides.len(), 3);
+        assert!(sides.iter().all(|s| s.bottom() <= clip.bottom() + 4.0 + f32::EPSILON));
+        assert!(sides.iter().any(|s| s.left() < 100.0 && s.right() > 100.0 && s.height() > 500.0));
+        assert!(sides.iter().any(|s| s.left() < 180.0 && s.right() > 180.0 && s.height() > 500.0));
+    }
+
+    #[test]
+    fn outline_outside_the_view_and_non_finite_draw_nothing() {
+        let clip = Rect::from_min_max(pos2(0.0, 0.0), pos2(800.0, 600.0));
+        assert!(outline_bands(Rect::from_min_max(pos2(900.0, 0.0), pos2(950.0, 20.0)), 2.0, clip).is_empty());
+        assert!(outline_bands(Rect::from_min_max(pos2(f32::NAN, 0.0), pos2(1.0, 1.0)), 2.0, clip).is_empty());
     }
 }
