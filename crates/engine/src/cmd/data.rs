@@ -462,6 +462,12 @@ fn toggle_filter(s: &mut Session, p: &Json) -> Result<Json> {
             Ok(json!({"filter": false}))
         });
     }
+    install_filter(s, p)
+}
+
+/// Turn a sheet AutoFilter on over `p.range`, or over the data range of the selection.
+fn install_filter(s: &mut Session, p: &Json) -> Result<Json> {
+    let sheet = s.doc()?.wb.active_sheet;
     let mut r = data_range(s, p)?;
     // A selected header row filters the data below it (#201).
     if p.get("range").is_none() && r.height() == 1 {
@@ -484,7 +490,7 @@ fn filter_by(s: &mut Session, p: &Json) -> Result<Json> {
     let af = match &sh.autofilter {
         Some(a) => a.clone(),
         None => {
-            toggle_filter(s, &json!({}))?;
+            install_filter(s, &json!({}))?;
             s.doc()?.wb.sheet(sheet).and_then(|sh| sh.autofilter.clone()).ok_or_else(|| EngineError::Other("no filter".into()))?
         }
     };
@@ -1277,6 +1283,24 @@ fn subtotal(s: &mut Session, p: &Json) -> Result<Json> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filter_by_inside_a_table_installs_the_autofilter_and_keeps_the_button() {
+        for sel in [json!({"cell": "A1"}), json!({"cell": "A2"}), json!({"range": "A1:A3"})] {
+            let mut s = Session::new();
+            s.new_workbook();
+            s.execute("range.setValues", json!({"range": "A1", "values": [["H"], ["a"], ["b"]]})).unwrap();
+            s.execute("insert.table", json!({"range": "A1:A3", "header": true})).unwrap();
+            s.execute("selection.set", sel.clone()).unwrap();
+            s.execute("data.filterBy", json!({"column": "A", "values": ["a"]})).unwrap();
+            let sh = s.doc().unwrap().wb.active().unwrap();
+            assert_eq!(sh.autofilter.as_ref().map(|a| a.range.a1()), Some("A1:A3".to_string()), "{sel}");
+            assert!(sh.tables[0].filter_button, "{sel}");
+            assert!(!sh.is_row_hidden(1), "{sel}");
+            assert!(sh.is_row_hidden(2), "{sel}");
+            assert_eq!(sh.value(CellRef::new(2, 0)).display(), "b", "{sel}");
+        }
+    }
 
     #[test]
     fn partial_validation_edits_keep_the_rest_of_the_old_rule() {
