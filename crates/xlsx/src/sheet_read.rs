@@ -541,7 +541,7 @@ pub fn parse_iso_datetime(s: &str, sys: DateSystem) -> Option<f64> {
 }
 
 pub fn parse_sqref(s: Option<&str>) -> Vec<RangeRef> {
-    s.unwrap_or("").split_whitespace().filter_map(RangeRef::parse).take(10_000).collect()
+    s.unwrap_or("").split_whitespace().filter_map(RangeRef::parse).collect()
 }
 
 fn cf_op(s: Option<&str>) -> CfOperator {
@@ -973,5 +973,13 @@ mod tests {
         assert_eq!(parse_iso_datetime("06:00:00", DateSystem::D1900), Some(0.25));
         assert_eq!(parse_iso_datetime("garbage", DateSystem::D1900), None);
         assert_eq!(parse_iso_datetime("2024-13-01", DateSystem::D1900), None);
+    }
+
+    #[test]
+    fn sqref_keeps_more_than_ten_thousand_ranges() {
+        let sq = (1..=12_000).map(|r| format!("A{r}")).collect::<Vec<_>>().join(" ");
+        let ranges = parse_sqref(Some(&sq));
+        assert_eq!(ranges.len(), 12_000);
+        assert_eq!(ranges.last().copied(), RangeRef::parse("A12000"));
     }
 }
