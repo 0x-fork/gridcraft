@@ -693,6 +693,12 @@ enum ValSrc {
     Calc(usize),
 }
 
+/// True when `col_groups` distinct column leaves (plus the grand-total column) times `values` value fields
+/// (at least one data column per group) already exceed the sheet width. This is a lower bound on the final column count.
+fn data_cols_exceed_sheet(col_groups: usize, grand_total: bool, values: usize) -> bool {
+    (col_groups + usize::from(grand_total)).saturating_mul(values.max(1)) > MAX_COLS as usize
+}
+
 /// Computes a PivotTable report from the workbook.
 pub fn compute(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Result<Output, String> {
     let src = read_source(wb, &pt.source, pivot_sheet)?;
@@ -752,6 +758,7 @@ pub fn compute(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Result<Out
     let mut aggs: AggMap = HashMap::new();
     let mut row_set: HashSet<Vec<u32>> = HashSet::new();
     let mut col_set: HashSet<Vec<u32>> = HashSet::new();
+    let mut col_leaves: HashSet<Vec<u32>> = HashSet::new();
     let filter_fmts: Vec<String> = filters.iter().map(|f| fmt_of(f.0)).collect();
     let row_fmts: Vec<String> = rows.iter().map(|(c, _)| fmt_of(*c)).collect();
     let col_fmts: Vec<String> = cols.iter().map(|(c, _)| fmt_of(*c)).collect();
@@ -788,8 +795,22 @@ pub fn compute(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Result<Out
                 }
             }
         }
+        // The column leaf this record lands in: its path cut after the first collapsed item (as in `flatten_cols`).
+        let shown = cols
+            .iter()
+            .zip(col_items.iter())
+            .zip(cp.iter())
+            .position(|(((_, f), fi), &it)| !f.collapsed_items.is_empty() && is_collapsed(f, &fi.label(it)))
+            .map_or(cp.len(), |d| d + 1);
+        if !col_leaves.contains(&cp[..shown]) {
+            col_leaves.insert(cp[..shown].to_vec());
+        }
         row_set.insert(rp);
         col_set.insert(cp);
+        // Refuse a report that cannot fit before the accumulators for more column groups are allocated.
+        if !cols.is_empty() && data_cols_exceed_sheet(col_leaves.len(), pt.grand_totals_rows, k) {
+            return Err("The PivotTable report will not fit on the sheet.".into());
+        }
         if aggs.len() > 5_000_000 {
             return Err("The PivotTable report is too large.".into());
         }
@@ -1426,5 +1447,19 @@ pub fn clear_output(wb: &mut Workbook, sheet: usize, idx: usize) {
     shm.take_cells(r);
     if let Some(p) = shm.pivots.get_mut(idx) {
         p.last_range = None;
+    }
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::data_cols_exceed_sheet;
+
+    #[test]
+    fn column_budget_counts_value_fields_and_grand_total() {
+        assert!(!data_cols_exceed_sheet(64, true, 128));
+        assert!(data_cols_exceed_sheet(64, true, 256));
+        assert!(!data_cols_exceed_sheet(64, false, 256));
+        assert!(!data_cols_exceed_sheet(16_384, false, 0));
+        assert!(data_cols_exceed_sheet(16_385, false, 0));
     }
 }
