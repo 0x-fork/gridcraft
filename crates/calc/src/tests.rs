@@ -158,6 +158,21 @@ fn index_with_arrays_of_positions() {
 }
 
 #[test]
+fn index_area_number_overflow() {
+    let mut t = T::new();
+    t.set("A1", "7");
+    t.set("D1", "9");
+    for (area, expected) in [("1", 7.0), ("2", 9.0)] {
+        t.set("G5", &format!("=INDEX((A1:B2,D1:E2),1,1,{area})"));
+        assert_eq!(t.num("G5"), expected, "area {area}");
+    }
+    for area in ["3", "1E300", "-1", "-1E300"] {
+        t.set("G5", &format!("=INDEX((A1:B2,D1:E2),1,1,{area})"));
+        assert_eq!(t.get("G5"), Value::Error(CellError::Ref), "area {area}");
+    }
+}
+
+#[test]
 fn errors_and_cycles() {
     let mut t = T::new();
     t.set("A1", "=1/0");

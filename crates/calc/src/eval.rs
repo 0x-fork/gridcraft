@@ -1157,7 +1157,8 @@ impl<'h> Evaluator<'h> {
         }
         match src {
             Ev::R(areas) => {
-                let Some(a) = areas.get((area_n - 1).max(0) as usize).copied() else { return err(CellError::Ref) };
+                let area = usize::try_from((area_n as u64).saturating_sub(1)).ok();
+                let Some(a) = area.and_then(|i| areas.get(i)).copied() else { return err(CellError::Ref) };
                 let r = a.range;
                 // A single row or column with one index picks along it.
                 let (row, col) = if two_args && r.height() == 1 { (1, row) } else { (row, col) };
