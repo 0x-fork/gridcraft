@@ -267,8 +267,8 @@ fn draw_kind(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx) {
                 Scatter | ScatterLines | Bubble => scatter(ctx, chart, data, area),
                 Histogram => histogram(ctx, chart, data, area),
                 Waterfall => waterfall(ctx, chart, data, area),
-                BoxWhisker => box_whisker(ctx, data, area),
-                Stock => stock(ctx, data, area),
+                BoxWhisker => box_whisker(ctx, chart, data, area),
+                Stock => stock(ctx, chart, data, area),
                 _ => cartesian(ctx, chart, data, area, false),
             }
         }
@@ -1574,12 +1574,12 @@ fn quantile(sorted: &[f64], q: f64) -> f64 {
     a + (b - a) * frac
 }
 
-fn box_whisker(ctx: &mut Ctx, data: &ChartData, area: Bx) {
+fn box_whisker(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx) {
     let labels: Vec<String> = data.series.iter().map(|s| s.name.clone()).collect();
     let Some((lo, hi)) = value_range(data.series.iter().flat_map(|s| s.values.iter().flatten().copied())) else { return };
     let ys = nice_scale(lo, hi, false);
     let f = Fmt::new(data.series.first().map(|s| s.number_format.as_str()).unwrap_or("General"));
-    let plot = frame(ctx, area, CatAxis::Labels(&labels), &ValAxis { scale: ys, fmt: &f }, None, false, true);
+    let plot = frame(ctx, area, CatAxis::Labels(&labels), &ValAxis { scale: ys, fmt: &f }, None, false, chart.gridlines);
     if !plot.ok() {
         return;
     }
@@ -1618,7 +1618,7 @@ fn box_whisker(ctx: &mut Ctx, data: &ChartData, area: Bx) {
 
 // ---------------------------------------------------------------- stock
 
-fn stock(ctx: &mut Ctx, data: &ChartData, area: Bx) {
+fn stock(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx) {
     let ncat = data.categories.len().max(data.series.iter().map(|s| s.values.len()).max().unwrap_or(0)).min(MAX_CATS);
     if ncat == 0 {
         return;
@@ -1627,7 +1627,7 @@ fn stock(ctx: &mut Ctx, data: &ChartData, area: Bx) {
     let Some((lo, hi)) = value_range(data.series.iter().flat_map(|s| s.values.iter().flatten().copied())) else { return };
     let ys = nice_scale(lo, hi, false);
     let f = Fmt::new(data.series.first().map(|s| s.number_format.as_str()).unwrap_or("General"));
-    let plot = frame(ctx, area, CatAxis::Labels(&labels), &ValAxis { scale: ys, fmt: &f }, None, false, true);
+    let plot = frame(ctx, area, CatAxis::Labels(&labels), &ValAxis { scale: ys, fmt: &f }, None, false, chart.gridlines);
     if !plot.ok() {
         return;
     }
