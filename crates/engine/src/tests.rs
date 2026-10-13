@@ -1544,6 +1544,40 @@ fn saving_to_an_unknown_extension_is_refused() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// An XLSX opened by its content under an unknown extension (`budget.dat`) saves back to its own
+/// file as XLSX; a Save As to another unknown extension is still refused.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn an_xlsx_opened_under_an_unknown_extension_saves_back_as_xlsx() {
+    #[allow(clippy::disallowed_methods)] // native-only test: a unique temp dir name
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let dir = std::env::temp_dir().join(format!("gridcraft-dat-{}-{nonce}", std::process::id()));
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("budget.dat");
+    let mut src = s();
+    src.execute("cell.set", json!({"cell": "A1", "input": "1"})).unwrap();
+    std::fs::write(&path, crate::io::save_bytes(&src.doc().unwrap().wb, "book.xlsx").unwrap()).unwrap();
+    let mut s = s();
+    s.execute("file.open", json!({"path": path})).unwrap();
+    s.execute("cell.set", json!({"cell": "A1", "input": "2"})).unwrap();
+    s.execute("file.save", json!({})).unwrap();
+    assert!(!s.doc().unwrap().is_dirty());
+    let bytes = std::fs::read(&path).unwrap();
+    assert_eq!(gridcraft_xlsx::sniff(&bytes), gridcraft_xlsx::Format::Xlsx);
+    let (wb, _) = crate::io::open_bytes("book.xlsx", &bytes).unwrap();
+    assert_eq!(wb.active().unwrap().value(CellRef::parse("A1").unwrap()), Value::Number(2.0));
+    assert!(s.execute("file.saveAs", json!({"path": dir.join("copy.foo")})).is_err());
+    assert!(!dir.join("copy.foo").exists());
+    // A text file under an unknown extension opens as CSV: Save doesn't turn it into an XLSX.
+    let notes = dir.join("notes.dat");
+    std::fs::write(&notes, "a,b\r\n").unwrap();
+    s.execute("file.open", json!({"path": notes})).unwrap();
+    s.execute("cell.set", json!({"cell": "A1", "input": "c"})).unwrap();
+    assert!(s.execute("file.save", json!({})).is_err());
+    assert_eq!(std::fs::read_to_string(&notes).unwrap(), "a,b\r\n");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn validation_formulas_are_relative_and_see_the_new_value() {
     let mut s = s();

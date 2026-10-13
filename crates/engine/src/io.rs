@@ -153,13 +153,18 @@ fn rename_first_sheet(wb: &mut Workbook, path: &str) {
 
 /// Encodes a workbook in the format chosen by `path`'s extension.
 pub fn save_bytes(wb: &Workbook, path: &str) -> Result<Vec<u8>> {
-    let sheet = wb.active_sheet;
     // An unknown or missing extension is refused rather than written as an XLSX under that name:
     // a typo like `.cvs` would otherwise produce a file no other app recognises.
     let Some(kind) = FileKind::from_path(path) else {
         let name = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(path);
         return Err(EngineError::Other(format!("{name}: unknown file format. Save as .xlsx, .csv, .tsv, .json or .html.")));
     };
+    save_bytes_as(wb, path, kind)
+}
+
+/// Encodes a workbook as `kind`, whatever `path`'s extension says.
+pub fn save_bytes_as(wb: &Workbook, path: &str, kind: FileKind) -> Result<Vec<u8>> {
+    let sheet = wb.active_sheet;
     match kind {
         // The extension picks the package kind; only the macro-enabled kinds (.xlsm, .xltm) carry
         // the VBA project, so any other name saves without it, as Excel does.
