@@ -88,6 +88,8 @@ pub struct Evaluator<'h> {
 
 struct FnCtx<'a, 'h> {
     ev: &'a mut Evaluator<'h>,
+    /// The criteria argument of a database function, when it is a reference.
+    criteria: Option<Area>,
 }
 
 impl Ctx for FnCtx<'_, '_> {
@@ -99,6 +101,28 @@ impl Ctx for FnCtx<'_, '_> {
     }
     fn random(&mut self) -> f64 {
         self.ev.host.random()
+    }
+    /// Excel's "formula as criteria": the formula is written for the first record, so its relative
+    /// references move down to `record`'s row, and the database's labels name its fields.
+    /// Known gap: the shifted references are not dependencies of the calling cell. One that lands
+    /// outside both the database and the criteria cell's own precedents (say `=G2<H2` with column H
+    /// outside the database) is read here but not tracked, so editing that cell doesn't recalculate
+    /// the D-function until something else does.
+    fn computed_criterion(&mut self, row: usize, col: usize, db: &Array, record: usize) -> Option<bool> {
+        let area = self.criteria?;
+        let at = area.range.start.offset(row as i64, col as i64).filter(|c| area.range.contains(*c))?;
+        let expr = self.ev.host.workbook().sheet(area.sheet)?.cell(at)?.formula.as_ref()?.expr_arc()?;
+        let shifted = gridcraft_formula::adjust::shift_relative((*expr).clone(), record as i64 - 1, 0);
+        let env = (0..db.cols)
+            .filter_map(|c| match db.get(0, c) {
+                Some(Value::Text(t)) if !t.trim().is_empty() => {
+                    Some((t.trim().to_string(), Ev::V(db.get(record, c).cloned().unwrap_or(Value::Empty))))
+                }
+                _ => None,
+            })
+            .collect();
+        let mut ev = Evaluator { host: &mut *self.ev.host, sheet: area.sheet, at, env, depth: self.ev.depth };
+        Some(matches!(ev.value(&shifted).scalar().to_bool(), Ok(true)))
     }
 }
 
@@ -592,7 +616,7 @@ impl<'h> Evaluator<'h> {
                         let value = self.value(a);
                         evaluated.push(Arg { value, from_ref: false });
                     }
-                    let mut ctx = FnCtx { ev: self };
+                    let mut ctx = FnCtx { ev: self, criteria: None };
                     return gridcraft_functions::call(spec, &evaluated, &mut ctx).pipe(Ev::V);
                 }
                 let i = match index.to_number() {
@@ -789,8 +813,17 @@ impl<'h> Evaluator<'h> {
         let mut evaluated = Vec::with_capacity(args.len());
         // SUMIF/AVERAGEIF: the size of the criteria range (argument 1), which the sum range takes.
         let mut criteria_shape = None;
+        // Database functions: the criteria range (argument 2), whose formulas are computed criteria.
+        let mut criteria = None;
         for (i, a) in args.iter().enumerate() {
             let mut ev = self.eval(a);
+            if spec.category == gridcraft_functions::Category::Database
+                && i == 2
+                && let Ev::R(areas) = &ev
+                && let [area] = areas.as_slice()
+            {
+                criteria = Some(*area);
+            }
             if resizes_sum_range(name, args.len()) {
                 if i == 0 {
                     criteria_shape = ev_shape(&ev);
@@ -818,7 +851,7 @@ impl<'h> Evaluator<'h> {
             };
             evaluated.push(Arg { value, from_ref });
         }
-        let mut ctx = FnCtx { ev: self };
+        let mut ctx = FnCtx { ev: self, criteria };
         gridcraft_functions::call(spec, &evaluated, &mut ctx).pipe(Ev::V)
     }
 
@@ -872,13 +905,13 @@ impl<'h> Evaluator<'h> {
         };
         let args = [Arg { value, from_ref }];
         if kind != Agg::Count {
-            match gridcraft_functions::call(sum, &args, &mut FnCtx { ev: self }) {
+            match gridcraft_functions::call(sum, &args, &mut FnCtx { ev: self, criteria: None }) {
                 Value::Number(n) => acc.sum += n,
                 other => return Err(Ev::V(other)),
             }
         }
         if kind != Agg::Sum {
-            match gridcraft_functions::call(count, &args, &mut FnCtx { ev: self }) {
+            match gridcraft_functions::call(count, &args, &mut FnCtx { ev: self, criteria: None }) {
                 Value::Number(n) => acc.count = acc.count.saturating_add(n as u64),
                 other => return Err(Ev::V(other)),
             }
@@ -1281,7 +1314,7 @@ impl<'h> Evaluator<'h> {
                         }
                     }
                 }
-                let mut ctx = FnCtx { ev: self };
+                let mut ctx = FnCtx { ev: self, criteria: None };
                 return match gridcraft_functions::call(spec, &xargs, &mut ctx) {
                     Value::Number(p) if p >= 1.0 => {
                         let k = p as u32 - 1;
