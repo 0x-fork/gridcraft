@@ -350,7 +350,10 @@ pub fn series(cx: &mut Ctx, sheet: usize, r: RangeRef, rows: bool, kind: &str, s
                             let mut left = step.abs() as i64;
                             while left > 0 {
                                 n += step.signum();
-                                if datetime_from_serial(sys, n).is_some_and(|d| d.weekday != 0 && d.weekday != 6) {
+                                let Some(day) = datetime_from_serial(sys, n) else {
+                                    return Err(crate::EngineError::Other("The weekday series runs past the supported date range.".into()));
+                                };
+                                if day.weekday != 0 && day.weekday != 6 {
                                     left -= 1;
                                 }
                             }
