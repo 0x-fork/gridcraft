@@ -970,6 +970,8 @@ fn cartesian(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx, horizonta
     let nslots = slot_keys.len().max(1) as f32;
     let bw = cw / (nslots + 1.5);
     let labels_on = chart.data_labels && ncat <= MAX_LABELS;
+    // Area labels wait until every area is filled, so a later (stacked) area can't paint over them.
+    let mut area_labels = Vec::new();
 
     // Areas first, then columns, then lines on top.
     for pass in 0..3 {
@@ -998,6 +1000,10 @@ fn cartesian(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx, horizonta
                         let c = center(j);
                         top.push([c, vpos(t, &sc)]);
                         base.push([c, vpos(b, &sc)]);
+                        // Source values (not stack totals), just above the top edge like the line labels.
+                        if labels_on && sp.is_some() && let Some(v) = s.values.get(j).copied().flatten() {
+                            area_labels.push((c, vpos(t, &sc) - 5.0, fmt.format(v, None)));
+                        }
                     }
                     if top.len() == 1 {
                         // A single point: give it some width.
@@ -1071,6 +1077,9 @@ fn cartesian(ctx: &mut Ctx, chart: &Chart, data: &ChartData, area: Bx, horizonta
                     }
                 }
             }
+        }
+        for (x, y, t) in area_labels.drain(..) {
+            ctx.text(x, y, &t, LABEL_SIZE, TEXT, HAlign::Center, VAlign::Bottom);
         }
     }
     // Trendlines on top: x is the category number 1..n.

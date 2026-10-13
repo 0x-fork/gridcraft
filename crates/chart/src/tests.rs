@@ -924,3 +924,29 @@ fn union_series_references() {
     c.series[0].values = format!("{}Sheet1!$B$1,Sheet1!$B$2{}", "(".repeat(5000), ")".repeat(5000));
     let _ = resolve(&wb, 0, &c);
 }
+
+#[test]
+fn area_charts_draw_source_value_labels_only_when_enabled() {
+    for kind in [ChartKind::Area, ChartKind::AreaStacked] {
+        let d = sample(kind);
+        let mut c = chart(kind);
+        c.data_labels = false;
+        let off = render(&c, &d, 640.0, 400.0, &ApproxMeasure);
+        c.data_labels = true;
+        let on = render(&c, &d, 640.0, 400.0, &ApproxMeasure);
+        let count = |p: &[Prim], v: &str| texts(p).iter().filter(|t| **t == v).count();
+        // One label per point: 3 series x 6 categories.
+        assert_eq!(texts(&on).len(), texts(&off).len() + 18, "{kind:?}");
+        for v in ["$12,000", "$38,000", "$9,000", "$27,000"] {
+            assert_eq!(count(&on, v), count(&off, v) + 1, "{kind:?}: {v}");
+        }
+        // Stacked areas label the source values, not cumulative totals (12,000 + 38,000).
+        assert_eq!(count(&on, "$50,000"), count(&off, "$50,000"), "{kind:?}: cumulative total shown");
+        let polys = |p: &[Prim]| p.iter().filter(|p| matches!(p, Prim::Polygon { .. })).cloned().collect::<Vec<_>>();
+        assert_eq!(polys(&on), polys(&off));
+        // The first series' labels are drawn after every area, so the next area can't cover them.
+        let last_poly = on.iter().rposition(|p| matches!(p, Prim::Polygon { .. }));
+        let first_label = on.iter().position(|p| matches!(p, Prim::Text { text, .. } if text == "$12,000"));
+        assert!(first_label > last_poly, "{kind:?}: label drawn under a later area");
+    }
+}
