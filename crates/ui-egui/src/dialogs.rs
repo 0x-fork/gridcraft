@@ -47,6 +47,17 @@ impl Dialog {
         &self.name
     }
 
+    /// Sets a form value. In Zoom, a Magnification choice is also the percentage `view.zoom` stores.
+    pub(crate) fn set_value(&mut self, key: &str, value: Json) {
+        if self.name == "zoom"
+            && key == "preset"
+            && let Some(p) = value.as_str().and_then(|s| s.parse::<f64>().ok())
+        {
+            self.values.insert("percent".into(), json!(p));
+        }
+        self.values.insert(key.into(), value);
+    }
+
     fn form(name: &str, title: &str, command: &'static str, fields: Vec<Field>, defaults: Json) -> Dialog {
         Dialog {
             name: name.into(),
@@ -1324,7 +1335,7 @@ fn form_fields(ui: &mut egui::Ui, d: &mut Dialog) {
                         let cur = d.values.get(key).and_then(Json::as_str).unwrap_or("").to_string();
                         for (val, text) in options {
                             if ui.radio(cur == val, text).clicked() {
-                                d.values.insert(key.into(), json!(val));
+                                d.set_value(key, json!(val));
                             }
                         }
                     });
