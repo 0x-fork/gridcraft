@@ -947,6 +947,15 @@ impl SheetApp {
         }
     }
 
+    /// Commits the edit with an arrow key. The arrow is an ordinary move, so it ends a run of Tabs
+    /// instead of continuing it (Right) or going back to its column like Enter (Down), as in Excel.
+    pub fn commit_edit_arrow(&mut self, dr: i64, dc: i64) -> bool {
+        let run = self.tab_run.take();
+        let ok = self.commit_edit(dr, dc, false, false);
+        self.tab_run = if ok { None } else { run };
+        ok
+    }
+
     pub fn cancel_edit(&mut self) {
         self.editor = None;
         self.session.mode = gridcraft_engine::Mode::Ready;

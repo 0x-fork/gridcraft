@@ -269,6 +269,24 @@ fn moving_with_an_arrow_ends_the_run_of_tabs() {
 }
 
 #[test]
+fn an_arrow_that_commits_typing_ends_the_run_of_tabs() {
+    // Excel 365 from B2: the arrow is an ordinary move, neither one more Tab (Right) nor an Enter
+    // back to the starting column (Down).
+    for (arrow, after_enter) in [(Key::ArrowRight, "D3"), (Key::ArrowDown, "C4")] {
+        let mut s = blank();
+        s.execute("selection.set", json!({"cell": "B2"})).unwrap();
+        let mut h = harness(s);
+        text(&mut h, "a");
+        key(&mut h, Key::Tab, Modifiers::NONE);
+        text(&mut h, "b");
+        key(&mut h, arrow, Modifiers::NONE);
+        assert_eq!(value(&h, "C2"), Value::from("b"), "{arrow:?}");
+        key(&mut h, Key::Enter, Modifiers::NONE);
+        assert_eq!(h.state().session.active().unwrap().selection.active.a1(), after_enter, "{arrow:?}");
+    }
+}
+
+#[test]
 fn arrows_escape_and_undo() {
     let mut h = harness(blank());
     key(&mut h, Key::ArrowDown, Modifiers::NONE);
