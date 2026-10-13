@@ -380,8 +380,6 @@ pub(crate) enum ComboResult {
     None,
     /// A row was applied: clicked or Enter on the highlighted row.
     Picked(String),
-    /// Enter with free text that matches no row (e.g. a custom font size).
-    Entered(String),
 }
 
 /// Excel-style dropdown: a filter field (type to narrow the list) plus arrow/Enter selection.
@@ -394,6 +392,24 @@ pub(crate) fn editable_combo(
     current_value: &str,
     items: &[(&str, String)],
     forced: bool,
+) -> ComboResult {
+    combo_popup(ui, anchor, salt, current_value, items, forced, true)
+}
+
+/// The dropdown of [`editable_combo`] without the filter field: the whole list, picked by click or
+/// arrows and Enter.
+fn list_combo(ui: &mut Ui, anchor: &egui::Response, salt: &'static str, current_value: &str, items: &[(&str, String)]) -> ComboResult {
+    combo_popup(ui, anchor, salt, current_value, items, false, false)
+}
+
+fn combo_popup(
+    ui: &mut Ui,
+    anchor: &egui::Response,
+    salt: &'static str,
+    current_value: &str,
+    items: &[(&str, String)],
+    forced: bool,
+    filter: bool,
 ) -> ComboResult {
     let popup_id = anchor.id.with("popup");
     let state_id = anchor.id.with(salt).with("__combo_state");
@@ -424,15 +440,17 @@ pub(crate) fn editable_combo(
                 });
             });
         }
-        let text_id = anchor.id.with(salt).with("__combo_text");
-        let te = ui.add(egui::TextEdit::singleline(&mut st.text).id(text_id).desired_width(220.0).hint_text("Type to filter…"));
-        if open_now && !te.has_focus() {
-            ui.ctx().memory_mut(|m| m.request_focus(text_id));
-            // Select all once focus lands so typing replaces the filter.
-            if let Some(mut s) = egui::text_edit::TextEditState::load(ui.ctx(), text_id) {
-                let len = st.text.chars().count();
-                s.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(len))));
-                s.store(ui.ctx(), text_id);
+        if filter {
+            let text_id = anchor.id.with(salt).with("__combo_text");
+            let te = ui.add(egui::TextEdit::singleline(&mut st.text).id(text_id).desired_width(220.0).hint_text("Type to filter…"));
+            if open_now && !te.has_focus() {
+                ui.ctx().memory_mut(|m| m.request_focus(text_id));
+                // Select all once focus lands so typing replaces the filter.
+                if let Some(mut s) = egui::text_edit::TextEditState::load(ui.ctx(), text_id) {
+                    let len = st.text.chars().count();
+                    s.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(len))));
+                    s.store(ui.ctx(), text_id);
+                }
             }
         }
         let lower = st.text.to_lowercase();
@@ -446,18 +464,13 @@ pub(crate) fn editable_combo(
                 st.sel = (st.sel - 1).rem_euclid(n);
             }
         }
-        if enter {
-            if filtered.is_empty() {
-                let t = st.text.trim().to_string();
-                if !t.is_empty() {
-                    result = ComboResult::Entered(t);
-                }
-            } else {
-                let idx = filtered[st.sel.clamp(0, filtered.len() as i32 - 1) as usize];
-                result = ComboResult::Picked(items[idx].0.to_string());
-            }
+        if enter && !filtered.is_empty() {
+            let idx = filtered[st.sel.clamp(0, filtered.len() as i32 - 1) as usize];
+            result = ComboResult::Picked(items[idx].0.to_string());
         }
-        ui.separator();
+        if filter {
+            ui.separator();
+        }
         egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
             for i in &filtered {
                 let (value, disp) = &items[*i];
@@ -1092,25 +1105,51 @@ pub const FONTS: &[&str] = &[
     "Verdana",
 ];
 
+/// Excel's size box: type a size and press Enter to apply exactly that number (the command refuses
+/// sizes outside 1 to 409), Escape or clicking away reverts; the arrow opens the standard sizes.
 fn size_combo(app: &mut SheetApp, ui: &mut Ui, st: &Style) {
+    let t = Tokens::get(ui.ctx());
     let size = st.font.size;
-    let label = if size.fract() == 0.0 { format!("{}", size as i32) } else { format!("{size}") };
-    let resp = ui.add_sized([52.0, 24.0], egui::Button::new(egui::RichText::new(&label).font(theme::ui_font(12.5))));
+    let current = if size.fract() == 0.0 { format!("{}", size as i32) } else { format!("{size}") };
+    let field = egui::Id::new("gridcraft.font_size_box");
+    let draft = field.with("draft");
+    let mut text = ui.data_mut(|d| d.get_temp::<String>(draft)).unwrap_or_else(|| current.clone());
+    let gap = std::mem::replace(&mut ui.spacing_mut().item_spacing.x, 0.0);
+    let out = egui::TextEdit::singleline(&mut text).id(field).font(theme::ui_font(12.5)).desired_width(30.0).show(ui);
+    let resp = out.response;
     control_keytip(app, ui, &resp, "home.fontSize");
-    let forced = invoke(app, "home.fontSize");
+    if invoke(app, "home.fontSize") {
+        ui.memory_mut(|m| m.request_focus(field));
+    }
+    if resp.gained_focus() {
+        // Typing replaces the size, as in Excel, whether the box was clicked or reached by keytip.
+        let mut state = out.state;
+        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(text.chars().count()))));
+        state.store(ui.ctx(), field);
+    }
+    if resp.lost_focus() {
+        ui.data_mut(|d| d.remove::<String>(draft));
+        // Consume the Enter so the grid behind does not also move the active cell down.
+        if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter))
+            && let Some(v) = text.trim().parse::<f64>().ok().filter(|v| v.is_finite())
+        {
+            act(app, "home.fontSize", json!({"size": v}));
+        }
+    } else if resp.has_focus() {
+        ui.data_mut(|d| d.insert_temp(draft, text));
+    } else {
+        ui.data_mut(|d| d.remove::<String>(draft));
+    }
+    let arrow = icon_button(ui, Icon::Chevron, t.text_dim, "Font Size", vec2(14.0, 24.0));
+    ui.spacing_mut().item_spacing.x = gap;
+    arrow.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "Font Size"));
     let sizes = [8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 36.0, 48.0, 72.0];
     let labels: Vec<String> = sizes.iter().map(|s| format!("{}", *s as i32)).collect();
     let items: Vec<(&str, String)> = labels.iter().map(|s| (s.as_str(), s.clone())).collect();
-    let current = if size.fract() == 0.0 { format!("{}", size as i32) } else { format!("{size}") };
-    let mut apply = |s: &str| {
-        if let Ok(v) = s.parse::<f32>() {
-            act(app, "home.fontSize", json!({"size": v}));
-        }
-    };
-    match editable_combo(ui, &resp, "size", &current, &items, forced) {
-        ComboResult::Picked(value) => apply(&value),
-        ComboResult::Entered(text) => apply(&text),
-        _ => {}
+    if let ComboResult::Picked(value) = list_combo(ui, &arrow, "size", &current, &items)
+        && let Ok(v) = value.parse::<f32>()
+    {
+        act(app, "home.fontSize", json!({"size": v}));
     }
 }
 
