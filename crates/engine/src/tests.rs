@@ -1694,6 +1694,8 @@ fn save_as_into_another_folder_keeps_linked_workbooks_on_the_same_file() {
     s.execute("file.saveAs", json!({"path": a.join("Deep.xlsx")})).unwrap();
     assert_eq!(link_target(&a.join("Deep.xlsx")), "b/Source.xlsx");
     std::fs::remove_dir_all(a).unwrap();
+}
+
 /// A typo like `report.cvs` must not quietly write an XLSX under that name and adopt it as the
 /// document's file.
 #[test]
