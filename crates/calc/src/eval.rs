@@ -465,9 +465,22 @@ impl<'h> Evaluator<'h> {
                 }
             }
             _ => {
-                let x = self.value(a);
-                let y = self.value(b);
-                Ev::V(binary_values(op, &x, &y))
+                // A long chain such as A1+A2+…+A500 nests to the left: fold it in a loop instead
+                // of one level of recursion per operator (past the depth limit it was #CALC!).
+                let mut rest = vec![(op, b)];
+                let mut left = a;
+                while let Expr::Binary(o, l, r) = left
+                    && !matches!(o, BinOp::Range | BinOp::Union | BinOp::Intersect)
+                {
+                    rest.push((*o, r.as_ref()));
+                    left = l.as_ref();
+                }
+                let mut acc = self.value(left);
+                while let Some((o, r)) = rest.pop() {
+                    let y = self.value(r);
+                    acc = binary_values(o, &acc, &y);
+                }
+                Ev::V(acc)
             }
         }
     }
