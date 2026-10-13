@@ -192,6 +192,25 @@ fn arrows_escape_and_undo() {
 }
 
 #[test]
+fn shift_arrows_in_point_mode_extend_from_the_pointed_cell() {
+    let mut s = blank();
+    s.execute("selection.set", json!({"cell": "A11"})).unwrap();
+    let mut h = harness(s);
+    text(&mut h, "=SUM(");
+    key(&mut h, Key::ArrowUp, Modifiers::NONE);
+    let edited = |h: &egui_kittest::Harness<'static, SheetApp>| h.state().editor.as_ref().map(|e| e.text.clone());
+    assert_eq!(edited(&h).as_deref(), Some("=SUM(A10"));
+    // Shift is held down, as on a real keyboard: the backend reports it before the arrow keys.
+    h.input_mut().events.push(Event::ModifiersChanged(Modifiers::SHIFT));
+    for expected in ["=SUM(A9:A10", "=SUM(A8:A10", "=SUM(A7:A10"] {
+        key(&mut h, Key::ArrowUp, Modifiers::SHIFT);
+        assert_eq!(edited(&h).as_deref(), Some(expected));
+    }
+    key(&mut h, Key::ArrowDown, Modifiers::SHIFT);
+    assert_eq!(edited(&h).as_deref(), Some("=SUM(A8:A10"), "Shift+Down shrinks back towards the anchor");
+}
+
+#[test]
 fn shortcuts_format_and_extend() {
     let mut s = blank();
     s.execute("range.setValues", json!({"range": "A1", "values": [[1, 2], [3, 4]]})).unwrap();
