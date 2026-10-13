@@ -1,5 +1,5 @@
 //! Overflowing worksheet tabs, exercised through their actual painted geometry and input.
-use egui::{Color32, Event, Modifiers, PointerButton, Rect, Shape, pos2, vec2};
+use egui::{Event, Modifiers, PointerButton, Rect, Shape, pos2, vec2};
 use gridcraft_engine::Session;
 use gridcraft_ui_egui::SheetApp;
 use serde_json::json;
