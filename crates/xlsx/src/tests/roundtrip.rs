@@ -204,9 +204,9 @@ fn sample() -> Workbook {
             security_descriptor: None,
         },
     ];
-    s.hyperlinks.insert(at("A2"), Hyperlink { target: "https://example.com/?a=1&b=2".into(), tooltip: Some("go".into()) });
-    s.hyperlinks.insert(at("A3"), Hyperlink { target: "'Data & Stuff'!B2".into(), tooltip: None });
-    s.hyperlinks.insert(at("A4"), Hyperlink { target: "mailto:me@example.com".into(), tooltip: None });
+    s.hyperlinks.insert(at("A2"), Hyperlink { target: "https://example.com/?a=1&b=2".into(), tooltip: Some("go".into()), external: true });
+    s.hyperlinks.insert(at("A3"), Hyperlink { target: "'Data & Stuff'!B2".into(), tooltip: None, external: false });
+    s.hyperlinks.insert(at("A4"), Hyperlink { target: "mailto:me@example.com".into(), tooltip: None, external: true });
     s.comments.insert(
         at("B2"),
         Comment {
@@ -988,6 +988,42 @@ fn table_newline_column_and_backslash_name_survive() {
     assert!(gridcraft_formula::parse("COUNTA(\\_Prime.1[Name])").is_ok(), "backslash table name parses as a structured reference");
 }
 
+/// A table that is only a header row and a totals row (Insert Table on one row, then Total
+/// Row) is written like the header-only and one-data-row shapes, not dropped on save.
+#[test]
+fn header_and_totals_table_without_data_row_survives() {
+    let mut wb = Workbook::new();
+    let s = wb.sheet_mut(0).unwrap();
+    s.tables.push(Table {
+        id: 1,
+        name: "Table1".into(),
+        range: rr("A1:B2"),
+        header_row: true,
+        totals_row: true,
+        columns: vec![
+            TableColumn { name: "Name".into(), totals: TotalsFn::None, totals_label: Some("Total".into()), formula: None },
+            TableColumn { name: "Amount".into(), totals: TotalsFn::Sum, totals_label: None, formula: None },
+        ],
+        style: "TableStyleMedium2".into(),
+        banded_rows: true,
+        banded_cols: false,
+        first_col: true,
+        last_col: true,
+        filter_button: true,
+        filter: vec![],
+    });
+    let (back, report) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    let tables = &back.sheet(0).unwrap().tables;
+    assert_eq!(tables.len(), 1);
+    let t = &tables[0];
+    assert_eq!((t.name.as_str(), t.range.a1(), t.header_row, t.totals_row), ("Table1", "A1:B2".to_string(), true, true));
+    assert_eq!((t.style.as_str(), t.banded_rows, t.first_col, t.last_col), ("TableStyleMedium2", true, true, true));
+    assert_eq!(t.columns[0].totals_label.as_deref(), Some("Total"));
+    assert_eq!(t.columns[1].totals, TotalsFn::Sum);
+    assert_eq!(back.sheet(0).unwrap().value(at("A1")), Value::text("Name"));
+}
+
 /// Templates and macro-enabled files differ from `.xlsx` only in the workbook part's content
 /// type; a template saved with the workbook type is rejected by Excel.
 #[test]
@@ -1060,4 +1096,42 @@ fn default_font_survives_a_round_trip() {
     );
     let saved = write_xlsx(&read_xlsx(&file).unwrap().0).unwrap();
     assert_eq!(font0(&saved), (Some("12".into()), Some("Calibri".into()), Some("2".into()), Some("minor".into())));
+#[test]
+fn solid_data_bar_survives_with_sparklines_and_gradient_neighbours() {
+    let mut wb = Workbook::new();
+    let s = wb.sheet_mut(0).unwrap();
+    s.set_value(at("A1"), Value::Number(1.0));
+    let bar = |gradient: bool, max: CfValueKind| CfRule::DataBar {
+        min: CfValueKind::Min,
+        max,
+        color: Color::Rgb(0x638EC6),
+        gradient,
+        show_value: true,
+    };
+    let rules = [(true, "A1", CfValueKind::Max), (false, "B1", CfValueKind::Formula("$C$1".into())), (false, "D1:D3", CfValueKind::Number(9.0))];
+    for (i, (gradient, range, max)) in rules.into_iter().enumerate() {
+        s.cond_formats.push(CondFormat { ranges: vec![rr(range)], rule: bar(gradient, max), priority: i as u32 + 1, stop_if_true: false });
+    }
+    s.sparklines.push(Sparkline { cell: at("F1"), source: "A1:C1".into(), kind: SparklineKind::Line, color: Color::Rgb(0x376092), markers: false });
+    let bytes = write_xlsx(&wb).unwrap();
+    // x14 cfvo values are `xm:f` children; a `val` attribute there is not valid x14.
+    let (xml, _) = sheet1_xml(&bytes);
+    assert!(xml.contains("<x14:cfvo type=\"num\"><xm:f>9</xm:f></x14:cfvo>"), "{xml}");
+    let (back, rep) = read_xlsx(&bytes).unwrap();
+    assert!(rep.warnings.is_empty(), "{:?}", rep.warnings);
+    let b = &back.sheets[0];
+    assert_eq!(b.cond_formats, wb.sheets[0].cond_formats);
+    assert_eq!(b.sparklines.len(), 1);
+fn doc_props_keep_boundary_whitespace() {
+    let mut wb = Workbook::new();
+    wb.props = DocProps {
+        title: "  Title  ".into(),
+        subject: "\n".into(),
+        author: "\tMe\t".into(),
+        company: " Co ".into(),
+        keywords: " a, b ".into(),
+        description: "\n  d\n".into(),
+    };
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    assert_eq!(back.props, wb.props);
 }
