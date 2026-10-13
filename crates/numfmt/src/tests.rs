@@ -818,3 +818,48 @@ fn format_codes_are_capped_at_255_characters() {
     assert_eq!(text_function(&Value::Number(0.5), &huge, S), Err(CellError::Value));
     assert_eq!(f(&huge, 0.5), "0.5");
 }
+
+/// Parses and renders `code` on a worker thread; panics if that takes more than 20 s, so a quadratic
+/// parser fails the test instead of hanging CI. Not a benchmark: at this size an O(n^2) pass takes
+/// minutes and an O(n) pass milliseconds, so the margin is decades wide.
+fn finishes_in_time(code: String) -> String {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f(&code, 1234.5));
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(20)).expect("format code did not parse and render in time")
+}
+
+#[test]
+fn hostile_codes_parse_in_linear_time() {
+    let n = 1_000_000;
+    // Unclosed brackets, a run of commas after a digit, a run of fraction bars.
+    assert!(finishes_in_time("[".repeat(n)).starts_with('['));
+    finishes_in_time(format!("0{}", ",".repeat(n)));
+    finishes_in_time(format!("0{}", "/".repeat(n)));
+    finishes_in_time(format!("0{}0", ",".repeat(n)));
+    // Unclosed brackets mixed with semicolons: each is a literal and a section separator stays one.
+    finishes_in_time("[;".repeat(n / 2));
+}
+
+#[test]
+fn unclosed_bracket_is_a_literal_in_both_passes() {
+    // Sections still split after an unclosed `[`.
+    assert_eq!(f("[0;0", 5.0), "[5");
+    assert_eq!(f("0;[0", -5.0), "[5");
+    assert_eq!(f("0;-0;[", 0.0), "[");
+    assert_eq!(parse::parse_sections("0;[Red-0").len(), 2);
+    assert_eq!(parse::parse_sections("[0;0").len(), 2);
+}
+
+#[test]
+fn closed_brackets_still_hold_their_semicolons() {
+    assert_eq!(f("[Red]0;[Blue]-0", -5.0), "-5");
+    assert_eq!(f("[>=100]0.0;0", 150.0), "150.0");
+    assert_eq!(f("[$-409]0.00", 2.5), "2.50");
+    assert_eq!(f("[$€-2] #,##0", 1234.0), "€ 1,234");
+    assert_eq!(parse::parse_sections("[Red]0;[Blue]0").len(), 2);
+    assert_eq!(parse::parse_sections("[unknown;x]0;0").len(), 2);
+    assert_eq!(f("0\\[0", 5.0), "0[5");
+    assert_eq!(f("\"[\"0;0", 5.0), "[5");
+}

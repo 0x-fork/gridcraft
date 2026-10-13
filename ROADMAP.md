@@ -132,6 +132,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-10-12 | Number formats: parsing a format code is linear in its length (long runs of `[`, `,` or `/` no longer take quadratic time), and an unclosed `[` is a literal when splitting sections as well as when tokenizing (#810) |
 | 2026-10-12 | Number formats: a fraction denominator with 65,536 zeros no longer crashes; format codes are capped at 255 characters like Excel (longer codes display as General, `TEXT` gives `#VALUE!`) (#807) |
 | 2026-10-12 | Security: cell hyperlinks open only http, https and mailto, after a confirmation; other schemes (file:, smb:, UNC, custom handlers) are refused (#777, part 1) |
 | 2026-10-12 | Deleting several Ctrl-selected rows or columns removes them all in one undo step (#758) |
