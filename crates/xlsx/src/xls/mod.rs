@@ -517,9 +517,9 @@ fn worksheet(
     }
     // Shared and array formulas: their definitions follow the first cell that uses them.
     let (arrays, shared) = (std::mem::take(&mut st.arrays), std::mem::take(&mut st.shared));
-    for p in std::mem::take(&mut st.pending) {
+    let pending = std::mem::take(&mut st.pending);
+    for p in &pending {
         if let Some((range, f)) = arrays.get(&p.anchor) {
-            // The other cells of an array formula keep only their values.
             if p.pos == p.anchor {
                 st.attach(p.pos, f, Mode::Cell, Some(*range));
             }
@@ -527,6 +527,16 @@ fn worksheet(
             st.attach(p.pos, f, Mode::Shared, None);
         } else {
             st.unsupported("a shared formula that is missing from the file");
+        }
+    }
+    // The other cells of a legacy array formula hold only cached results: dropped, as when an
+    // .xlsx is read, so that the formula fills its range on recalculation. If the formula itself
+    // couldn't be imported, they keep their values.
+    for p in &pending {
+        let filled = st.sheet.cell(p.anchor).and_then(|c| c.formula.as_ref()).and_then(|f| f.array).is_some_and(|r| r.contains(p.pos));
+        if p.pos != p.anchor && filled {
+            let style = st.sheet.style_id(p.pos);
+            st.sheet.cells.set(p.pos, Cell { value: Value::Empty, formula: None, style });
         }
     }
     if st.dropped > 0 {
