@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use egui::{Align2, Color32, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::{Align2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use gridcraft_engine::model::{Sheet, Visibility};
 use serde_json::json;
 
