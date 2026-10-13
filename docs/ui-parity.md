@@ -1,5 +1,6 @@
 # UI parity
 
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (sheet-tab navigation reveals the selected tab without interrupting manual scrolling) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (Alt+Down opens AutoFilter header menus) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (ribbon and menu Paste paste the system clipboard like Cmd/Ctrl+V; regression test for the Paste button freeze, #273; Paste button gets an accessible name) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
@@ -22,7 +23,7 @@ Sources: `crates/ui-egui/src` (ribbon, grid, editor, formula bar, dialogs, panes
 | Ribbon collapse, simplified ribbon, customize ribbon/QAT | yes | partial | customization missing |
 | Key tips (Alt / F10 then letters) | yes, every ribbon control | **initial** (#43, 10-10): Alt or F10 shows key tips on Home for alignment, Paste Special and AutoFit plus legacy Alt sequences; other tabs and controls not yet (#33, #49) | 3–5 h |
 | Formula bar with Name Box, expand, function hints | yes | yes | done |
-| Sheet tabs: rename, reorder, colour, hide, scroll | yes | yes | rename focus bug on macOS (#145) |
+| Sheet tabs: rename, reorder, colour, hide, scroll | yes | yes | active tab revealed on navigation and resize (#681); manual wheel/trackpad browsing preserved; rename focus bug on macOS (#145) |
 | Status bar: Sum/Count/Average and more, view buttons, zoom | yes | yes | customizable statistics partial |
 | Task panes (Format Chart, Comments, Watch, Selection, PivotTable fields) | yes | yes | element-level Format pane for shapes and pictures missing |
 | Backstage (File) view: Info, New with templates, Open recent, Export, Options | yes | partial | Options dialog and template gallery missing |
