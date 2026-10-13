@@ -398,7 +398,9 @@ struct SheetState<'g> {
     shared: HashMap<CellRef, Parsed>,
     arrays: HashMap<CellRef, (RangeRef, Parsed)>,
     last_formula: Option<CellRef>,
-    pending_string: Option<CellRef>,
+    /// The cell waiting for its String record, with its style: a blank cell isn't stored, so a
+    /// formula kept as its value may have no cell to receive the text.
+    pending_string: Option<(CellRef, StyleId)>,
     dropped: usize,
     unsupported: Vec<&'static str>,
 }
@@ -602,11 +604,13 @@ fn sheet_record(rec: &Record<'_>, st: &mut SheetState<'_>, budget: &mut Budget, 
         }
         0x0006 => formula_cell(&mut c, st, budget)?,
         0x0207 => {
-            if let Some(pos) = st.pending_string.take() {
+            if let Some((pos, style)) = st.pending_string.take() {
                 let s = c.string()?;
                 budget.text(s.len())?;
                 if let Some(cell) = st.sheet.cells.get_mut(pos) {
                     cell.value = Value::from(s);
+                } else {
+                    st.sheet.cells.set(pos, Cell { value: Value::from(s), formula: None, style });
                 }
             }
         }
@@ -744,7 +748,7 @@ fn formula_cell(c: &mut Cursor<'_, '_>, st: &mut SheetState<'_>, budget: &mut Bu
     st.sheet.cells.set(pos, Cell { value, formula: None, style });
     st.last_formula = Some(pos);
     if string_result {
-        st.pending_string = Some(pos);
+        st.pending_string = Some((pos, style));
     }
     // PtgExp: part of a shared or array formula anchored at another cell.
     if f.rgce.len() == 5 && f.rgce.first() == Some(&0x01) {
