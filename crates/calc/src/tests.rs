@@ -594,6 +594,29 @@ fn subtotal_skips_hidden() {
     assert_eq!(t.num("B2"), 6.0);
 }
 
+#[test]
+fn subtotal_109_skips_nested_subtotal() {
+    let mut t = T::new();
+    t.set("A1", "2");
+    t.set("A2", "=SUBTOTAL(9,A1)");
+    t.set("C1", "=SUBTOTAL(109,A1:A2)");
+    t.set("C2", "=SUBTOTAL(9,A1:A2)");
+    t.set("C3", "=SUBTOTAL(109,A1)");
+    assert_eq!(t.num("C1"), 2.0);
+    assert_eq!(t.num("C2"), 2.0);
+    assert_eq!(t.num("C3"), 2.0);
+    // Manually hidden rows are still left out by 109 only.
+    let mut t = T::new();
+    t.set("A1", "1");
+    t.set("A2", "2");
+    t.set("A3", "=SUBTOTAL(9,A1:A2)");
+    t.wb.sheet_mut(0).unwrap().rows.insert(1, gridcraft_model::LineInfo { hidden: true, ..Default::default() });
+    t.set("B1", "=SUBTOTAL(109,A1:A3)");
+    t.set("B2", "=SUBTOTAL(9,A1:A3)");
+    assert_eq!(t.num("B1"), 1.0);
+    assert_eq!(t.num("B2"), 3.0);
+}
+
 /// SUBTOTAL leaves out rows a filter hides for every function number, while 1-11 keep rows
 /// hidden by hand (as in ConditionalFormattingSamples.xlsx, where `SUBTOTAL(9,Table69[Sales])`
 /// under a filtered table adds only the visible rows).
