@@ -1423,20 +1423,20 @@ fn manage_cf(s: &mut Session, p: &Json) -> Result<Json> {
     }
     edit(s, |cx| {
         let sh = cx.sheet_mut(sheet)?;
-        let n = sh.cond_formats.len();
+        // The count is taken again after each step: a delete shortens the list.
         if let Some(i) = u32_param(p, "delete").map(|v| v as usize)
-            && i < n
+            && i < sh.cond_formats.len()
         {
             sh.cond_formats.remove(i);
         }
         if let Some(i) = u32_param(p, "moveUp").map(|v| v as usize)
             && i > 0
-            && i < n
+            && i < sh.cond_formats.len()
         {
             sh.cond_formats.swap(i, i - 1);
         }
         if let Some(i) = u32_param(p, "moveDown").map(|v| v as usize)
-            && i + 1 < n
+            && i + 1 < sh.cond_formats.len()
         {
             sh.cond_formats.swap(i, i + 1);
         }
@@ -1468,4 +1468,24 @@ fn insert_icon(s: &mut Session, p: &Json) -> Result<Json> {
         cx.sheet_mut(sheet)?.shapes.push(shape);
         Ok(json!({"shape": id}))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn manage_rules_delete_then_move() {
+        let mut s = Session::new();
+        s.new_workbook();
+        for v in ["1", "2"] {
+            let rule = json!({"type": "cellIs", "operator": "greaterThan", "value": v, "preset": "lightRedFill"});
+            s.execute("home.conditionalFormat", json!({"range": "A1:A3", "rule": rule})).unwrap();
+        }
+        // Deleting first left two rules' worth of indices for the move: it panicked.
+        s.execute("home.manageRules", json!({"delete": 0, "moveUp": 1})).unwrap();
+        s.execute("home.manageRules", json!({"delete": 0, "moveDown": 0})).unwrap();
+        let rules = s.execute("home.manageRules", json!({})).unwrap();
+        assert_eq!(rules["rules"].as_array().map(Vec::len), Some(0));
+    }
 }
