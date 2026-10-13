@@ -1,5 +1,6 @@
 # Gaps
 
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-12 · **Change:** minor (ink XLSX preservation; icons still pending) · **Target:** Microsoft Excel (Microsoft 365)
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (§8: PivotTable values on rows) · **Target:** Microsoft Excel (Microsoft 365)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
@@ -130,6 +131,8 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
   conversion; cloud storage requested (#86). **Estimate:** 35–55 h (co-authoring scope needs the owner).
 
 ### 17. Insert objects (F)
+- Ink strokes now survive XLSX save/reopen as editable polylines. Inserted icons still lose their
+  identity/artwork on save (#551); native Office InkML import is not implemented.
 - SmartArt, WordArt, equations, signature line, objects, 3-D models, screenshot; 8 shape kinds vs
   ~170; pictures in cells (#61, PR #105). **Estimate:** 25–40 h.
 
@@ -165,6 +168,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-12 | minor | §17: ink geometry survives XLSX saves; the icon portion of #551 remains |
 | 2026-10-12 | minor | §8: values on rows (Σ Values in Rows, `dataOnRows`) laid out, moved and round-tripped |
 | 2026-10-12 | minor | Desktop File > Print now discovers printers and submits PDF jobs through pinned craft-print with printer choice, copies, duplex and grayscale; browser printing and PDF export remain available. Remaining print parity includes page ranges and driver-specific tray/options UI; physical printer fidelity needs hardware validation. |
 | 2026-10-11 | minor | §6: iterative calculation for circular references landed (Maximum Iterations, Maximum Change) |

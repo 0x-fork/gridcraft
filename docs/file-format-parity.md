@@ -1,5 +1,6 @@
 # File-format parity
 
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-12 · **Change:** minor (editable ink round-trips as DrawingML geometry) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 > **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-12 · **Change:** minor (`.xls` array formulas fill their range on recalculation) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 > **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-12 · **Change:** minor (macOS Open With offers GridCraft for `.xlsb` and `.ods`) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
@@ -13,6 +14,13 @@ support comes from `crates/engine/src/io.rs` (`FileKind`), `crates/xlsx/src` and
 `crates/xlsx/src/tests/` (round-trip, fixtures, malformed input, CSV, ODS, XLSB, XLS, PivotTables).
 
 ## Workbook formats
+
+Ink created with Draw is written as standard, unfilled DrawingML polylines, without visible point
+captions or private metadata. Supported numeric polylines reopen as editable ink, retaining points,
+colour, integer width and anchor. Curves, filled paths, transforms and unsupported line styles are
+not interpreted as ink. This does not implement Office InkML or fix inserted icons (#551).
+Command and package tests cover repeated saves and unrelated cell edits; external Excel rendering
+and repair-free opening remain unverified.
 
 | Format | Excel | GridCraft read | GridCraft write | Fidelity / notes | Tests |
 |---|---|---|---|---|---|
@@ -79,6 +87,7 @@ refresh. Counted under features (Get & Transform, ~10% ready), not here.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-12 | minor | Ink paths and editing survive XLSX save/reopen; strict polyline import and malformed-input controls |
 | 2026-10-12 | minor | `.xls` import: the other cells of an array formula ({=FREQUENCY(...)}, {=TREND(...)}) drop their cached results, as `.xlsx` import does, so the formula fills its range on recalculation instead of showing `#SPILL!` against its own old values; 79 fewer mismatching formulas and 16 fewer round-trip differences over 4,224 real-world files |
 | 2026-10-12 | minor | macOS: the app bundle declares `.xlsb` and `.ods`, so Finder's Open With offers GridCraft for them, as Linux and Windows already did (#321) |
 | 2026-10-12 | minor | CSV: saving a file opened as CSV keeps its detected separator (`;` files were rewritten with `,`) |
