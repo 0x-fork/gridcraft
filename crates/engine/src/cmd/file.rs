@@ -107,9 +107,8 @@ fn save(s: &mut Session, p: &Json) -> Result<Json> {
     let d = s.doc_mut()?;
     let bytes = crate::io::save_bytes(&d.wb, &path)?;
     crate::io::write_file(&path, &bytes)?;
-    let kind = crate::io::FileKind::from_path(&path).unwrap_or(crate::io::FileKind::Xlsx);
     // Only a full-fidelity format clears the dirty flag and becomes the document's file.
-    if matches!(kind, crate::io::FileKind::Xlsx | crate::io::FileKind::Json) {
+    if matches!(crate::io::FileKind::from_path(&path), Some(crate::io::FileKind::Xlsx | crate::io::FileKind::Json)) {
         d.saved = d.wb.clone();
         d.path = Some(path.clone());
     }

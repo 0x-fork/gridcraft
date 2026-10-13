@@ -1519,6 +1519,31 @@ fn saving_an_opened_semicolon_csv_keeps_semicolons() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// A typo like `report.cvs` must not quietly write an XLSX under that name and adopt it as the
+/// document's file.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn saving_to_an_unknown_extension_is_refused() {
+    #[allow(clippy::disallowed_methods)] // native-only test: a unique temp dir name
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let dir = std::env::temp_dir().join(format!("gridcraft-unknown-ext-{}-{nonce}", std::process::id()));
+    std::fs::create_dir(&dir).unwrap();
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "1"})).unwrap();
+    for name in ["report.cvs", "report"] {
+        let path = dir.join(name);
+        let e = s.execute("file.save", json!({"path": path})).unwrap_err().to_string();
+        assert!(e.contains(".xlsx"), "{name}: {e}");
+        assert!(!path.exists(), "{name} was written");
+    }
+    let d = s.doc().unwrap();
+    assert!(d.path.is_none());
+    assert!(d.is_dirty());
+    assert!(s.execute("file.saveBytes", json!({"format": "foo"})).is_err());
+    s.execute("file.save", json!({"path": dir.join("report.csv")})).unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn validation_formulas_are_relative_and_see_the_new_value() {
     let mut s = s();
