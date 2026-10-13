@@ -1,6 +1,6 @@
 //! Text functions.
 
-use gridcraft_core::parse::parse_number_text;
+use gridcraft_core::parse::parse_number_text_in;
 use gridcraft_core::{CellError, Value, number_to_text};
 
 use crate::criteria::wildcard_find;
@@ -295,17 +295,17 @@ fn unicode(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
 
 /// VALUE: a blank cell reads as 0, but empty or blank text is not a number (observed:
 /// `VALUE("")` is `#VALUE!`).
-fn value(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+fn value(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
     match scalar(arg(a, 0)?) {
         Value::Number(n) => num_val(n),
         Value::Empty => num_val(0.0),
         Value::Error(e) => Err(e),
-        Value::Text(t) => parse_number_text(&t).ok_or(CellError::Value).and_then(num_val),
+        Value::Text(t) => parse_number_text_in(&t, c.date_system()).ok_or(CellError::Value).and_then(num_val),
         _ => Err(CellError::Value),
     }
 }
 
-fn numbervalue(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+fn numbervalue(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
     let s = text(a, 0)?;
     let dec = if a.len() > 1 { text(a, 1)?.chars().next().ok_or(CellError::Value)? } else { '.' };
     let grp = if a.len() > 2 { text(a, 2)?.chars().next().ok_or(CellError::Value)? } else { ',' };
@@ -338,7 +338,7 @@ fn numbervalue(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
             out.push(c);
         }
     }
-    let mut n = parse_number_text(&out).ok_or(CellError::Value)?;
+    let mut n = parse_number_text_in(&out, c.date_system()).ok_or(CellError::Value)?;
     for _ in 0..pct {
         n /= 100.0;
     }
