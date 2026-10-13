@@ -2399,9 +2399,13 @@ fn solver(ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, open: &mut bool
     let method = text(d, "method");
     ui.horizontal(|ui| {
         ui.label("Select a Solving Method:");
-        let label = |m: &str| if m == "simplex" { "Simplex LP" } else { "GRG Nonlinear" };
+        let label = |m: &str| match m {
+            "simplex" => "Simplex LP",
+            "evolutionary" => "Evolutionary",
+            _ => "GRG Nonlinear",
+        };
         egui::ComboBox::from_id_salt("solverMethod").selected_text(label(&method)).show_ui(ui, |ui| {
-            for m in ["grg", "simplex"] {
+            for m in ["grg", "simplex", "evolutionary"] {
                 if ui.selectable_label(method == m, label(m)).clicked() {
                     d.values.insert("method".into(), json!(m));
                 }
@@ -2409,10 +2413,10 @@ fn solver(ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, open: &mut bool
         });
     });
     ui.label(
-        egui::RichText::new(if method == "simplex" {
-            "Simplex LP: for linear models; integer and binary constraints by branch and bound."
-        } else {
-            "GRG Nonlinear: a local optimum of a smooth model, from the current values."
+        egui::RichText::new(match method.as_str() {
+            "simplex" => "Simplex LP: for linear models; integer and binary constraints by branch and bound.",
+            "evolutionary" => "Evolutionary: a genetic search for models that aren't smooth; every variable cell needs bounds.",
+            _ => "GRG Nonlinear: a local optimum of a smooth model, from the current values.",
         })
         .small(),
     );
@@ -2444,12 +2448,34 @@ fn solver_results(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, open: &
             d.values.insert("restore".into(), json!(true));
         }
     }
+    // Reports describe the solution whether it is kept or not.
+    let solved = d.values.get("values").and_then(Json::as_object).is_some_and(|v| !v.is_empty());
+    if solved {
+        ui.add_space(4.0);
+        ui.label("Reports:");
+        for (key, label) in [("answerReport", "Answer"), ("limitsReport", "Limits")] {
+            let mut on = d.values.get(key).and_then(Json::as_bool).unwrap_or(false);
+            if ui.checkbox(&mut on, label).changed() {
+                d.values.insert(key.into(), json!(on));
+            }
+        }
+    }
     let mut confirm = false;
     ok_cancel(ui, &mut confirm, open);
     if confirm {
         // The solution (and the saved model) is one undo step.
         if changed && restore {
             app.run_or_alert("edit.undo", json!({}));
+        }
+        let reports: Vec<&str> = [("answerReport", "answer"), ("limitsReport", "limits")]
+            .into_iter()
+            .filter(|(key, _)| d.values.get(*key).and_then(Json::as_bool) == Some(true))
+            .map(|(_, kind)| kind)
+            .collect();
+        if solved && !reports.is_empty() {
+            let field = |k: &str| d.values.get(k).cloned().unwrap_or(Json::Null);
+            let params = json!({"reports": reports, "model": field("model"), "values": field("values"), "original": field("original"), "message": field("message")});
+            app.run_or_alert("data.solverReport", params);
         }
         *open = false;
     }
