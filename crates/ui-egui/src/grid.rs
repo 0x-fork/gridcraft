@@ -2722,8 +2722,9 @@ pub(crate) fn paint_overlays(
         p.rect_stroke(r, 2.0, Stroke::new(1.0, Color32::from_gray(160)), StrokeKind::Inside);
         crate::icons::paint(p, r.shrink(3.0), crate::icons::Icon::Chevron, Color32::from_gray(60));
     }
-    // Input message of the active cell's validation.
+    // Input message of the active cell's validation, hidden while its list is open: it would cover the items.
     if app.editor.is_none()
+        && app.grid.list_picker != Some(sel.active)
         && let Some(dv) = sh.validations.iter().find(|d| d.ranges.iter().any(|r| r.contains(sel.active)))
         && dv.show_input
         && !(dv.input_title.is_empty() && dv.input_message.is_empty())
