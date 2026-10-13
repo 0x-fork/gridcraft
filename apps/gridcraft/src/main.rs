@@ -369,3 +369,32 @@ fn main() -> eframe::Result<()> {
     }
     result
 }
+
+#[cfg(test)]
+mod packaging_tests {
+    use gridcraft_engine::io::FileKind;
+
+    /// The text between `start` and `end` that follows each `marker` in `text`, sorted (e.g. the
+    /// `xlsb` in `Classes\.xlsb\OpenWithProgids`).
+    fn extensions(text: &str, marker: &str, start: &str, end: char) -> Vec<String> {
+        let mut v: Vec<String> = text.split(marker).skip(1).filter_map(|s| s.split_once(start)?.1.split(end).next()).map(str::to_string).collect();
+        v.sort();
+        v
+    }
+
+    /// macOS Open With (`CFBundleDocumentTypes`) offers GridCraft for the same files as Windows
+    /// Open with, and GridCraft opens each of them. #321 added `.xlsb` and `.ods` on Windows and
+    /// Linux only.
+    #[test]
+    fn macos_and_windows_offer_the_same_file_types() {
+        let plist = include_str!("../../../packaging/macos/Info.plist.in");
+        let wxs = include_str!("../../../packaging/windows/gridcraft.wxs");
+        let mac = extensions(plist, "<key>CFBundleTypeExtensions</key>", "<string>", '<');
+        let win = extensions(wxs, "Key=\"Software\\Classes\\.", "", '\\');
+        assert!(mac.iter().any(|e| e == "xlsx"), "Info.plist.in extensions not found: {mac:?}");
+        assert_eq!(mac, win);
+        for ext in &mac {
+            assert!(FileKind::from_path(&format!("book.{ext}")).is_some(), "GridCraft doesn't open .{ext}");
+        }
+    }
+}
