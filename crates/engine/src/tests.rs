@@ -805,6 +805,46 @@ fn sort_and_filter() {
     assert_eq!(r["hiddenRows"], 1);
 }
 
+/// Top 10 keeps the top or bottom N items or percent, ties at the threshold included.
+#[test]
+fn filter_top10_items_and_percent() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Score"], [5], [1], [9], [3], [9], [7], ["x"]]})).unwrap();
+    s.execute("selection.set", json!({"cell": "A1"})).unwrap();
+    s.execute("data.filter", json!({})).unwrap();
+    // Top 2 items: 9, 9 (the "x" text row is hidden too).
+    let r = s.execute("data.filterBy", json!({"column": "A", "top": {"count": 2}})).unwrap();
+    assert_eq!(r["hiddenRows"], 5);
+    // Bottom 2 items: 1, 3.
+    let r = s.execute("data.filterBy", json!({"column": "A", "top": {"count": 2, "bottom": true}})).unwrap();
+    assert_eq!(r["hiddenRows"], 5);
+    // Top 50 percent of 6 numbers = 3 items; the threshold 7 keeps 9, 9, 7.
+    let r = s.execute("data.filterBy", json!({"column": "A", "top": {"count": 50, "percent": true}})).unwrap();
+    assert_eq!(r["hiddenRows"], 4);
+}
+
+/// Two Top 10 criteria on one column (possible in a native JSON file) each keep their own
+/// cutoff: Top 3 and Bottom 4 of 1..5 keep 3 and 4.
+#[test]
+fn filter_top10_two_criteria_on_one_column() {
+    use gridcraft_model::FilterCriterion;
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["N"], [1], [2], [3], [4], [5]]})).unwrap();
+    s.execute("selection.set", json!({"cell": "A1"})).unwrap();
+    s.execute("data.filter", json!({})).unwrap();
+    let sh = std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb).sheet_mut(0).unwrap();
+    if let Some(af) = sh.autofilter.as_mut() {
+        af.criteria = vec![
+            (0, FilterCriterion::Top10 { bottom: false, percent: false, count: 3 }),
+            (0, FilterCriterion::Top10 { bottom: true, percent: false, count: 4 }),
+        ];
+    }
+    s.execute("data.reapply", json!({})).unwrap();
+    let hidden: Vec<u32> = s.active().unwrap().wb.sheet(0).unwrap().rows.iter().filter(|(_, r)| r.hidden).map(|(k, _)| *k).collect();
+    // Rows are 0-based: values 1, 2 and 5 sit on rows 1, 2 and 5.
+    assert_eq!(hidden, vec![1, 2, 5]);
+}
+
 /// Turning the filter on with only the header row selected filters the data below it (#201).
 #[test]
 fn filter_on_a_selected_header_row_covers_the_data_below() {
