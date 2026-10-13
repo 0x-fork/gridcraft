@@ -370,20 +370,26 @@ impl Dialog {
                 ],
                 json!({"header": "", "footer": "&CPage &P of &N"}),
             ),
-            "pageSetup" => Dialog::form(
-                "pageSetup",
-                "Page Setup",
-                "pageLayout.margins",
-                vec![
-                    Number { key: "left", label: "Left margin (in):" },
-                    Number { key: "right", label: "Right margin (in):" },
-                    Number { key: "top", label: "Top margin (in):" },
-                    Number { key: "bottom", label: "Bottom margin (in):" },
-                    Number { key: "header", label: "Header (in):" },
-                    Number { key: "footer", label: "Footer (in):" },
-                ],
-                json!({"left": 0.7, "right": 0.7, "top": 0.75, "bottom": 0.75, "header": 0.3, "footer": 0.3}),
-            ),
+            "pageSetup" => {
+                // Opens on the active sheet's saved margins, so OK without edits rewrites them unchanged.
+                let m = app.session.active().and_then(|d| d.wb.active()).map(|s| s.print.margins).unwrap_or([0.7, 0.7, 0.75, 0.75, 0.3, 0.3]);
+                // Round off f32 noise so the form shows 0.1, not 0.10000000149.
+                let [left, right, top, bottom, header, footer] = m.map(|v| (f64::from(v) * 1e4).round() / 1e4);
+                Dialog::form(
+                    "pageSetup",
+                    "Page Setup",
+                    "pageLayout.margins",
+                    vec![
+                        Number { key: "left", label: "Left margin (in):" },
+                        Number { key: "right", label: "Right margin (in):" },
+                        Number { key: "top", label: "Top margin (in):" },
+                        Number { key: "bottom", label: "Bottom margin (in):" },
+                        Number { key: "header", label: "Header (in):" },
+                        Number { key: "footer", label: "Footer (in):" },
+                    ],
+                    json!({"left": left, "right": right, "top": top, "bottom": bottom, "header": header, "footer": footer}),
+                )
+            }
             "textToColumns" => Dialog::form(
                 "textToColumns",
                 "Convert Text to Columns",
