@@ -324,8 +324,6 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "File Name" => "Nom du fichier",
         "Sheet Name" => "Nom de la feuille",
         "Go to Header" => "Aller à l'en-tête",
-        "Different First Page" => "Première page différente",
-        "Different Odd & Even Pages" => "Pages paires et impaires différentes",
         "Go to Footer" => "Aller au pied de page",
         "Ruler" => "Règle",
         "File" => "Fichier",
