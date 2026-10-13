@@ -132,6 +132,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-10-12 | PDF export writes the document title and author as UTF-16BE when they are not ASCII, so viewers show accents, currency signs and non-Latin text correctly (#813) |
 | 2026-10-12 | `TEXT()` over a range and chart labels parse each number format code once instead of once per value (#806) |
 | 2026-10-12 | SUBTOTAL(109) over hidden rows recalculates after Row Height, AutoFit Row Height and Ungroup reveal rows (found by the command-sequence fuzz) |
 | 2026-10-12 | Page Layout view: drag the margin edges on the rulers to set the page margins (resize cursor, live preview, value tooltip, one undo step, Esc cancels) (#792) |
