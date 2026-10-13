@@ -373,6 +373,15 @@ fn numfmt_color(c: gridcraft_engine::numfmt::FormatColor) -> Color32 {
     }
 }
 
+/// Last column of a Center Across Selection run starting at `start`: it extends over following columns (up to `limit`) while `continues` holds.
+fn center_across_end(start: u32, limit: u32, continues: impl Fn(u32) -> bool) -> u32 {
+    let mut end = start;
+    while end < limit && end + 1 < MAX_COLS && continues(end + 1) {
+        end += 1;
+    }
+    end
+}
+
 fn look(wb: &Workbook, si: usize, sh: &Sheet, c: CellRef, cf: &mut CfCache) -> (Look, Option<CfLook>) {
     let mut style = wb.styles.get(sh.style_id(c)).clone();
     if let Some(t) = sh.table_at(c) {
@@ -1047,17 +1056,25 @@ pub(crate) fn paint_quadrant(
             galley = p.layout_no_wrap(s, font.clone(), color);
             w = galley.size().x;
         }
+        // Center Across Selection: the text is centred over this cell and the empty cells to its right that also use it.
+        let across_end = if halign == HAlign::CenterAcross && !rotated && in_merge(c).is_none() {
+            center_across_end(c.col, c1 + 20, |col| {
+                let n = CellRef::new(c.row, col);
+                empty_ok(n) && wb.styles.get(sh.style_id(n)).align.h == HAlign::CenterAcross
+            })
+        } else {
+            c.col
+        };
         // Overflow into empty neighbours for text (not upright text, whose width is its line height).
         let mut clip = *rect;
-        if filter_space == 0.0
-            && !numeric
-            && !matches!(v, Value::Number(_))
-            && st.align.rotation.abs() != 90
-            && w > rect.width() - 2.0 * pad
-            && in_merge(c).is_none()
+        let overflows = !numeric && !matches!(v, Value::Number(_)) && st.align.rotation.abs() != 90 && w > rect.width() - 2.0 * pad;
+        if filter_space == 0.0 && (overflows || across_end > c.col) && in_merge(c).is_none()
         {
             let mut right = rect.right();
             let mut left = rect.left();
+            if across_end > c.col {
+                right = geo.x(sh, across_end + 1);
+            }
             if matches!(halign, HAlign::Left | HAlign::Center | HAlign::Justify) {
                 let mut cc = c.col + 1;
                 while right - rect.left() < w + 2.0 * pad && cc < MAX_COLS && empty_ok(CellRef::new(c.row, cc)) && cc <= c1 + 20 {
@@ -1087,7 +1104,8 @@ pub(crate) fn paint_quadrant(
             }
         }
         let x = match halign {
-            HAlign::Center | HAlign::CenterAcross | HAlign::Distributed => rect.center().x - w / 2.0,
+            HAlign::CenterAcross => clip.center().x - w / 2.0,
+            HAlign::Center | HAlign::Distributed => rect.center().x - w / 2.0,
             HAlign::Right => rect.right() - pad - w - indent,
             _ => text_left + pad + indent,
         };
@@ -3128,6 +3146,13 @@ mod selection_fill_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn center_across_run_stops_at_first_non_continuing_column() {
+        assert_eq!(center_across_end(0, 20, |c| c <= 2), 2);
+        assert_eq!(center_across_end(0, 20, |_| false), 0);
+        assert_eq!(center_across_end(0, 1, |_| true), 1);
+    }
 
     #[test]
     fn filter_menu_uses_the_table_whose_header_was_clicked() {
