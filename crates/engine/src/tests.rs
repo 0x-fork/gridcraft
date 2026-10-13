@@ -3041,6 +3041,19 @@ fn a_decrypted_workbook_never_overwrites_its_encrypted_original() {
 }
 
 #[test]
+fn subtotal_109_recalculates_when_row_height_or_autofit_reveals_rows() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [[1], [2], [4], [8]]})).unwrap();
+    s.execute("cell.set", json!({"cell": "C1", "input": "=SUBTOTAL(109,A1:A4)"})).unwrap();
+    s.execute("home.hideRows", json!({"rows": "2:3"})).unwrap();
+    assert_eq!(v(&s, "C1"), Value::Number(9.0));
+    // A non-zero height unhides the rows (the fuzz found the stale SUBTOTAL).
+    s.execute("home.rowHeight", json!({"rows": "2:3", "height": 60.0})).unwrap();
+    assert_eq!(v(&s, "C1"), Value::Number(15.0));
+    s.execute("home.hideRows", json!({"rows": "2:3"})).unwrap();
+    assert_eq!(v(&s, "C1"), Value::Number(9.0));
+    s.execute("home.autofitRowHeight", json!({"rows": "2:3"})).unwrap();
+    assert_eq!(v(&s, "C1"), Value::Number(15.0));
 fn paste_special_validation_copies_the_rule() {
     let mut s = s();
     let ok = |s: &mut Session, cell: &str, input: &str| s.execute("data.validate", json!({"cell": cell, "input": input})).unwrap()["ok"] == true;
