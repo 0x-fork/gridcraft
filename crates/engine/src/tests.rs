@@ -3142,6 +3142,22 @@ fn a_decrypted_workbook_never_overwrites_its_encrypted_original() {
 }
 
 #[test]
+fn link_open_refuses_every_scheme_but_http_https_and_mailto() {
+    let mut s = s();
+    s.execute("insert.link", json!({"cell": "A1", "target": "file:///etc/passwd"})).unwrap();
+    s.take_ui_requests();
+    for url in ["file:///etc/passwd", "smb://h/s", "\\\\h\\s", "JAVASCRIPT:1"] {
+        assert!(s.execute("link.open", json!({"url": url})).is_err(), "{url}");
+    }
+    assert!(s.execute("link.open", json!({"cell": "A1"})).is_err());
+    assert!(s.take_ui_requests().is_empty());
+    s.execute("link.open", json!({"url": "HTTPS://example.org/a"})).unwrap();
+    assert_eq!(s.take_ui_requests(), vec![crate::UiRequest::OpenUrl("HTTPS://example.org/a".into())]);
+    s.execute("link.open", json!({"url": "B2"})).unwrap();
+    assert!(s.take_ui_requests().is_empty());
+}
+
+#[test]
 fn subtotal_109_recalculates_when_row_height_or_autofit_reveals_rows() {
     let mut s = s();
     s.execute("range.setValues", json!({"range": "A1", "values": [[1], [2], [4], [8]]})).unwrap();

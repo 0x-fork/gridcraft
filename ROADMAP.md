@@ -132,6 +132,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-10-12 | Security: cell hyperlinks open only http, https and mailto, after a confirmation; other schemes (file:, smb:, UNC, custom handlers) are refused (#777, part 1) |
 | 2026-10-12 | Deleting several Ctrl-selected rows or columns removes them all in one undo step (#758) |
 | 2026-10-12 | XLSX chart sheets are kept on open and save: the sheet, its drawing and chart (with style and colours) are written back unchanged in their place among the worksheets, and left out when the sheet they plot is deleted or renamed or a worksheet took their name (#727) |
 | 2026-10-12 | CSV and tab-separated export is capped at 512 MiB: a sheet whose used range would expand to more (two cells far apart, such as A1 and XFD1048576, are 16 GiB of commas) is refused with the rows, columns and limit, before anything is allocated or written (#528) |

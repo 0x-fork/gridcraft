@@ -2459,15 +2459,18 @@ fn delete_selected_object(app: &mut SheetApp, sh: &Sheet) -> bool {
     true
 }
 
+/// A click on a hyperlink. References select; web and e-mail addresses ask first (the dialog's
+/// OK runs `link.open`); every other kind is refused with a message. The decision is the
+/// engine's ([`gridcraft_engine::links::classify`]), the same one `link.open` applies.
 pub fn follow_link(app: &mut SheetApp, target: &str) {
-    if target.contains("://") || target.starts_with("mailto:") {
-        if let Some(f) = &app.services.open_url {
-            f(target);
+    use gridcraft_engine::links::{LinkKind, classify};
+    match classify(target) {
+        LinkKind::Internal(r) => {
+            let _ = app.session.run("edit.goTo", json!({"reference": r.trim_start_matches('#')}));
+            app.grid.ensure_visible = true;
         }
-    } else {
-        let t = target.trim_start_matches('#');
-        let _ = app.session.run("edit.goTo", json!({"reference": t}));
-        app.grid.ensure_visible = true;
+        LinkKind::External(url) => app.open_dialog("openLink", json!({"url": url})),
+        LinkKind::Refused(why) => app.message = Some(("Hyperlink".into(), why)),
     }
 }
 
