@@ -8,8 +8,9 @@
 //! them are skipped.
 //!
 //! **Round trip.** The recalculated workbook is written with GridCraft's XLSX writer, the package is
-//! validated (content types cover every part, every internal relationship target exists) and read
-//! back, and the two workbooks are compared feature by feature.
+//! validated (content types cover every part, every internal relationship target exists, no kind of
+//! relationship the source had is missing) and read back, and the two workbooks are compared feature
+//! by feature.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::{Cursor, Read as _};
@@ -38,6 +39,9 @@ const MAX_FILES: usize = 100_000;
 const MAX_XML_PART: u64 = 64 * 1024 * 1024;
 /// Most zip entries looked at while validating a written package.
 const MAX_ENTRIES: usize = 200_000;
+/// Relationship kinds (lower case) whose absence after a save isn't a loss: the calculation chain is
+/// a cache Excel rebuilds, and GridCraft never writes it.
+const REBUILT_KINDS: [&str; 1] = ["calcchain"];
 
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
@@ -286,7 +290,7 @@ fn check_inner(path: &str, bytes: &[u8], opts: &Options) -> FileReport {
     calc.recalc_all(&mut fresh);
     let trust_cache = !full_calc_on_load(bytes);
     report.calc = oracle(&cached, &fresh, &calc, trust_cache, opts);
-    report.round_trip = round_trip(&fresh, opts);
+    report.round_trip = round_trip(&fresh, bytes, opts);
     report
 }
 
@@ -514,8 +518,9 @@ pub fn oracle(cached: &Workbook, fresh: &Workbook, calc: &Calc, trust_cache: boo
 
 // ---------------------------------------------------------------- round trip
 
-/// Writes `wb` with GridCraft's XLSX writer, validates the package, reads it back and compares.
-pub fn round_trip(wb: &Workbook, opts: &Options) -> RoundTrip {
+/// Writes `wb` with GridCraft's XLSX writer, validates the package against itself and against
+/// `source` (the file `wb` was read from), reads it back and compares.
+pub fn round_trip(wb: &Workbook, source: &[u8], opts: &Options) -> RoundTrip {
     let bytes = match gridcraft_engine::io::save_bytes(wb, "roundtrip.xlsx") {
         Ok(b) => b,
         Err(e) => return RoundTrip { error: Some(format!("write failed: {e}")), categories: vec![] },
@@ -524,6 +529,13 @@ pub fn round_trip(wb: &Workbook, opts: &Options) -> RoundTrip {
     match validate_package(&bytes) {
         Ok(issues) => issues.into_iter().for_each(|i| package.push(|| i)),
         Err(e) => package.push(|| e),
+    }
+    if let (Ok(before), Ok(after)) = (relationship_kinds(source), relationship_kinds(&bytes)) {
+        for (key, kind) in &before {
+            if !after.contains_key(key) && !REBUILT_KINDS.contains(&key.as_str()) {
+                package.push(|| format!("lost relationship {kind}"));
+            }
+        }
     }
     let back = match gridcraft_engine::io::open_bytes("roundtrip.xlsx", &bytes) {
         Ok((b, _)) => b,
@@ -886,6 +898,22 @@ pub fn validate_package(bytes: &[u8]) -> Result<Vec<String>, String> {
         }
     }
     Ok(issues)
+}
+
+/// Every relationship kind (last segment of the type, the same in the transitional and strict
+/// namespaces) in the package's relationship parts, keyed in lower case.
+fn relationship_kinds(bytes: &[u8]) -> Result<BTreeMap<String, String>, String> {
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| format!("not a zip package: {e}"))?;
+    let mut kinds = BTreeMap::new();
+    for n in zip_names(&mut zip).into_iter().filter(|n| part_key(n).ends_with(".rels")) {
+        let Ok(els) = read_zip_part(&mut zip, &n).and_then(|xml| xml_elements(&xml)) else { continue };
+        for (_, attrs) in els.iter().filter(|(el, _)| el == "Relationship") {
+            if let Some(kind) = attr(attrs, "Type").and_then(|t| t.rsplit('/').next()) {
+                kinds.entry(kind.to_ascii_lowercase()).or_insert_with(|| kind.to_string());
+            }
+        }
+    }
+    Ok(kinds)
 }
 
 // ---------------------------------------------------------------- output
@@ -1277,7 +1305,8 @@ mod tests {
     fn round_trip_of_a_simple_book_is_clean() {
         let mut wb = book(&[("A1", "2", n(2.0)), ("B1", "=A1*3", n(6.0)), ("A2", "x", Value::text("x"))]);
         wb.sheet_mut(0).unwrap().merges.push(gridcraft_engine::core::RangeRef::parse("C1:D2").unwrap());
-        let rt = round_trip(&wb, &Options::default());
+        let source = gridcraft_engine::io::save_bytes(&wb, "t.xlsx").unwrap();
+        let rt = round_trip(&wb, &source, &Options::default());
         assert_eq!(rt.error, None);
         assert!(rt.is_clean(), "{rt:?}");
         assert!(rt.categories.iter().any(|c| c.name == "package"));
@@ -1340,6 +1369,44 @@ mod tests {
         assert!(validate_package(b"not a zip").is_err());
         let own = gridcraft_engine::io::save_bytes(&book(&[("A1", "=1", n(1.0))]), "t.xlsx").unwrap();
         assert_eq!(validate_package(&own).unwrap(), Vec::<String>::new());
+    }
+
+    /// `bytes` with `extra` relationships added to the workbook's rels part and `parts` added.
+    fn with_workbook_rels(bytes: &[u8], extra: &str, parts: &[(&str, &str)]) -> Vec<u8> {
+        let mut src = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+        let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for i in 0..src.len() {
+            let mut f = src.by_index(i).unwrap();
+            let name = f.name().to_string();
+            let mut body = String::new();
+            f.read_to_string(&mut body).unwrap();
+            if name == "xl/_rels/workbook.xml.rels" {
+                body = body.replace("</Relationships>", &format!("{extra}</Relationships>"));
+            }
+            out.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+            out.write_all(body.as_bytes()).unwrap();
+        }
+        for (name, body) in parts {
+            out.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+            out.write_all(body.as_bytes()).unwrap();
+        }
+        out.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn package_reports_relationship_kinds_the_output_lost() {
+        let plain = gridcraft_engine::io::save_bytes(&book(&[("A1", "1", n(1.0))]), "t.xlsx").unwrap();
+        // A kind GridCraft doesn't know is dropped on save; a calculation chain is never written
+        // (Excel rebuilds it), so its absence isn't a loss.
+        let source = with_workbook_rels(
+            &plain,
+            r#"<Relationship Id="rId90" Type="http://example.com/relationships/madeUp" Target="madeUp.xml"/><Relationship Id="rId91" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" Target="calcChain.xml"/>"#,
+            &[("xl/madeUp.xml", "<madeUp/>"), ("xl/calcChain.xml", "<calcChain/>")],
+        );
+        let r = check_bytes("t.xlsx", &source, &Options::default());
+        let package = r.round_trip.categories.iter().find(|c| c.name == "package").unwrap();
+        assert_eq!(package.examples, ["lost relationship madeUp"]);
+        assert!(check_bytes("t.xlsx", &plain, &Options::default()).round_trip.is_clean());
     }
 
     #[test]
