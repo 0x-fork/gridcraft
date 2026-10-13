@@ -119,7 +119,12 @@ fn write_struct_ref(s: &StructRef, at_shorthand: bool) -> String {
             let _ = write!(out, "[{}]", s.specifiers.first().map(item).unwrap_or(""));
         }
         (Some(c), None) if s.specifiers.is_empty() => {
-            let _ = write!(out, "[{}]", esc(c));
+            // Excel writes a name with spaces at its edges in the double-bracket form.
+            if c.trim() == c {
+                let _ = write!(out, "[{}]", esc(c));
+            } else {
+                let _ = write!(out, "[[{}]]", esc(c));
+            }
         }
         (Some(c), None) if this_row => {
             if simple_col(c) {

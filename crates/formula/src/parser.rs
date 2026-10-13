@@ -426,6 +426,9 @@ fn combine(op: BinOp, lhs: Expr, rhs: Expr) -> Expr {
 pub fn parse_struct(table: &str, body: &str) -> Result<StructRef, String> {
     let mut specifiers = Vec::new();
     let mut cols: Vec<String> = Vec::new();
+    // Spaces at the edges of a column name are part of it (`Table1[Qty ]` names `Qty `), so the
+    // untrimmed body is what a lone column is read from.
+    let raw = body;
     let body = body.trim();
     let unescape = |s: &str| {
         let mut out = String::new();
@@ -477,7 +480,7 @@ pub fn parse_struct(table: &str, body: &str) -> Result<StructRef, String> {
         } else if let Some(i) = item(body) {
             specifiers.push(i);
         } else if !body.is_empty() {
-            cols.push(column(body)?);
+            cols.push(column(raw)?);
         }
     } else {
         // [[#Headers],[Col1]:[Col3]], [[#This Row],[Col 1]] or [[#This Row],Col1]
