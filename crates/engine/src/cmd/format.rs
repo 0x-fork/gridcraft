@@ -938,7 +938,7 @@ fn line_targets(s: &Session, p: &Json, rows: bool) -> Result<(usize, Vec<(u32, u
         let (prefix, body) = split_sheet(t);
         if let Some(name) = prefix {
             let named = s.doc()?.wb.sheet_index(&name).ok_or_else(|| bad(key, format!("no sheet named `{name}`")))?;
-            if p.get("sheet").is_some() && named != sheet {
+            if p.get("sheet").is_some_and(|v| !v.is_null()) && named != sheet {
                 return Err(bad(key, format!("`{t}` names a sheet other than `sheet`")));
             }
             sheet = named;
