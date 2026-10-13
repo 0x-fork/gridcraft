@@ -1059,10 +1059,10 @@ impl<'h> Evaluator<'h> {
         if h == 0 || w == 0 {
             return err(CellError::Ref);
         }
-        let r0 = base.range.start.row as i64 + rows;
-        let c0 = base.range.start.col as i64 + cols;
-        let (r0, r1) = if h > 0 { (r0, r0 + h - 1) } else { (r0 + h + 1, r0) };
-        let (c0, c1) = if w > 0 { (c0, c0 + w - 1) } else { (c0 + w + 1, c0) };
+        let r0 = (base.range.start.row as i64).saturating_add(rows);
+        let c0 = (base.range.start.col as i64).saturating_add(cols);
+        let (r0, r1) = if h > 0 { (r0, r0.saturating_add(h - 1)) } else { (r0.saturating_add(h + 1), r0) };
+        let (c0, c1) = if w > 0 { (c0, c0.saturating_add(w - 1)) } else { (c0.saturating_add(w + 1), c0) };
         if r0 < 0 || c0 < 0 || r1 >= MAX_ROWS as i64 || c1 >= MAX_COLS as i64 {
             return err(CellError::Ref);
         }

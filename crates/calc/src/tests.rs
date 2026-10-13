@@ -1023,3 +1023,32 @@ fn trim_references() {
     t.set("K20", "=SUM(Q1:.Q9)");
     assert_eq!(t.get("K20"), Value::Error(CellError::Calc));
 }
+
+#[test]
+fn offset_extreme_arguments_return_ref() {
+    let wb = Workbook::new();
+    for formula in [
+        "=OFFSET(B2,1E300,0)",
+        "=OFFSET(B2,0,1E300)",
+        "=OFFSET(B2,0,0,1E300,1)",
+        "=OFFSET(B2,0,0,1,1E300)",
+        "=OFFSET(B2,-1E300,0)",
+        "=OFFSET(B2,0,-1E300)",
+        "=OFFSET(B2,0,0,-1E300,1)",
+        "=OFFSET(B2,0,0,1,-1E300)",
+        "=OFFSET(B2,1E300,0,-1E300,1)",
+        "=OFFSET(B2,0,1E300,1,-1E300)",
+        "=OFFSET(B2,-1E300,0,-1E300,1)",
+    ] {
+        assert_eq!(crate::evaluate(&wb, 0, c("D1"), formula), Value::Error(CellError::Ref), "{formula}");
+    }
+    for (formula, expected) in [
+        ("=ROW(OFFSET(B2,1.9,0))", 3.0),
+        ("=COLUMN(OFFSET(B2,0,-1.9))", 1.0),
+        ("=ROWS(OFFSET(B2,0,0,-2,1))", 2.0),
+        ("=COLUMNS(OFFSET(B2,0,0,1,-2))", 2.0),
+        ("=ROWS(OFFSET(A1,0,0,1048576,1))", 1048576.0),
+    ] {
+        assert_eq!(crate::evaluate(&wb, 0, c("D1"), formula), Value::Number(expected), "{formula}");
+    }
+}
