@@ -28,6 +28,8 @@ pub struct Ctx<'a> {
     pub num_fmts: std::collections::HashMap<u32, String>,
     /// Value metadata blocks, indexed by the worksheet's one-based `vm` attribute.
     pub cell_pictures: Vec<Option<Arc<CellPicture>>>,
+    /// x14 conditional-format ids of the current sheet's data bars, with the index of the rule in `cond_formats`.
+    pub cf_ext_ids: Vec<(String, usize)>,
 }
 
 impl Ctx<'_> {
@@ -79,6 +81,7 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
         next_id: 1,
         num_fmts: Default::default(),
         cell_pictures: vec![],
+        cf_ext_ids: vec![],
     };
     let root_rels = cx.pkg.rels("")?;
     let wb_part = find_rel(&root_rels, "officeDocument").map(|r| r.target.clone()).unwrap_or_else(|| "xl/workbook.xml".into());
@@ -301,7 +304,7 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     if let Some(r) = find_rel(&root_rels, "core-properties").cloned()
         && let Ok(Some(x)) = cx.pkg.read_xml(&r.target)
     {
-        let get = |n: &str| x.child(n).map(|e| e.text.trim().to_string()).unwrap_or_default();
+        let get = |n: &str| x.child(n).map(|e| e.text.clone()).unwrap_or_default();
         wb.props.title = get("title");
         wb.props.subject = get("subject");
         wb.props.author = get("creator");
@@ -311,7 +314,7 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(Workbook, ReadReport), IoError> {
     if let Some(r) = find_rel(&root_rels, "extended-properties").cloned()
         && let Ok(Some(x)) = cx.pkg.read_xml(&r.target)
     {
-        wb.props.company = x.child("Company").map(|e| e.text.trim().to_string()).unwrap_or_default();
+        wb.props.company = x.child("Company").map(|e| e.text.clone()).unwrap_or_default();
     }
 
     // A VBA project is carried through unchanged: GridCraft never runs macros, but preserving the
