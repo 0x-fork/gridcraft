@@ -1330,9 +1330,8 @@ mod tests {
             wb.sheet_mut(0).unwrap().cond_formats.push(cf);
             wb
         };
-        let diffs = |a: &Workbook, b: &Workbook| {
-            diff_workbooks(a, b, &Options::default()).into_iter().find(|c| c.name == "condFormats").unwrap().diffs
-        };
+        let diffs =
+            |a: &Workbook, b: &Workbook| diff_workbooks(a, b, &Options::default()).into_iter().find(|c| c.name == "condFormats").unwrap().diffs;
         assert_eq!(diffs(&with(bar(false, 1)), &with(bar(true, 1))), 1);
         assert_eq!(diffs(&with(bar(true, 1)), &with(bar(true, 1))), 0);
         assert_eq!(diffs(&with(bar(true, 1)), &with(bar(true, 5))), 0);
