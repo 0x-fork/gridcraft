@@ -6,6 +6,10 @@ fn rt(src: &str) -> String {
 }
 
 #[test]
+fn quoted_sheet_qualified_name_keeps_quotes() {
+    assert_eq!(rt("'My Sheet'!Total"), "'My Sheet'!Total");
+    assert_eq!(rt("'Data'!Total"), "Data!Total");
+    assert_eq!(rt("'It''s'!Total+1"), "'It''s'!Total+1");
 fn intersection_with_deleted_operand_reparses() {
     // Deleting the columns of an intersection operand prints `A1:B2 #REF!`; that text must parse back.
     assert_eq!(rt("A1:B2 #REF!"), "A1:B2 #REF!");
@@ -201,6 +205,10 @@ fn rename_sheet_updates_qualified_names() {
     assert_eq!(print(&rename_sheet(e, "data", "Numbers")), "Numbers!MyName+MyName+Other!MyName");
     let e = parse("Data!MyName").unwrap();
     assert_eq!(print(&rename_sheet(e, "Data", "New Name")), "'New Name'!MyName");
+    // Stored bare, like a parsed name, so the evaluator finds the sheet and a second rename still matches.
+    let e = rename_sheet(parse("Data!MyName").unwrap(), "Data", "It's");
+    assert_eq!(e, Expr::Name("It's!MyName".into()));
+    assert_eq!(print(&rename_sheet(e, "It's", "Totals")), "Totals!MyName");
 }
 
 #[test]
