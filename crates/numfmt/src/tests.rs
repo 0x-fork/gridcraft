@@ -777,8 +777,9 @@ fn parse_cache_is_bounded() {
     assert!(text_function(&Value::Number(1.0), "0.00\"0\"", S).is_ok());
     assert_eq!(parse_cache::parses() - before, 1);
 
-    // A very long code is parsed on every call and not stored.
-    let long = format!("0\"{}\"", "x".repeat(parse_cache::MAX_CODE_LEN));
+    // A code too long (in bytes) for the cache is parsed on every call and not stored. Two-byte
+    // characters keep it under the 255-character cap that TEXT() refuses past.
+    let long = format!("0\"{}\"", "é".repeat(parse_cache::MAX_CODE_LEN / 2 + 8));
     let before = parse_cache::parses();
     for _ in 0..3 {
         assert!(text_function(&Value::Number(1.0), &long, S).is_ok());
