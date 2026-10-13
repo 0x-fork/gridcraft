@@ -1793,6 +1793,9 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                 return;
             }
             let c = geo.col_at(sh, p.x);
+            if point_header(app, wb, sh, RangeRef::cols(c, c)) {
+                return;
+            }
             if resp.drag_started()
                 && !mods.any()
                 && sel.ranges.len() == 1
@@ -1813,6 +1816,9 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                 return;
             }
             let r = geo.row_at(sh, p.y);
+            if point_header(app, wb, sh, RangeRef::rows(r, r)) {
+                return;
+            }
             let range = if mods.shift { RangeRef::rows(sel.anchor.row.min(r), sel.anchor.row.max(r)) } else { RangeRef::rows(r, r) };
             select_ranges(app, range, mods.command, CellRef::new(r, geo.col_at(sh, geo.cells.left() + 1.0)));
             app.grid.drag = Drag::Rows(if mods.shift { sel.anchor.row } else { r });
@@ -2099,6 +2105,16 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
         resp.request_focus();
     }
     keyboard(app, &ctx, resp, geo, sh);
+}
+
+/// Point mode on a header: inserts the whole-column or whole-row reference instead of selecting.
+fn point_header(app: &mut SheetApp, wb: &Workbook, sh: &Sheet, range: RangeRef) -> bool {
+    let Some(ed) = app.editor.as_mut().filter(|ed| ed.can_point()) else { return false };
+    let r = range.a1();
+    let r = if ed.sheet != wb.active_sheet { format!("{}!{r}", gridcraft_engine::formula::quote_sheet(&sh.name)) } else { r };
+    ed.insert_ref(&r);
+    ed.request_focus = true;
+    true
 }
 
 fn select_to_pointer(app: &mut SheetApp, geo: &Geo, sh: &Sheet, wb: &Workbook, p: Pos2) {
