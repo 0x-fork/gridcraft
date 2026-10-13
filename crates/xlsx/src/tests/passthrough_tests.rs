@@ -530,6 +530,8 @@ fn saving_into_another_folder_rebases_relative_links_to_workbooks() {
     assert!(crate::rebase_links(&wb, std::path::Path::new("/elsewhere")).is_none());
     wb.source_dir = Some("relative/dir".into());
     assert!(crate::rebase_links(&wb, std::path::Path::new("/elsewhere")).is_none());
+}
+
 // ------------------------------------------------------------------ chart sheets (#727)
 
 const NS_C: &str = "http://schemas.openxmlformats.org/drawingml/2006/chart";
@@ -708,6 +710,8 @@ fn formulas_name_the_sheets_a_chart_plots() {
     assert_eq!(sheet_names_in("SUM(Data!A1:A3,'Other sheet'!B2)"), ["Data", "Other sheet"]);
     assert!(sheet_names_in("[1]Ext!A1").is_empty() && sheet_names_in("[1]Ext!A1:A3").is_empty());
     assert!(sheet_names_in("Name").is_empty() && sheet_names_in("").is_empty());
+}
+
 #[test]
 fn file_version_and_calc_features_survive_a_save() {
     // Excel trusts the saved cell values only when workbook.xml carries both <fileVersion> and the

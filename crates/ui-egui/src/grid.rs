@@ -1240,8 +1240,7 @@ pub(crate) fn paint_quadrant(
         // Overflow into empty neighbours for text (not upright text, whose width is its line height).
         let mut clip = *rect;
         let overflows = !numeric && !matches!(v, Value::Number(_)) && st.align.rotation.abs() != 90 && w > rect.width() - 2.0 * pad;
-        if filter_space == 0.0 && (overflows || across_end > c.col) && in_merge(c).is_none()
-        {
+        if filter_space == 0.0 && (overflows || across_end > c.col) && in_merge(c).is_none() {
             let mut right = rect.right();
             let mut left = rect.left();
             if across_end > c.col {
