@@ -561,6 +561,28 @@ fn insert_delete_rows_adjust() {
 }
 
 #[test]
+fn deleting_a_multi_area_row_selection_removes_every_area_and_undoes_once() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [[1], [2], [3], [4], [5], [6]]})).unwrap();
+    s.execute("cell.set", json!({"cell": "B1", "input": "=A6"})).unwrap();
+    // Ctrl-select rows 2, 4 and 5:6 (A1 refs are 1-based).
+    let sel = &mut s.doc_mut().unwrap().selection;
+    sel.ranges = vec![gridcraft_core::RangeRef::rows(1, 1), gridcraft_core::RangeRef::rows(3, 3), gridcraft_core::RangeRef::rows(4, 5)];
+    sel.active = CellRef::new(4, 0);
+    s.doc_mut().unwrap().undo.clear();
+    s.execute("home.deleteRows", json!({})).unwrap();
+    assert_eq!((v(&s, "A1"), v(&s, "A2"), v(&s, "A3")), (Value::Number(1.0), Value::Number(3.0), Value::Empty));
+    assert_eq!(s.execute("cell.get", json!({"cell": "B1"})).unwrap()["formula"], "=#REF!");
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!((1..=6).map(|r| v(&s, &format!("A{r}"))).collect::<Vec<_>>(), (1..=6).map(|n| Value::Number(n as f64)).collect::<Vec<_>>());
+    assert!(s.doc().unwrap().undo.is_empty(), "one undo step restored all rows");
+    // The explicit list form behaves the same, for columns too.
+    s.execute("range.setValues", json!({"range": "A1", "values": [[1, 2, 3, 4]]})).unwrap();
+    s.execute("home.deleteColumns", json!({"cols": "A:A,C:C"})).unwrap();
+    assert_eq!((v(&s, "A1"), v(&s, "B1"), v(&s, "C1")), (Value::Number(2.0), Value::Number(4.0), Value::Empty));
+}
+
+#[test]
 fn move_columns_reorders_without_overwriting_and_undoes_once() {
     let mut s = s();
     s.execute("range.setValues", json!({"range": "A1", "values": [[1, 2, 3, 4, 5, 6, 7, 8]]})).unwrap();
