@@ -2547,7 +2547,9 @@ fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_open: bool)
                     c.1 = all_new;
                 }
             }
-            egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+            // Full width: shrunk to the longest value, the scroll bar sat mid-menu and the wheel only
+            // worked over the values themselves (#432).
+            egui::ScrollArea::vertical().max_height(220.0).auto_shrink([false, true]).show(ui, |ui| {
                 for (v, on) in checks.iter_mut().filter(|(v, _)| matches(v)) {
                     ui.checkbox(on, v.as_str());
                 }
