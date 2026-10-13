@@ -280,6 +280,26 @@ fn language_switch_translates_the_ribbon_and_persists() {
 }
 
 #[test]
+fn pivot_fields_pane_follows_the_interface_language() {
+    // #858: the PivotTable Fields pane and its field menus stayed in English after switching to Spanish.
+    let mut h = harness(blank());
+    h.state_mut().run("range.setValues", json!({"range": "A1:B3", "values": [["Region", "Sales"], ["North", 10], ["South", 20]]})).unwrap();
+    h.state_mut().run("insert.pivotTable", json!({"source": "Sheet1!$A$1:$B$3", "rows": ["Region"]})).unwrap();
+    h.state_mut().run("app.language.set", json!({"language": "es"})).unwrap();
+    h.run_steps(4);
+    for label in ["Campos de tabla dinámica", "Filas", "Valores", "Actualizar", "Campo calculado…"] {
+        assert!(h.query_by_label(label).is_some(), "the pane shows `{label}`");
+    }
+    assert!(h.query_by_label("PivotTable Fields").is_none());
+    h.get_by_label("Region ▾").click();
+    h.run_steps(2);
+    for label in ["Mover a rótulos de columna", "Agrupar por años", "Quitar campo"] {
+        assert!(h.query_by_label(label).is_some(), "the field menu shows `{label}`");
+    }
+    assert!(h.query_by_label("Remove Field").is_none());
+}
+
+#[test]
 fn name_manager_new_and_edit_open_the_name_dialog_and_come_back() {
     // #238: New… in the Name Manager did nothing (the manager put itself back over the dialog it
     // had just opened).
