@@ -704,11 +704,7 @@ fn stash_get(wb: &Workbook, key: &str) -> Json {
 /// Like `stash_get`, for the name-keyed lists (views, scripts): a stored value that is not a JSON object is treated as empty.
 fn stash_map(wb: &Workbook, key: &str) -> Json {
     let v = stash_get(wb, key);
-    if v.is_object() {
-        v
-    } else {
-        json!({})
-    }
+    if v.is_object() { v } else { json!({}) }
 }
 
 fn stash_set(wb: &mut Workbook, key: &str, v: &Json) {
