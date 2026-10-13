@@ -24,7 +24,7 @@ fn numbers() {
     assert_eq!(f("0", -2.5), "-3");
     assert_eq!(f("0.00", 2.675), "2.68");
     assert_eq!(f("0.00", 1.005), "1.01");
-    assert_eq!(f("0.0", -0.04), "-0.0");
+    assert_eq!(f("0.0", -0.04), "0.0");
     assert_eq!(f("00000", 123.0), "00123");
     assert_eq!(f("000-00-0000", 123456789.0), "123-45-6789");
     assert_eq!(f("#.##", 0.5), ".5");
@@ -103,6 +103,29 @@ fn scientific() {
     assert_eq!(f("0.000E+00", 1e-300), "1.000E-300");
     assert_eq!(f("0.00E+00", 9.999), "1.00E+01");
     assert_eq!(f("0.00E+00", -12345.0), "-1.23E+04");
+}
+
+/// A negative number that rounds to zero in the first section shows no minus sign; a negative
+/// section of its own keeps its text (observed Excel results).
+#[test]
+fn negative_rounding_to_zero_drops_the_sign() {
+    let cases: &[(&str, f64, &str)] = &[
+        ("0.00", -0.0033, "0.00"),
+        ("0.00", -2.89e-9, "0.00"),
+        ("0.00", -0.005, "-0.01"),
+        ("0", -0.4, "0"),
+        ("0", -0.5, "-1"),
+        ("0.0", -0.004, "0.0"),
+        ("#,##0.00", -0.004, "0.00"),
+        ("0.00%", -2.89e-9, "0.00%"),
+        ("0.00%", -0.0033, "-0.33%"),
+        ("0.00;(0.00)", -0.0033, "(0.00)"),
+        ("0.00;-0.00;\"zero\"", -0.0033, "-0.00"),
+        ("0.00E+00", -2.89e-9, "-2.89E-09"),
+    ];
+    for &(code, n, want) in cases {
+        assert_eq!(f(code, n), want, "{code} with {n}");
+    }
 }
 
 #[test]
@@ -347,6 +370,8 @@ fn text_fn() {
     assert_eq!(text_function(&Value::Number(2957003.0), "m/d/yyyy", DateSystem::D1904), Ok("12/31/9999".into()));
     assert_eq!(text_function(&Value::Number(2957004.0), "m/d/yyyy", DateSystem::D1904), Err(CellError::Value));
     assert_eq!(text_function(&Value::Bool(true), "0", S), Ok("TRUE".into()));
+    assert_eq!(text_function(&Value::Number(-0.0033), "0", S), Ok("0".into()));
+    assert_eq!(text_function(&Value::Number(-0.4), "0", S), Ok("0".into()));
     // Booleans go through the text section as TRUE/FALSE (observed Excel results).
     let cases: &[(bool, &str, &str)] = &[
         (true, ";;;@", "TRUE"),
@@ -588,4 +613,175 @@ fn decimal_digits_keeps_fifteen_digits_and_truncates_a_tie() {
     // A 16th digit above 5 carries as usual.
     let (d, e) = decimal_digits(999999999999999.6);
     assert_eq!((d, e), ([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 15));
+}
+
+// ---- parse cache ----
+
+/// `TEXT()` as it was before the cache: parse the code, then format.
+fn text_uncached(v: &Value, code: &str, sys: DateSystem) -> Result<String, CellError> {
+    if code.is_empty() {
+        return Ok(String::new());
+    }
+    let fmt = NumberFormat::parse(code);
+    let n = match v.scalar() {
+        Value::Error(e) => return Err(e),
+        Value::Empty => 0.0,
+        Value::Number(n) => n,
+        Value::Bool(b) => return Ok(fmt.format_text(if b { "TRUE" } else { "FALSE" }).text),
+        Value::Text(t) => match gridcraft_core::parse::parse_number_text(&t) {
+            Some(n) => n,
+            None => return Ok(fmt.format_text(&t).text),
+        },
+        Value::Array(_) => return Err(CellError::Value),
+    };
+    if !n.is_finite() {
+        return Err(CellError::Num);
+    }
+    let (f, overflow) = fmt.format_number(n, sys);
+    if overflow { Err(CellError::Value) } else { Ok(f.text) }
+}
+
+const CACHE_CODES: &[&str] = &[
+    "0",
+    "0.00",
+    "#,##0.00",
+    "#,##0.00;[Red](#,##0.00)",
+    "$#,##0.00",
+    "0%",
+    "0.0%",
+    "0.00E+00",
+    "##0.0E+0",
+    "General",
+    "general",
+    "checkbox",
+    "@",
+    "0;@",
+    "0;-0;;@",
+    "00000",
+    "# ?/?",
+    "# ??/16",
+    "?/?",
+    "m/d/yyyy",
+    "yyyy-mm-dd hh:mm:ss",
+    "dddd, mmmm d, yyyy",
+    "h:mm AM/PM",
+    "[h]:mm:ss",
+    "mm:ss.000",
+    "[Red]0;[Blue]-0",
+    "[>100]0.0;[<5]0.000;0",
+    "[<=9999999]###-####;(###) ###-####",
+    "[$-409]d mmm yy",
+    "\"abc\"0",
+    "\\x0",
+    "*-0",
+    "_(* #,##0_)",
+    "0.0.0",
+    "[",
+    "\"abc",
+    "0;0;0;0;0",
+    "#,##0.00;[Red",
+    "[$-]0",
+    "  0.00  ",
+    "[Color99]0",
+    "0.00_);(0.00)",
+    "#,,\"M\"",
+    "yyyy",
+    "",
+];
+
+fn cache_values() -> Vec<Value> {
+    vec![
+        Value::Number(0.0),
+        Value::Number(1234.5678),
+        Value::Number(-42.5),
+        Value::Number(0.5),
+        Value::Number(45000.75),
+        Value::Number(1e15),
+        Value::Number(1e-7),
+        Value::Number(-0.0001),
+        Value::Number(f64::INFINITY),
+        Value::from("abc"),
+        Value::from("12.5"),
+        Value::Bool(true),
+        Value::Empty,
+        Value::Error(CellError::NA),
+    ]
+}
+
+#[test]
+fn parse_cached_gives_the_same_results_cold_and_warm() {
+    assert!(CACHE_CODES.len() >= 40);
+    parse_cache::clear();
+    let values = cache_values();
+    for sys in [DateSystem::D1900, DateSystem::D1904] {
+        // Cold on the first system, warm on the second.
+        for code in CACHE_CODES {
+            let direct = NumberFormat::parse(code);
+            let cached = NumberFormat::parse_cached(code);
+            assert_eq!(cached.code(), direct.code(), "{code:?}");
+            assert_eq!(
+                (cached.kind(), cached.is_date(), cached.is_text(), cached.is_general()),
+                (direct.kind(), direct.is_date(), direct.is_text(), direct.is_general())
+            );
+            for v in &values {
+                let want = text_uncached(v, code, sys);
+                assert_eq!(text_function(v, code, sys), want, "TEXT({v:?}, {code:?})");
+                // Again, now certainly warm.
+                assert_eq!(text_function(v, code, sys), want, "warm TEXT({v:?}, {code:?})");
+                assert_eq!(format_value(v, &cached, sys), format_value(v, &direct, sys), "{v:?} {code:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn parse_cached_parses_each_code_once() {
+    parse_cache::clear();
+    let before = parse_cache::parses();
+    for i in 0..10_000 {
+        assert!(text_function(&Value::Number(f64::from(i) + 0.5), "0.00", S).is_ok());
+    }
+    assert_eq!(parse_cache::parses() - before, 1);
+
+    let before = parse_cache::parses();
+    for i in 0..10_000 {
+        let code = if i % 2 == 0 { "0.00" } else { "#,##0.0" };
+        assert!(text_function(&Value::Number(f64::from(i)), code, S).is_ok());
+    }
+    // "0.00" is still cached from above: only the second code is new.
+    assert_eq!(parse_cache::parses() - before, 1);
+
+    parse_cache::clear();
+    let before = parse_cache::parses();
+    for i in 0..10_000 {
+        let code = if i % 2 == 0 { "0.00" } else { "#,##0.0" };
+        assert!(text_function(&Value::Number(f64::from(i)), code, S).is_ok());
+    }
+    assert_eq!(parse_cache::parses() - before, 2);
+}
+
+#[test]
+fn parse_cache_is_bounded() {
+    parse_cache::clear();
+    // More distinct codes than the capacity: all still format correctly...
+    let n = parse_cache::CAPACITY + 10;
+    for i in 0..n {
+        let c = format!("0.00\"{i}\"");
+        assert_eq!(text_function(&Value::Number(1.0), &c, S), Ok(format!("1.00{i}")));
+    }
+    // ...the first ones were evicted (parsed again), the newest is still cached.
+    let before = parse_cache::parses();
+    let newest = format!("0.00\"{}\"", n - 1);
+    assert!(text_function(&Value::Number(1.0), &newest, S).is_ok());
+    assert_eq!(parse_cache::parses() - before, 0);
+    assert!(text_function(&Value::Number(1.0), "0.00\"0\"", S).is_ok());
+    assert_eq!(parse_cache::parses() - before, 1);
+
+    // A very long code is parsed on every call and not stored.
+    let long = format!("0\"{}\"", "x".repeat(parse_cache::MAX_CODE_LEN));
+    let before = parse_cache::parses();
+    for _ in 0..3 {
+        assert!(text_function(&Value::Number(1.0), &long, S).is_ok());
+    }
+    assert_eq!(parse_cache::parses() - before, 3);
 }
