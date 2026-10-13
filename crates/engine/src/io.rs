@@ -187,6 +187,20 @@ pub fn save_bytes_as(wb: &Workbook, path: &str, kind: FileKind) -> Result<Vec<u8
     }
 }
 
+/// [`save_bytes`] for the file at `path`: relative paths to linked workbooks are rewritten for
+/// its folder, so they still name the same files.
+pub fn save_file_bytes(wb: &Workbook, path: &str) -> Result<Vec<u8>> {
+    match source_dir(path).and_then(|f| gridcraft_xlsx::rebase_links(wb, &f)) {
+        Some(rebased) => save_bytes(&rebased, path),
+        None => save_bytes(wb, path),
+    }
+}
+
+/// The folder of the file at `path`, which relative paths to linked workbooks are relative to.
+pub fn source_dir(path: &str) -> Option<std::path::PathBuf> {
+    std::path::absolute(path).ok()?.parent().map(std::path::Path::to_path_buf)
+}
+
 /// Save As CSV/Text writes "the text and values as they are displayed in cells" with "all
 /// characters in each cell" (Microsoft Support, *Excel formatting and features that are not
 /// transferred to other file formats*): number formats applied, never column-width `#####`.

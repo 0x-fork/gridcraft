@@ -1620,6 +1620,80 @@ fn saving_an_opened_semicolon_csv_keeps_semicolons() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// A workbook whose B1 is `=[1]Sheet1!A1`, linked to `link` (an external relationship target).
+fn linked_workbook(link: &str) -> Vec<u8> {
+    use std::io::{Cursor, Write};
+    const NS_REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    let types = r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/externalLinks/externalLink1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.externalLink+xml"/></Types>"#.to_string();
+    let rels = format!(
+        r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{NS_REL}/officeDocument" Target="xl/workbook.xml"/></Relationships>"#
+    );
+    let book = format!(
+        r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="{NS_REL}"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets><externalReferences><externalReference r:id="rId2"/></externalReferences></workbook>"#
+    );
+    let book_rels = format!(
+        r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{NS_REL}/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="{NS_REL}/externalLink" Target="externalLinks/externalLink1.xml"/></Relationships>"#
+    );
+    let sheet = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="B1"><f>[1]Sheet1!A1</f><v>10</v></c></row></sheetData></worksheet>"#.to_string();
+    let link_part = format!(
+        r#"<externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="{NS_REL}"><externalBook r:id="rId1"><sheetNames><sheetName val="Sheet1"/></sheetNames><sheetDataSet><sheetData sheetId="0"><row r="1"><cell r="A1"><v>10</v></cell></row></sheetData></sheetDataSet></externalBook></externalLink>"#
+    );
+    let link_rels = format!(
+        r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{NS_REL}/externalLinkPath" Target="{link}" TargetMode="External"/></Relationships>"#
+    );
+    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    for (name, data) in [
+        ("[Content_Types].xml", types),
+        ("_rels/.rels", rels),
+        ("xl/workbook.xml", book),
+        ("xl/_rels/workbook.xml.rels", book_rels),
+        ("xl/worksheets/sheet1.xml", sheet),
+        ("xl/externalLinks/externalLink1.xml", link_part),
+        ("xl/externalLinks/_rels/externalLink1.xml.rels", link_rels),
+    ] {
+        zip.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+        zip.write_all(data.as_bytes()).unwrap();
+    }
+    zip.finish().unwrap().into_inner()
+}
+
+/// The target of the linked workbook in a saved file.
+fn link_target(path: &std::path::Path) -> String {
+    use std::io::Read;
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(std::fs::read(path).unwrap())).unwrap();
+    let mut rels = String::new();
+    zip.by_name("xl/externalLinks/_rels/externalLink1.xml.rels").unwrap().read_to_string(&mut rels).unwrap();
+    let (_, after) = rels.split_once("Target=\"").unwrap();
+    after.split_once('"').unwrap().0.to_string()
+}
+
+/// Save As into another folder keeps the link on the same file, as Excel does: the relative path
+/// is rewritten from the new folder (#801).
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn save_as_into_another_folder_keeps_linked_workbooks_on_the_same_file() {
+    #[allow(clippy::disallowed_methods)] // native-only test: a unique temp dir name
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let a = std::env::temp_dir().join(format!("gridcraft-links-{}-{nonce}", std::process::id()));
+    let b = a.join("b");
+    std::fs::create_dir_all(&b).unwrap();
+    let dest = a.join("Dest.xlsx");
+    std::fs::write(&dest, linked_workbook("Source.xlsx")).unwrap();
+    let mut s = s();
+    s.execute("file.open", json!({"path": dest})).unwrap();
+    s.execute("file.saveAs", json!({"path": b.join("Dest.xlsx")})).unwrap();
+    assert_eq!(link_target(&b.join("Dest.xlsx")), "../Source.xlsx");
+    // Saved again into the folder it was read from, the path is the one it was read with.
+    s.execute("file.saveAs", json!({"path": a.join("Copy.xlsx")})).unwrap();
+    assert_eq!(link_target(&a.join("Copy.xlsx")), "Source.xlsx");
+    // Read from a subfolder and saved into its parent, the path goes down into the subfolder.
+    let deep = b.join("Deep.xlsx");
+    std::fs::write(&deep, linked_workbook("Source.xlsx")).unwrap();
+    let mut s = Session::new();
+    s.execute("file.open", json!({"path": deep})).unwrap();
+    s.execute("file.saveAs", json!({"path": a.join("Deep.xlsx")})).unwrap();
+    assert_eq!(link_target(&a.join("Deep.xlsx")), "b/Source.xlsx");
+    std::fs::remove_dir_all(a).unwrap();
 /// A typo like `report.cvs` must not quietly write an XLSX under that name and adopt it as the
 /// document's file.
 #[test]
