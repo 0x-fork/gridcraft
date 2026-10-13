@@ -642,16 +642,18 @@ fn radians(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
 
 const NUMERALS: [(char, u32); 7] = [('I', 1), ('V', 5), ('X', 10), ('L', 50), ('C', 100), ('D', 500), ('M', 1000)];
 
-/// Tokens (text, value) for a ROMAN form, largest value first. Form 0 is classic; higher forms
-/// allow subtracting progressively smaller numerals (max ratio 10, 20, 50, 100, 1000).
+/// Tokens (text, value) for a ROMAN form, largest value first. Form 0 is classic; each higher
+/// form widens one of two limits on the subtracted numeral's ratio to the larger one, alternating:
+/// the limit for I/X/C (10, 10, 100, 100, 1000) and for V/L (none, 20, 20, 200, 200). So form 2
+/// allows IC and XM but not VD, and form 3 adds VD and VM but not ID.
 fn roman_tokens(form: u32) -> Vec<(String, u32)> {
-    let max_ratio = [10, 20, 50, 100, 1000].get(form as usize).copied().unwrap_or(10);
+    let (pow10_max, five_max) = [(10, 0), (10, 20), (100, 20), (100, 200), (1000, 200)].get(form as usize).copied().unwrap_or((10, 0));
     let mut toks: Vec<(String, u32)> = NUMERALS.iter().map(|(c, v)| (c.to_string(), *v)).collect();
     for (i, (sc, sv)) in NUMERALS.iter().enumerate() {
         for (lc, lv) in NUMERALS.iter().skip(i + 1) {
             let ratio = lv / sv;
             let pow10 = matches!(sc, 'I' | 'X' | 'C');
-            let ok = if form == 0 { pow10 && ratio <= 10 } else { ratio <= max_ratio };
+            let ok = ratio <= if pow10 { pow10_max } else { five_max };
             let value = lv - sv;
             // Skip pairs that equal a single numeral (VX = V) – they are never shorter.
             if ok && !NUMERALS.iter().any(|(_, v)| *v == value) {
@@ -1570,6 +1572,43 @@ mod tests {
         close(ev("DECIMAL", vec![t("111"), n(2.0)]), 7.0);
         close(ev("DECIMAL", vec![t("zap"), n(36.0)]), 45745.0);
         is_err(ev("DECIMAL", vec![t("12"), n(2.0)]), Num);
+    }
+
+    /// Every number where Excel's forms 2 and 3 differ from a plain ratio limit (issue #733):
+    /// form 2 subtracts I from C and X from M, form 3 also V from M.
+    #[test]
+    fn roman_forms_two_and_three_match_excel() {
+        const HUNDREDS: [&str; 10] = ["", "C", "CC", "CCC", "CD", "D", "DC", "DCC", "DCCC", "CM"];
+        const ONES: [&str; 10] = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX"];
+        let mut cases = Vec::new();
+        for thousands in 0..4usize {
+            let m = "M".repeat(thousands);
+            for (h, hundreds) in HUNDREDS.iter().enumerate() {
+                if h != 4 && h != 9 {
+                    cases.push((thousands * 1000 + h * 100 + 99, 2.0, format!("{m}{hundreds}IC")));
+                }
+            }
+            for (o, ones) in ONES.iter().enumerate() {
+                cases.push((thousands * 1000 + 990 + o, 2.0, format!("{m}XM{ones}")));
+            }
+            for (o, ones) in ONES.iter().enumerate().take(5) {
+                cases.push((thousands * 1000 + 995 + o, 3.0, format!("{m}VM{ones}")));
+            }
+        }
+        assert_eq!(cases.len(), 92);
+        for (number, form, want) in &cases {
+            is_text(ev2("ROMAN", *number as f64, *form), want);
+        }
+        // Neighbours that already matched: form 2 still has no VD or ID, form 3 no ID.
+        is_text(ev2("ROMAN", 495.0, 2.0), "XDV");
+        is_text(ev2("ROMAN", 495.0, 3.0), "VD");
+        is_text(ev2("ROMAN", 1499.0, 2.0), "MXDIX");
+        is_text(ev2("ROMAN", 999.0, 0.0), "CMXCIX");
+        is_text(ev2("ROMAN", 999.0, 1.0), "LMVLIV");
+        is_text(ev2("ROMAN", 999.0, 4.0), "IM");
+        is_text(ev2("ROMAN", 995.0, 4.0), "VM");
+        is_text(ev2("ROMAN", 99.0, 1.0), "VCIV");
+        is_text(ev2("ROMAN", 99.0, 4.0), "IC");
     }
 
     #[test]
