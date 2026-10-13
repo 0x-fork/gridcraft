@@ -539,6 +539,7 @@ fn analyze(raw: Raw) -> Section {
         }
     }
     let last_exp = toks.iter().rposition(|t| matches!(t, Tok::Exp { .. }));
+    let scientific = toks.iter().skip_while(|t| !matches!(t, Tok::Digit(_))).any(|t| matches!(t, Tok::Exp { .. }));
     for i in 0..toks.len() {
         let Some(t) = toks.get(i).cloned() else { break };
         let replace = match t {
@@ -571,6 +572,10 @@ fn analyze(raw: Raw) -> Section {
                 let next_digit = digit_after_commas.get(i).copied().unwrap_or(false);
                 if seen_digit && next_digit && !seen_point && !seen_exp {
                     sec.thousands = true;
+                    Some(Tok::Lit(String::new()))
+                } else if seen_digit && scientific {
+                    // Observed: a scientific section never scales; any other comma after the
+                    // first digit shows nothing (`#,e+#`, `#e+#,`, `#e+000,00`).
                     Some(Tok::Lit(String::new()))
                 } else if seen_digit && !next_digit {
                     sec.scale += 1;
