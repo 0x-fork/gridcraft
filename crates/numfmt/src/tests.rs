@@ -825,7 +825,8 @@ fn format_codes_are_capped_at_255_characters() {
 fn finishes_in_time(code: String) -> String {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let _ = tx.send(f(&code, 1234.5));
+        // Uncapped: `parse` turns a code past 255 characters into General before the parser sees it.
+        let _ = tx.send(format_value(&Value::Number(1234.5), &NumberFormat::parse_uncapped(&code), S).text);
     });
     rx.recv_timeout(std::time::Duration::from_secs(20)).expect("format code did not parse and render in time")
 }
