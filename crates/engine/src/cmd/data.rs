@@ -147,6 +147,23 @@ fn data_range(s: &Session, p: &Json) -> Result<RangeRef> {
     Ok(current_region(sh, d.selection.active))
 }
 
+/// The sheet and range a data command works on: the sheet `sheet` or a `Sheet!` prefix on `range`
+/// names, else the active one. The selection belongs to the active sheet, so another sheet needs `range`.
+fn data_target(s: &Session, p: &Json, cmd: &str) -> Result<(usize, RangeRef)> {
+    let sheet = target_sheet(s, p)?;
+    let d = s.doc()?;
+    if let Some(t) = str_param(p, "range")
+        && let (Some(name), _) = split_sheet(t)
+        && d.wb.sheet_index(&name) != Some(sheet)
+    {
+        return Err(bad(cmd, format!("`{t}` names a sheet other than `sheet`")));
+    }
+    if sheet != d.wb.active_sheet && p.get("range").is_none() {
+        return Err(bad(cmd, "missing `range`: the selection is on the active sheet"));
+    }
+    Ok((sheet, data_range(s, p)?))
+}
+
 /// Excel's header guess: the first row is text over a column of numbers, or is bold.
 fn guess_header(wb: &Workbook, sh: &Sheet, r: RangeRef) -> bool {
     if let Some(t) = sh.table_at(r.start) {
@@ -736,9 +753,9 @@ fn sort_key(v: &Value) -> (u8, i64, String) {
 // ---------------------------------------------------------------- tools
 
 fn remove_duplicates(s: &mut Session, p: &Json) -> Result<Json> {
-    let r = data_range(s, p)?;
+    let (sheet, r) = data_target(s, p, "data.removeDuplicates")?;
     let d = s.doc()?;
-    let sh = d.wb.active().ok_or(EngineError::NoDocument)?;
+    let sh = d.wb.sheet(sheet).ok_or(EngineError::NoDocument)?;
     // Rows and columns past the data are blank: only the part with data is compared (whole
     // columns compared a million blank rows and reported them as removed duplicates).
     let r = sh.used_range().and_then(|u| r.intersection(&u)).unwrap_or(RangeRef::cell(r.start));
@@ -748,7 +765,6 @@ fn remove_duplicates(s: &mut Session, p: &Json) -> Result<Json> {
         .and_then(Json::as_array)
         .map(|a| a.iter().filter_map(|c| col_param(Some(c), r.start.col)).collect())
         .unwrap_or_else(|| (r.start.col..=r.end.col).collect());
-    let sheet = d.wb.active_sheet;
     let start = r.start.row + header as u32;
     let mut removed = 0;
     edit(s, |cx| {
