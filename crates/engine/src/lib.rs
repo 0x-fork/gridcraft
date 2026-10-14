@@ -228,8 +228,11 @@ pub enum UiRequest {
 }
 
 /// Width in points of one line of text drawn in a cell font, measured by a front end that has
-/// the font the grid draws with.
-pub type TextWidth = Arc<dyn Fn(&str, &model::Font) -> f32 + Send + Sync>;
+/// the font the grid draws with. With `exact` false the front end may answer with a cheaper
+/// measure that is never narrower (AutoFit asks for it on columns with many distinct values).
+/// Commands call it while they run, so a front end must not run commands while holding a lock
+/// the measure takes (egui's: see `theme::cell_text_width` in the UI crate).
+pub type TextWidth = Arc<dyn Fn(&str, &model::Font, bool) -> f32 + Send + Sync>;
 
 #[derive(Default)]
 pub struct Session {

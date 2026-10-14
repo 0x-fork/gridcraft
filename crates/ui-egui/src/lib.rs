@@ -992,7 +992,7 @@ impl SheetApp {
     pub fn logic(&mut self, ctx: &egui::Context) {
         if self.session.text_width.is_none() {
             let ctx = ctx.clone();
-            self.session.text_width = Some(std::sync::Arc::new(move |text, font| theme::cell_text_width(&ctx, text, font)));
+            self.session.text_width = Some(std::sync::Arc::new(move |text, font, exact| theme::cell_text_width(&ctx, text, font, exact)));
         }
         // A keytip control request lives one frame: the ribbon consumes it during `ui`, and
         // anything that never reached a control (collapsed ribbon, tab switch) is dropped.

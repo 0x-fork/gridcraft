@@ -1025,6 +1025,10 @@ pub fn approx_text_width(text: &str, size: f32, bold: bool) -> f32 {
     w * size * if bold { 1.07 } else { 1.0 } * 96.0 / 72.0
 }
 
+/// Distinct texts AutoFit measures exactly; past this many, `Session::text_width` is asked for a
+/// quick measure so a huge column doesn't lay out every value.
+const EXACT_TEXT_WIDTHS: usize = 2_000;
+
 fn autofit_cols(s: &mut Session, p: &Json) -> Result<Json> {
     let lines = line_targets(s, p, false)?;
     let measure = s.text_width.clone();
@@ -1032,6 +1036,8 @@ fn autofit_cols(s: &mut Session, p: &Json) -> Result<Json> {
         let si = cx.sheet_index();
         let Some(sh) = cx.wb.sheet(si) else { return Ok(Json::Null) };
         let mut widths = Vec::new();
+        let mut measured: std::collections::HashMap<StyleId, std::collections::HashMap<String, f32>> = Default::default();
+        let mut distinct = 0usize;
         let used = sh.used_range();
         for (a, b) in lines {
             for c in a..=b.min(a + 16383) {
@@ -1042,11 +1048,23 @@ fn autofit_cols(s: &mut Session, p: &Json) -> Result<Json> {
                     if sh.merge_at(cell).is_some_and(|m| !m.is_single()) {
                         continue;
                     }
-                    let st = cx.wb.styles.get(sh.style_id(cell));
+                    let id = sh.style_id(cell);
+                    let st = cx.wb.styles.get(id);
                     let text = crate::display::cell_text(&cx.wb, sh, cell);
                     for line in text.lines() {
                         let w = match &measure {
-                            Some(m) => m(line, &st.font),
+                            Some(m) => {
+                                let known = measured.entry(id).or_default();
+                                match known.get(line) {
+                                    Some(w) => *w,
+                                    None => {
+                                        let w = m(line, &st.font, distinct < EXACT_TEXT_WIDTHS);
+                                        known.insert(line.to_owned(), w);
+                                        distinct += 1;
+                                        w
+                                    }
+                                }
+                            }
                             None => approx_text_width(line, st.font.size, st.font.bold),
                         };
                         max = max.max(w + 6.0 + st.align.indent as f32 * 9.0 + sh.filter_button_space(cell));
