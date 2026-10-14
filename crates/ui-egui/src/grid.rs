@@ -2258,9 +2258,21 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
     // Release.
     if resp.drag_stopped() || (!pointer.any_down() && app.grid.drag != Drag::None && !resp.dragged()) {
         match std::mem::take(&mut app.grid.drag) {
-            Drag::Select if resp.drag_stopped() => {
-                if let Some(p) = pos {
+            Drag::Select => {
+                if resp.drag_stopped()
+                    && let Some(p) = pos
+                {
                     select_to_pointer(app, geo, sh, wb, p);
+                }
+                // An armed Format Painter pastes onto the cells just clicked or dragged over
+                // (not while pointing a formula reference, which also drags a Select).
+                if app.session.format_painter.is_some() && !app.editor.as_ref().is_some_and(|ed| ed.can_point()) {
+                    let dest = app.session.active().map(|d| d.selection.current().a1());
+                    if let Some(dest) = dest
+                        && let Err(e) = app.run("edit.formatPainter", json!({"apply": dest}))
+                    {
+                        app.message = Some(("GridCraft".into(), crate::clean_error(&e)));
+                    }
                 }
             }
             Drag::Fill { target: Some(t) } => {
