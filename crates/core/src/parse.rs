@@ -54,8 +54,13 @@ fn parse_numeric(t: &str, sys: DateSystem) -> Option<(f64, Option<&'static str>)
         return None;
     }
     // Parenthesised negatives: (100) = -100.
-    if let Some(inner) = t.strip_prefix('(').and_then(|x| x.strip_suffix(')')) {
-        return parse_numeric(inner.trim(), sys).map(|(n, f)| (-n, f));
+    if let Some(inner) = parenthesized(t) {
+        // Excel reads no sign and no nested parentheses inside: `(-5)`, `($-5)`, `((5))`.
+        if inner.strip_prefix('$').map_or(inner.as_str(), str::trim_start).starts_with(['-', '+', '(']) {
+            return None;
+        }
+        let r = parse_plain(&inner).or_else(|| parse_fraction(&inner).map(|n| (n, Some("# ?/?"))));
+        return r.map(|(n, f)| (-n, f));
     }
     if let Some(r) = parse_plain(t) {
         return Some(r);
@@ -67,6 +72,22 @@ fn parse_numeric(t: &str, sys: DateSystem) -> Option<(f64, Option<&'static str>)
         return Some(r);
     }
     None
+}
+
+/// The number inside accounting parentheses, as plain text: `(5)` gives `5`. A dollar sign may
+/// stand before them (`$(5)` reads as `($5)`) and a percent sign after them (`(5)%` reads as
+/// `(5%)`), with spaces around either. The caller reads only a plain number or a fraction from it.
+fn parenthesized(t: &str) -> Option<String> {
+    let (currency, rest) = match t.strip_prefix('$') {
+        Some(r) => ("$", r.trim_start()),
+        None => ("", t),
+    };
+    let rest = rest.strip_prefix('(')?;
+    let (body, percent) = match rest.strip_suffix(')') {
+        Some(b) => (b, ""),
+        None => (rest.strip_suffix('%')?.trim_end().strip_suffix(')')?, "%"),
+    };
+    Some(format!("{currency}{}{percent}", body.trim()))
 }
 
 /// Signs, currency, thousands separators, percent, exponent.
@@ -93,7 +114,8 @@ fn parse_plain(t: &str) -> Option<(f64, Option<&'static str>)> {
         percent = true;
         s = r.trim_end();
     }
-    if s.is_empty() {
+    // Excel reads `$5` and `5%` but not `$5%`.
+    if s.is_empty() || currency && percent {
         return None;
     }
     let has_sep = s.contains(',');
@@ -350,6 +372,93 @@ mod tests {
         assert_eq!(p("1e3").value, Value::Number(1000.0));
         assert_eq!(p("1 1/2").value, Value::Number(1.5));
         assert_eq!(p(".5").value, Value::Number(0.5));
+    }
+
+    /// Observed in Excel 365 (en-US): typed entry, VALUE and `--"text"` agree.
+    #[test]
+    fn accounting_parentheses() {
+        let accepted: [(&str, f64, Option<&str>); 22] = [
+            ("$(5)", -5.0, Some("\"$\"#,##0")),
+            ("$ (5)", -5.0, Some("\"$\"#,##0")),
+            ("$( 5 )", -5.0, Some("\"$\"#,##0")),
+            ("$ ( 1,234 )", -1234.0, Some("\"$\"#,##0")),
+            ("$(1,234)", -1234.0, Some("\"$\"#,##0")),
+            ("$(1,000.50)", -1000.5, Some("\"$\"#,##0.00")),
+            ("$(1,234.)", -1234.0, Some("\"$\"#,##0.00")),
+            ("$(.5)", -0.5, Some("\"$\"#,##0.00")),
+            ("$(0)", 0.0, Some("\"$\"#,##0")),
+            (" $(5) ", -5.0, Some("\"$\"#,##0")),
+            ("($5)", -5.0, Some("\"$\"#,##0")),
+            ("( $ 1,234 )", -1234.0, Some("\"$\"#,##0")),
+            ("(5)", -5.0, None),
+            ("( 5 )", -5.0, None),
+            ("(1,234.5)", -1234.5, Some("#,##0.00")),
+            ("(1e-3)", -0.001, Some("0.00E+00")),
+            ("(5)%", -0.05, Some("0%")),
+            ("( 5 ) %", -0.05, Some("0%")),
+            ("(5%)", -0.05, Some("0%")),
+            ("(5.)%", -0.05, Some("0.00%")),
+            ("(1,234)%", -12.34, Some("0%")),
+            ("(1 1/2)", -1.5, Some("# ?/?")),
+        ];
+        for (s, n, f) in accepted {
+            assert_eq!(p(s), Parsed { value: Value::Number(n), format: f }, "{s}");
+            assert_eq!(parse_number_text(s), Some(n), "{s}");
+        }
+        for s in [
+            "$5%",
+            "$(5%)",
+            "$(5)%",
+            "($5%)",
+            "($5)%",
+            "$ ( 5 ) %",
+            "(5)%%",
+            "(5%)%",
+            "((5))",
+            "(-5)",
+            "(+5)",
+            "($-5)",
+            "($ -5)",
+            "($+5)",
+            "(-$5)",
+            "$(-5)",
+            "$ (-5)",
+            "$(+5)",
+            "-(5)",
+            "-$(5)",
+            "+$(5)",
+            "$+(5)",
+            "$$(5)",
+            "$ $(5)",
+            "$((5))",
+            "($(5))",
+            "(-1 1/2)",
+            "()",
+            "$()",
+            "(5)$",
+            "$(5)$",
+            "(5)(5)",
+            "$(5)0",
+            "(5)e3",
+            "(5)-",
+            "(5-)",
+            "$(5-)",
+            "$(5",
+            "$5)",
+            "(5",
+            "$(1,23)",
+            "$(,5)",
+            "(5e)",
+            "(1/2)",
+            "$(1/2)",
+            "(3/4/2026)",
+            "$(3/4/2026)",
+            "(10:30)",
+            "$(10:30)",
+        ] {
+            assert_eq!(p(s).value, Value::text(s), "{s}");
+            assert_eq!(parse_number_text(s), None, "{s}");
+        }
     }
 
     #[test]
