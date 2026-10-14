@@ -459,9 +459,18 @@ pub(crate) fn editable_combo(
             }
         }
         ui.separator();
-        let row_h = 20.0 + ui.spacing().item_spacing.y;
-        let content_h = filtered.len() as f32 * row_h + 4.0;
-        let desired_h = content_h.min(240.0);
+
+        let button_h = ui.spacing().interact_size.y.max(20.0);
+        let spacing = ui.spacing().item_spacing.y;
+        let n = filtered.len() as f32;
+
+        let content_h = n * button_h + (n - 1.0).max(0.0) * spacing;
+
+        let max_rows = 9.0_f32;
+        let max_h = max_rows * button_h + (max_rows - 1.0) * spacing;
+
+        let desired_h = content_h.min(max_h);
+
         ui.set_min_height(desired_h);
 
         egui::ScrollArea::vertical().max_height(desired_h).show(ui, |ui| {
@@ -470,8 +479,8 @@ pub(crate) fn editable_combo(
 
                 let row = ui.add(egui::Button::selectable(pos as i32 == st.sel, egui::RichText::new(disp)).min_size(vec2(220.0, 20.0)));
 
-                if (down || up) && pos as i32 == st.sel {
-                    row.scroll_to_me(None);
+                if (down || up) && pos as i32 == st.sel && !ui.clip_rect().contains_rect(row.rect) {
+                    row.scroll_to_me(Some(if down { egui::Align::Max } else { egui::Align::Min }));
                 }
 
                 if row.clicked() {
