@@ -191,3 +191,30 @@ fn table_filter_autofit_works_through_command_and_header_double_click() {
         }
     }
 }
+
+#[test]
+fn header_double_click_fits_the_text_as_the_grid_draws_it() {
+    // Issue #1316: `@` and `%` are far wider in every real font than the engine's average-glyph
+    // estimate, so AutoFit has to measure with the font the grid draws the cell in.
+    let text = "sarmstrong@example.com %%% @@@";
+    let mut h = harness("A1");
+    h.state_mut().session.execute("range.setValues", json!({"range":"A1", "values":[[text]]})).unwrap();
+    h.run_steps(3);
+    let (pos, _) = edge(&h, false, 0);
+    button(&mut h, pos, true);
+    button(&mut h, pos, false);
+    h.step();
+    button(&mut h, pos, true);
+    button(&mut h, pos, false);
+    h.run_steps(2);
+
+    let app = h.state();
+    let sheet = app.session.active().unwrap().wb.active().unwrap();
+    let font = &app.session.active().unwrap().wb.styles.get(sheet.style_id(gridcraft_engine::core::CellRef::new(0, 0))).font;
+    let id = egui::FontId::new(font.size * 96.0 / 72.0, gridcraft_ui_egui::theme::cell_family(&font.name, font.bold, font.italic));
+    let drawn = h.ctx.fonts_mut(|f| f.layout_no_wrap(text.to_string(), id, egui::Color32::BLACK)).size().x;
+    let estimate = gridcraft_engine::cmd::format::approx_text_width(text, font.size, font.bold);
+    assert!(drawn > estimate + 6.0, "fixture: the drawn text ({drawn}) must be wider than the estimate ({estimate}) plus padding");
+    // Two 2.5 px paddings and the gridline, as the grid lays out the cell.
+    assert!(sheet.col_width(0) >= drawn + 6.0, "column {} is narrower than the drawn text {drawn} + padding", sheet.col_width(0));
+}
