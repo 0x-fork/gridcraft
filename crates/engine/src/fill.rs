@@ -35,6 +35,18 @@ fn lists() -> Vec<Vec<String>> {
     ]
 }
 
+/// The most cells one fill may write: the size cap the fill commands put on their ranges.
+pub const MAX_FILL_CELLS: u64 = 5_000_000;
+
+/// Whether `target` is a shape Excel's AutoFill accepts for `src`: it contains the source and the
+/// source sits in one of its corners. Excel refuses a target that doesn't contain the source
+/// (`2:3` into `A:A`, `H4:H9` into `D:F`) or holds it away from every corner (`H4:H9` into `H:H`).
+pub fn holds_source_in_corner(src: RangeRef, target: RangeRef) -> bool {
+    target.contains_range(&src)
+        && (target.start.row == src.start.row || target.end.row == src.end.row)
+        && (target.start.col == src.start.col || target.end.col == src.end.col)
+}
+
 /// Fills `target` (which contains `src` at one edge) from the pattern in `src`.
 pub fn fill(cx: &mut Ctx, sheet: usize, src: RangeRef, target: RangeRef, mode: FillMode) -> Result<()> {
     let custom = cx.wb.custom_lists.clone();
@@ -46,6 +58,18 @@ pub fn fill(cx: &mut Ctx, sheet: usize, src: RangeRef, target: RangeRef, mode: F
     } else {
         target.end.col > src.end.col || target.start.col == src.start.col
     };
+    // Every source lane writes one cell per step past the source: bound that product, not the
+    // source and target separately (whole rows into whole columns was ~17 billion writes).
+    let (lane_count, steps) = if vertical {
+        let steps = if forward { target.end.row.saturating_sub(src.end.row) } else { src.start.row.saturating_sub(target.start.row) };
+        (src.width(), steps)
+    } else {
+        let steps = if forward { target.end.col.saturating_sub(src.end.col) } else { src.start.col.saturating_sub(target.start.col) };
+        (src.height(), steps)
+    };
+    if u64::from(lane_count).saturating_mul(u64::from(steps)) > MAX_FILL_CELLS {
+        return Err(crate::EngineError::Other("The fill is too large.".into()));
+    }
     let lanes: Vec<u32> = if vertical { (src.start.col..=src.end.col).collect() } else { (src.start.row..=src.end.row).collect() };
     let src_len = if vertical { src.height() } else { src.width() };
     let mut writes: Vec<(CellRef, Option<Cell>)> = Vec::new();
@@ -651,5 +675,43 @@ mod tests {
         let sh = d.wb.active().unwrap();
         let growth: Vec<String> = (1..6).map(|r| crate::display::cell_text(&d.wb, sh, CellRef::new(r, 0))).collect();
         assert_eq!(growth, ["2.5", "1.25", "", "", ""]);
+    }
+
+    #[test]
+    fn autofill_refuses_targets_that_do_not_extend_the_source() {
+        // Whole rows into whole columns once filled every source column down the whole sheet
+        // (~17 billion writes) and aborted the process on a 24-51 GB allocation (fuzz seeds 1064,
+        // 1114, 1775). Excel refuses every one of these shapes.
+        let mut s = crate::Session::new();
+        s.new_workbook();
+        s.execute("range.setValues", serde_json::json!({"range": "A2", "values": [[1, "Item 1"], [2, "Item 2"]]})).unwrap();
+        s.execute("range.setValues", serde_json::json!({"range": "H4", "values": [[10], [20]]})).unwrap();
+        let before = s.doc().unwrap().wb.active().unwrap().cells.len();
+        for (mode, source, target) in [
+            ("series", "2:3", "A:A"),
+            ("alternate", "2:3", "A:A"),
+            ("series", "8:10", "C:E"),
+            ("copy", "24:24", "B:D"),
+            ("values", "H4:H9", "D:F"),
+            ("series", "H4:H9", "H:H"),
+            ("series", "A2:A3", "A1:A5"),
+            ("series", "A2:A6", "A2:A4"),
+            ("series", "B2:B3", "A2:A3"),
+        ] {
+            let r = s.execute("edit.autoFill", serde_json::json!({"mode": mode, "source": source, "target": target}));
+            assert!(r.is_err(), "{source} -> {target} should be refused");
+        }
+        assert_eq!(s.doc().unwrap().wb.active().unwrap().cells.len(), before, "a refused fill writes nothing");
+        // Targets holding the source in a corner still fill, whole rows and diagonal drags included.
+        s.execute("edit.autoFill", serde_json::json!({"source": "2:3", "target": "2:6"})).unwrap();
+        s.execute("edit.autoFill", serde_json::json!({"source": "A2:A3", "target": "A1:A3"})).unwrap();
+        let sh = s.doc().unwrap().wb.active().unwrap();
+        let text = |a: &str| crate::display::cell_text(&s.doc().unwrap().wb, sh, CellRef::parse(a).unwrap());
+        assert_eq!([text("A1"), text("A6"), text("B6")], ["0", "5", "Item 5"]);
+        assert!(holds_source_in_corner(RangeRef::parse("B5").unwrap(), RangeRef::parse("B3:B5").unwrap()));
+        assert!(holds_source_in_corner(RangeRef::parse("A:A").unwrap(), RangeRef::parse("A:C").unwrap()));
+        assert!(holds_source_in_corner(RangeRef::parse("B5:C9").unwrap(), RangeRef::parse("B5:D13").unwrap()));
+        assert!(holds_source_in_corner(RangeRef::parse("B1:B2").unwrap(), RangeRef::parse("A1:B4").unwrap()));
+        assert!(!holds_source_in_corner(RangeRef::parse("A:A").unwrap(), RangeRef::parse("1:1").unwrap()));
     }
 }

@@ -1306,7 +1306,7 @@ fn fill_dir(s: &mut Session, p: &Json, dr: i64, dc: i64) -> Result<Json> {
             None => return Ok(Json::Null),
         }
     }
-    if r.count() > 5_000_000 {
+    if r.count() > crate::fill::MAX_FILL_CELLS {
         return Err(bad("edit.fill", "range too large"));
     }
     // With one row selected, Fill Down copies from the row above (Excel behaviour).
@@ -1342,8 +1342,14 @@ fn auto_fill(s: &mut Session, p: &Json) -> Result<Json> {
         "values" => crate::fill::FillMode::ValuesOnly,
         _ => crate::fill::FillMode::Series,
     };
-    if target.count() > 5_000_000 || src.count() > 5_000_000 {
+    if target.count() > crate::fill::MAX_FILL_CELLS || src.count() > crate::fill::MAX_FILL_CELLS {
         return Err(bad("edit.autoFill", "range too large"));
+    }
+    // Excel refuses a target that doesn't hold the source in a corner. Such targets used to fill
+    // every source lane across the whole target extent: billions of cells for whole rows (`2:3`)
+    // into whole columns (`A:A`).
+    if !crate::fill::holds_source_in_corner(src, target) {
+        return Err(bad("edit.autoFill", "the target must contain the source in one of its corners"));
     }
     edit(s, |cx| {
         crate::fill::fill(cx, sheet, src, target, mode)?;
