@@ -1,6 +1,6 @@
 //! Formulas tab: AutoSum, Insert Function, names, auditing, calculation.
 
-use gridcraft_core::{CellRef, RangeRef};
+use gridcraft_core::{CellError, CellRef, RangeRef, Value};
 use gridcraft_model::{CalcMode, DefinedName, Formula};
 use serde_json::{Value as Json, json};
 
@@ -389,7 +389,9 @@ fn name_manager(s: &mut Session, _: &Json) -> Result<Json> {
         .filter(|n| !n.hidden)
         .map(|n| {
             let sheet = n.scope.unwrap_or(d.wb.active_sheet);
-            let v = gridcraft_calc::evaluate(&d.wb, sheet, CellRef::default(), &n.formula);
+            // parse_name, not evaluate's parse: a name's top-level commas are unions.
+            let v = gridcraft_formula::parse_name(&n.formula)
+                .map_or(Value::Error(CellError::Name), |e| gridcraft_calc::recalc::evaluate_expr(&d.wb, sheet, CellRef::default(), &e));
             json!({"name": n.name, "refersTo": format!("={}", n.formula), "scope": n.scope.and_then(|i| d.wb.sheet(i)).map(|s| s.name.clone()).unwrap_or_else(|| "Workbook".into()), "value": crate::cmd::inspect::value_json(&v), "comment": n.comment})
         })
         .collect();
@@ -632,5 +634,17 @@ mod tests {
         let name = s.doc().unwrap().wb.names.iter().find(|n| n.name == "u").map(|n| n.formula.clone());
         assert_eq!(name.as_deref(), Some("Data!$A$1:$A$2,Data!$C$1:$C$2"));
         assert_eq!(v(&mut s, "E1"), json!(15.0));
+    }
+
+    #[test]
+    fn name_manager_previews_a_name_over_several_ranges() {
+        let mut s = Session::new();
+        s.new_workbook();
+        s.execute("range.setValues", json!({"range": "A1:C2", "values": [[1, 0, 5], [2, 0, 7]]})).unwrap();
+        s.execute("formulas.defineName", json!({"name": "u", "refersTo": "=Sheet1!$A$1:$A$2,Sheet1!$C$1:$C$2"})).unwrap();
+        let list = s.execute("formulas.nameManager", json!({})).unwrap();
+        let u = list.as_array().and_then(|l| l.iter().find(|n| n["name"] == "u")).cloned().unwrap();
+        // The union parses as one, so the preview is what the union gives in a cell, not #NAME?.
+        assert_eq!(u["value"], json!({"error": "#VALUE!"}));
     }
 }
