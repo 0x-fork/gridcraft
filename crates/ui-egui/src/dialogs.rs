@@ -2244,8 +2244,8 @@ fn manage_rules(app: &mut SheetApp, ui: &mut egui::Ui) {
 fn command_search(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool) {
     let (down, up, home, end, pgup, pgdn) = ui.input_mut(|i| {
         (
-            i.count_and_consume_key(egui::Modifiers::NONE, Key::ArrowDown),
-            i.count_and_consume_key(egui::Modifiers::NONE, Key::ArrowUp),
+            i.consume_key(egui::Modifiers::NONE, Key::ArrowDown),
+            i.consume_key(egui::Modifiers::NONE, Key::ArrowUp),
             i.consume_key(egui::Modifiers::CTRL, Key::Home),
             i.consume_key(egui::Modifiers::CTRL, Key::End),
             i.consume_key(egui::Modifiers::NONE, Key::PageUp),
@@ -2272,7 +2272,6 @@ fn command_search(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm
         .collect();
 
     let last = cmds.len().saturating_sub(1);
-    // let page_size = 10;
 
     let row_h = ui.spacing().interact_size.y.max(20.0);
     let row_step = row_h + ui.spacing().item_spacing.y;
@@ -2281,11 +2280,11 @@ fn command_search(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm
 
     let page_size = ((LIST_HEIGHT / row_step).floor() as usize).saturating_sub(1).max(1);
 
-    if down > 0 {
-        d.list_index = d.list_index.saturating_add(down).min(last);
+    if down {
+        d.list_index = (d.list_index + 1).min(last);
     }
-    if up > 0 {
-        d.list_index = d.list_index.saturating_sub(up);
+    if up {
+        d.list_index = d.list_index.saturating_sub(1);
     }
     if pgdn {
         d.list_index = (d.list_index + page_size).min(last);
@@ -2303,11 +2302,12 @@ fn command_search(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm
     d.list_index = d.list_index.min(last);
 
     egui::ScrollArea::vertical().max_height(LIST_HEIGHT).auto_shrink([true, false]).show(ui, |ui| {
+        let scroll_area_width = ui.available_width();
         for (i, (id, label, menu)) in cmds.iter().enumerate() {
-            let r = ui.add(egui::Button::selectable(i == d.list_index, format!("{label}    {menu}")).min_size(vec2(width, 20.0)));
+            let r = ui.add(egui::Button::selectable(i == d.list_index, format!("{label}    {menu}")).min_size(vec2(scroll_area_width, 20.0)));
 
-            if (down > 0 || up > 0 || home || end || pgup || pgdn) && i == d.list_index && !ui.clip_rect().contains_rect(r.rect) {
-                r.scroll_to_me(Some(if down > 0 || end || pgdn { egui::Align::Max } else { egui::Align::Min }));
+            if (down || up || home || end || pgup || pgdn) && i == d.list_index && !ui.clip_rect().contains_rect(r.rect) {
+                r.scroll_to_me(Some(if down || end || pgdn { egui::Align::Max } else { egui::Align::Min }));
             }
 
             if r.clicked() {
