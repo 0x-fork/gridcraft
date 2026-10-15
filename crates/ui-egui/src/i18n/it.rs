@@ -189,7 +189,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Data Table…" => "Tabella dati…",
         "Scenario Manager…" => "Gestione scenari…",
         "Goal Seek…" => "Ricerca obiettivo…",
-        "Forecast\nSheet" => "Foglio\nprevisioni",
+        "Forecast\nSheet" => "Foglio\nprevisione",
         "Spelling" => "Controllo ortografia",
         "Check\nAccessibility" => "Verifica\naccessibilità",
         "Threaded Comments" => "Commenti in thread",
