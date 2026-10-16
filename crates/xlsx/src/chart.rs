@@ -61,12 +61,49 @@ fn group_kind(g: &El) -> Option<ChartKind> {
     })
 }
 
+/// Excel's file notation for "this workbook" in front of a workbook-scoped defined name.
+const THIS_BOOK: &str = "[0]!";
+
+/// A chart reference (`<c:f>`) read from a file → model text: drops a leading `=` and the
+/// `[0]!` in front of workbook-scoped names (`[0]!Sales` → `Sales`), which the formula parser
+/// would take for a structured reference. External books (`[1]Sheet1!$A$1`), quoted sheet
+/// names and string literals are kept as they are.
+pub(crate) fn chart_ref_from_file(text: &str) -> String {
+    let t = text.trim();
+    let t = t.strip_prefix('=').unwrap_or(t);
+    let mut out = String::with_capacity(t.len());
+    let mut quote: Option<char> = None;
+    // The last character kept: `[0]!` only counts at the start or after an operator,
+    // never inside a structured reference (`T[[0]]`) or a longer name.
+    let mut prev: Option<char> = None;
+    let mut i = 0;
+    while let Some(c) = t.get(i..).and_then(|r| r.chars().next()) {
+        let rest = t.get(i..).unwrap_or("");
+        if quote.is_none()
+            && rest.starts_with(THIS_BOOK)
+            && prev.is_none_or(|p| !(p.is_alphanumeric() || "_.\\[]'\"!$#".contains(p)))
+            && rest.get(THIS_BOOK.len()..).and_then(|n| n.chars().next()).is_some_and(|n| n.is_alphabetic() || n == '_' || n == '\\')
+        {
+            i += THIS_BOOK.len();
+            continue;
+        }
+        match (c, quote) {
+            ('"' | '\'', None) => quote = Some(c),
+            (q, Some(open)) if q == open => quote = None,
+            _ => {}
+        }
+        out.push(c);
+        prev = Some(c);
+        i += c.len_utf8();
+    }
+    out
+}
+
 fn data_ref(e: Option<&El>) -> Option<String> {
     let e = e?;
     for k in ["numRef", "strRef", "multiLvlStrRef"] {
         if let Some(f) = e.child(k).and_then(|r| r.child("f")) {
-            let t = f.text.trim();
-            return Some(t.strip_prefix('=').unwrap_or(t).to_string());
+            return Some(chart_ref_from_file(&f.text));
         }
     }
     // Literal values become an array constant.
@@ -84,14 +121,9 @@ fn data_ref(e: Option<&El>) -> Option<String> {
 }
 
 fn read_series(s: &El) -> Series {
-    let name = s.child("tx").and_then(|tx| {
-        if let Some(f) = tx.path(&["strRef", "f"]) {
-            let t = f.text.trim();
-            Some(t.strip_prefix('=').unwrap_or(t).to_string())
-        } else {
-            tx.child("v").map(|v| v.text.clone())
-        }
-    });
+    let name = s
+        .child("tx")
+        .and_then(|tx| tx.path(&["strRef", "f"]).map(|f| chart_ref_from_file(&f.text)).or_else(|| tx.child("v").map(|v| v.text.clone())));
     let sp = s.child("spPr");
     let color = sp
         .and_then(|p| p.child("solidFill"))
@@ -306,6 +338,21 @@ fn is_ref(f: &str) -> bool {
     matches!(gridcraft_formula::parse(f), Ok(Expr::Ref(_)))
 }
 
+/// The name `f` is when it is a bare workbook-scoped defined name seen from sheet `si` (a
+/// sheet-scoped name of the same spelling on `si` wins, as in formulas).
+fn book_name(wb: &Workbook, si: usize, f: &str) -> Option<String> {
+    let Ok(Expr::Name(n)) = gridcraft_formula::parse(f.trim()) else { return None };
+    wb.name(&n, si).is_some_and(|d| d.scope.is_none()).then_some(n)
+}
+
+/// A chart reference for `<c:f>`: Excel writes a workbook-scoped name as `[0]!Name`.
+fn chart_ref_to_file(wb: &Workbook, si: usize, f: &str) -> String {
+    match book_name(wb, si, f) {
+        Some(n) => format!("{THIS_BOOK}{n}"),
+        None => crate::fmla::text_to_file(f),
+    }
+}
+
 fn num_data(tag: &str, f: Option<&str>, wb: &Workbook, si: usize) -> String {
     let f = f.unwrap_or("").trim();
     if f.is_empty() {
@@ -322,7 +369,7 @@ fn num_data(tag: &str, f: Option<&str>, wb: &Workbook, si: usize) -> String {
         let _ = write!(s, "</c:numLit></c:{tag}>");
         return s;
     }
-    let mut s = format!("<c:{tag}><c:numRef><c:f>{}</c:f>", esc(&crate::fmla::text_to_file(f)));
+    let mut s = format!("<c:{tag}><c:numRef><c:f>{}</c:f>", esc(&chart_ref_to_file(wb, si, f)));
     if let Some(vals) = ref_values(wb, si, f) {
         let _ = write!(s, "<c:numCache><c:formatCode>General</c:formatCode><c:ptCount val=\"{}\"/>", vals.len());
         for (i, v) in vals.iter().enumerate() {
@@ -383,7 +430,7 @@ fn str_data(tag: &str, f: &str, wb: &Workbook, si: usize) -> String {
         let _ = write!(s, "</c:strLit></c:{tag}>");
         return s;
     }
-    let mut s = format!("<c:{tag}><c:strRef><c:f>{}</c:f>", esc(&crate::fmla::text_to_file(f)));
+    let mut s = format!("<c:{tag}><c:strRef><c:f>{}</c:f>", esc(&chart_ref_to_file(wb, si, f)));
     if let Some(vals) = ref_values(wb, si, f) {
         let _ = write!(s, "<c:strCache><c:ptCount val=\"{}\"/>", vals.len());
         for (i, v) in vals.iter().enumerate() {
@@ -400,7 +447,7 @@ fn str_data(tag: &str, f: &str, wb: &Workbook, si: usize) -> String {
 fn series_xml(s: &Series, idx: usize, g: G, wb: &Workbook, si: usize) -> String {
     let mut x = format!("<c:ser><c:idx val=\"{idx}\"/><c:order val=\"{idx}\"/>");
     if let Some(n) = &s.name {
-        if is_ref(n) {
+        if is_ref(n) || book_name(wb, si, n).is_some() {
             x.push_str(&str_data("tx", n, wb, si));
         } else {
             let lit = n.trim().strip_prefix('"').and_then(|t| t.strip_suffix('"')).unwrap_or(n);
