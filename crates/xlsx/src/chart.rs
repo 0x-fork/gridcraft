@@ -5,7 +5,7 @@ use std::fmt::Write as _;
 
 use gridcraft_core::Value;
 use gridcraft_formula::{Expr, SheetSel};
-use gridcraft_model::{Chart, ChartKind, Color, LegendPos, LineDash, Series, Trendline, TrendlineKind, Workbook};
+use gridcraft_model::{Chart, ChartKind, Color, DefinedName, LegendPos, LineDash, Series, Trendline, TrendlineKind, Workbook};
 
 use crate::drawing::{dml_color, srgb};
 use crate::xml::{El, esc, num};
@@ -338,19 +338,39 @@ fn is_ref(f: &str) -> bool {
     matches!(gridcraft_formula::parse(f), Ok(Expr::Ref(_)))
 }
 
-/// The name `f` is when it is a bare workbook-scoped defined name seen from sheet `si` (a
-/// sheet-scoped name of the same spelling on `si` wins, as in formulas).
-fn book_name(wb: &Workbook, si: usize, f: &str) -> Option<String> {
+/// A chart reference that is a name: its sheet when qualified (`Sheet1!Sales`), the bare
+/// name, and the definition formulas would find from sheet `si` (none when undefined). `None`
+/// when it isn't a name, or names a sheet the workbook doesn't have.
+fn chart_name<'a>(wb: &'a Workbook, si: usize, f: &str) -> Option<(Option<usize>, String, Option<&'a DefinedName>)> {
     let Ok(Expr::Name(n)) = gridcraft_formula::parse(f.trim()) else { return None };
-    wb.name(&n, si).is_some_and(|d| d.scope.is_none()).then_some(n)
+    match n.split_once('!') {
+        Some((s, bare)) => {
+            let i = wb.sheet_index(s.trim_matches('\''))?;
+            Some((Some(i), bare.to_string(), wb.name(bare, i)))
+        }
+        None => {
+            let def = wb.name(&n, si);
+            Some((None, n, def))
+        }
+    }
 }
 
-/// A chart reference for `<c:f>`: Excel writes a workbook-scoped name as `[0]!Name`.
+/// A chart reference for `<c:f>`. Excel needs a name qualified there: with a bare `Name` it
+/// draws the whole chart blank, with no repair prompt (observed in Excel for Windows,
+/// Microsoft 365). A workbook-scoped name is written `[0]!Name`, as Excel writes it, a
+/// sheet-scoped one `Sheet!Name`; an undefined name gets `[0]!`, as the file it came from had.
 fn chart_ref_to_file(wb: &Workbook, si: usize, f: &str) -> String {
-    match book_name(wb, si, f) {
-        Some(n) => format!("{THIS_BOOK}{n}"),
+    let on_sheet = |i: usize, n: &str| wb.sheet(i).map(|sh| format!("{}!{n}", gridcraft_formula::quote_sheet(&sh.name)));
+    match chart_name(wb, si, f) {
+        Some((Some(i), n, _)) => on_sheet(i, &n).unwrap_or_else(|| crate::fmla::text_to_file(f)),
+        Some((None, n, def)) => def.and_then(|d| d.scope).and_then(|i| on_sheet(i, &n)).unwrap_or_else(|| format!("{THIS_BOOK}{n}")),
         None => crate::fmla::text_to_file(f),
     }
+}
+
+/// A series name that refers to a defined name (as opposed to literal text that parses as one).
+fn is_defined_name(wb: &Workbook, si: usize, f: &str) -> bool {
+    chart_name(wb, si, f).is_some_and(|(_, _, d)| d.is_some())
 }
 
 fn num_data(tag: &str, f: Option<&str>, wb: &Workbook, si: usize) -> String {
@@ -447,7 +467,7 @@ fn str_data(tag: &str, f: &str, wb: &Workbook, si: usize) -> String {
 fn series_xml(s: &Series, idx: usize, g: G, wb: &Workbook, si: usize) -> String {
     let mut x = format!("<c:ser><c:idx val=\"{idx}\"/><c:order val=\"{idx}\"/>");
     if let Some(n) = &s.name {
-        if is_ref(n) || book_name(wb, si, n).is_some() {
+        if is_ref(n) || is_defined_name(wb, si, n) {
             x.push_str(&str_data("tx", n, wb, si));
         } else {
             let lit = n.trim().strip_prefix('"').and_then(|t| t.strip_suffix('"')).unwrap_or(n);

@@ -10,8 +10,8 @@ use serde_json::json;
 
 const TASKS: usize = 6;
 
-/// A plan table, OFFSET names over its structured references (and names built on names), and
-/// a stacked bar chart whose series name those names.
+/// A plan table, OFFSET names over its structured references (and names built on names; one
+/// scoped to the sheet), and a stacked bar chart whose series name those names.
 fn plan() -> Workbook {
     let mut s = Session::new();
     s.new_workbook();
@@ -22,20 +22,23 @@ fn plan() -> Workbook {
     s.execute("range.setValues", json!({"range": "A1", "values": rows})).unwrap();
     let range = format!("A1:D{}", TASKS + 1);
     s.execute("insert.table", json!({"range": range, "header": true, "name": "Plan"})).unwrap();
-    for (name, refers) in [
-        ("TaskNames", "=OFFSET(Plan[[#Headers],[Task]],1,0,COUNTA(Plan[Task]),1)"),
-        ("TaskStart", "=OFFSET(TaskNames,0,1)"),
-        ("TaskDone", "=OFFSET(TaskNames,0,2)"),
-        ("TaskLeft", "=OFFSET(TaskNames,0,3)"),
-        ("LeftTitle", "=Sheet1!$D$1"),
+    for (name, refers, scope) in [
+        ("TaskNames", "=OFFSET(Plan[[#Headers],[Task]],1,0,COUNTA(Plan[Task]),1)", "Workbook"),
+        ("TaskStart", "=OFFSET(TaskNames,0,1)", "Workbook"),
+        ("TaskDone", "=OFFSET(TaskNames,0,2)", "Workbook"),
+        ("TaskLeft", "=OFFSET(TaskNames,0,3)", "Sheet1"),
+        ("LeftTitle", "=Sheet1!$D$1", "Workbook"),
+        ("DoneTitle", "=Sheet1!$C$1", "Sheet1"),
     ] {
-        s.execute("formulas.defineName", json!({"name": name, "refersTo": refers})).unwrap();
+        s.execute("formulas.defineName", json!({"name": name, "refersTo": refers, "scope": scope})).unwrap();
     }
     s.execute("insert.chart", json!({"range": range, "type": "bar", "subtype": "stacked"})).unwrap();
     let mut wb = Workbook::clone(&s.doc().unwrap().wb);
     let chart = &mut wb.sheet_mut(0).unwrap().charts[0];
     assert_eq!(chart.series.len(), 3);
-    for (ser, (name, values)) in chart.series.iter_mut().zip([("Sheet1!$B$1", "TaskStart"), ("Sheet1!$C$1", "TaskDone"), ("LeftTitle", "TaskLeft")]) {
+    for (ser, (name, values)) in
+        chart.series.iter_mut().zip([("Sheet1!$B$1", "TaskStart"), ("Sheet1!DoneTitle", "TaskDone"), ("LeftTitle", "TaskLeft")])
+    {
         ser.name = Some(name.into());
         ser.categories = Some("TaskNames".into());
         ser.values = values.into();
@@ -76,11 +79,14 @@ fn reopen(bytes: &[u8]) -> Workbook {
 #[test]
 fn workbook_names_in_chart_series_resolve_after_save_and_reopen() {
     let bytes = io::save_bytes(&plan(), "plan.xlsx").unwrap();
-    // Written as Excel writes them.
+    // Qualified, as Excel needs them: it draws a chart with a bare name in `<c:f>` blank.
     let xml = chart_xml(&bytes);
-    for f in ["[0]!TaskNames", "[0]!TaskStart", "[0]!TaskDone", "[0]!TaskLeft", "[0]!LeftTitle"] {
+    for f in ["[0]!TaskNames", "[0]!TaskStart", "[0]!TaskDone", "Sheet1!TaskLeft", "[0]!LeftTitle"] {
         assert!(xml.contains(&format!("<c:f>{f}</c:f>")), "{f} missing from {xml}");
     }
+    assert!(!xml.contains("<c:f>Task"), "a bare name in {xml}");
+    // Series names that are defined names stay references, qualified or not.
+    assert!(xml.contains("<c:tx><c:strRef><c:f>Sheet1!DoneTitle</c:f>"), "{xml}");
     // A series name that is a defined name stays a reference, not literal text.
     assert!(!xml.contains("<c:v>LeftTitle</c:v>"));
 
@@ -88,6 +94,7 @@ fn workbook_names_in_chart_series_resolve_after_save_and_reopen() {
     let chart = &wb.sheet(0).unwrap().charts[0];
     assert_eq!(chart.series[0].categories.as_deref(), Some("TaskNames"));
     assert_eq!(chart.series[0].values, "TaskStart");
+    assert_eq!(chart.series[2].values, "Sheet1!TaskLeft");
     assert_eq!(chart.series[2].name.as_deref(), Some("LeftTitle"));
 
     let data = gridcraft_chart::resolve(&wb, 0, chart);
@@ -108,7 +115,7 @@ fn workbook_names_in_chart_series_resolve_after_save_and_reopen() {
 #[test]
 fn a_missing_workbook_name_resolves_to_no_values_without_panicking() {
     let bytes = io::save_bytes(&plan(), "plan.xlsx").unwrap();
-    let bytes = edit_chart(&bytes, |x| x.replace("[0]!TaskLeft", "[0]!NoSuchName"));
+    let bytes = edit_chart(&bytes, |x| x.replace("Sheet1!TaskLeft", "[0]!NoSuchName"));
     let wb = reopen(&bytes);
     let chart = &wb.sheet(0).unwrap().charts[0];
     assert_eq!(chart.series[2].values, "NoSuchName");
