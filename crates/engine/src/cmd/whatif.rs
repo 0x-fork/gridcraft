@@ -867,28 +867,30 @@ fn advanced_filter(s: &mut Session, p: &Json) -> Result<Json> {
     if let Some(t) = str_param(p, "copyTo") {
         let (dsi, dest) = parse_range(wb, t, CMD)?;
         let dest = dest.start;
-        let extract = RangeRef::new(dest, dest.offset_clamped(list.height() as i64 - 1, list.width() as i64 - 1));
-        if dsi == si && extract.intersects(&list) {
-            return Err(EngineError::Other("The extract range can't overlap the list range.".into()));
-        }
         let mut rows_out: Vec<u32> = vec![list.start.row];
         rows_out.extend(keep.iter().filter(|(_, k)| *k).map(|(r, _)| *r));
+        let end =
+            dest.offset(rows_out.len() as i64 - 1, list.width() as i64 - 1).ok_or_else(|| bad(CMD, "the extract range exceeds the worksheet"))?;
+        let out_range = RangeRef::new(dest, end);
+        if dsi == si && out_range.intersects(&list) {
+            return Err(EngineError::Other("The extract range can't overlap the list range.".into()));
+        }
         let cells: Vec<(CellRef, Cell)> = rows_out
             .iter()
             .enumerate()
             .flat_map(|(i, row)| {
-                (list.start.col..=list.end.col).filter_map(move |c| {
+                (list.start.col..=list.end.col).map(move |c| {
                     let src = CellRef::new(*row, c);
-                    let to = dest.offset(i as i64, (c - list.start.col) as i64)?;
+                    // The full output footprint was checked above.
+                    let to = CellRef::new(dest.row + i as u32, dest.col + c - list.start.col);
                     let style = sh.style_id(src);
-                    Some((to, Cell { value: sh.value(src), formula: None, style }))
+                    (to, Cell { value: sh.value(src), formula: None, style })
                 })
             })
             .collect();
-        let out_range = RangeRef::new(dest, dest.offset_clamped(rows_out.len() as i64 - 1, list.width() as i64 - 1));
         edit(s, |cx| {
             let shm = cx.sheet_mut(dsi)?;
-            let old: Vec<CellRef> = shm.cells.iter_range(extract).map(|(c, _)| c).collect();
+            let old: Vec<CellRef> = shm.cells.iter_range(out_range).map(|(c, _)| c).collect();
             for c in &old {
                 shm.remove_cell(*c);
             }
@@ -1315,6 +1317,41 @@ mod tests {
         assert_eq!(r["matched"], 4);
         // Overlap is rejected.
         assert!(s.execute("data.advancedFilter", json!({"range": "A1:B6", "criteria": "H1:I3", "copyTo": "B2"})).is_err());
+    }
+
+    #[test]
+    fn advanced_filter_copy_preserves_cells_beyond_result() {
+        let mut s = s();
+        s.execute("range.setValues", json!({"range": "A1", "values": [["Name", "Score"], ["A", 1], ["B", 2], ["C", 3]]})).unwrap();
+        s.execute("range.setValues", json!({"range": "H1", "values": [["Name"], ["B"]]})).unwrap();
+        s.execute("cell.set", json!({"cell": "K4", "input": "Keep me"})).unwrap();
+        let r = s.execute("data.advancedFilter", json!({"range": "A1:B4", "criteria": "H1:H2", "copyTo": "K1"})).unwrap();
+        assert_eq!(r["range"], "K1:L2");
+        assert_eq!(v(&s, "K2"), Value::from("B"));
+        assert_eq!(v(&s, "K4"), Value::from("Keep me"));
+    }
+
+    #[test]
+    fn advanced_filter_copy_rejects_overflow_without_mutation() {
+        let mut s = s();
+        s.execute("range.setValues", json!({"range": "A1", "values": [["Name", "Score"], ["A", 1]]})).unwrap();
+        s.execute("range.setValues", json!({"range": "H1", "values": [["Name"], ["A"]]})).unwrap();
+        for dest in ["XFD1", "K1048576"] {
+            s.execute("cell.set", json!({"cell": dest, "input": "Keep me"})).unwrap();
+            assert!(s.execute("data.advancedFilter", json!({"range": "A1:B2", "criteria": "H1:H2", "copyTo": dest})).is_err());
+            assert_eq!(v(&s, dest), Value::from("Keep me"));
+        }
+    }
+
+    #[test]
+    fn advanced_filter_copy_allows_output_above_source_when_only_old_clear_area_overlaps() {
+        let mut s = s();
+        s.execute("range.setValues", json!({"range": "C4", "values": [["Name", "Score"], ["A", 1], ["B", 2], ["C", 3]]})).unwrap();
+        s.execute("range.setValues", json!({"range": "H1", "values": [["Name"], ["A"]]})).unwrap();
+        let r = s.execute("data.advancedFilter", json!({"range": "C4:D7", "criteria": "H1:H2", "copyTo": "B1"})).unwrap();
+        assert_eq!(r["range"], "B1:C2");
+        assert_eq!(v(&s, "C4"), Value::from("Name"));
+        assert_eq!(v(&s, "C2"), Value::Number(1.0));
     }
 
     #[test]
