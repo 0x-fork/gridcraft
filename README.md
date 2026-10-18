@@ -10,11 +10,11 @@
 <h1 align="center">GridCraft</h1>
 
 <p align="center">
-  <b>Spreadsheets and data; an open-source, clean-room reimplementation of Microsoft Excel, rebuilt in pure Rust.</b>
+  <b>Spreadsheets and data; an open-source, high-performance modern spreadsheet application, built in pure Rust.</b>
 </p>
 
 <p align="center">
-  A fast, open-source, clean-room take on the Excel workflow. It runs natively on macOS,
+  A fast, open-source, clean-room take on modern spreadsheet workflows. It runs natively on macOS,
   Windows, Linux and BSD, and in the browser via WebAssembly.<br>
   <i>By the ArtCraft team.</i>
 </p>
@@ -78,19 +78,18 @@
 
 ## Why GridCraft
 
-- **Familiar.** Excel's ribbon, formula bar, Name Box, sheet tabs, keyboard shortcuts, fill
-  handle, point-mode formula entry with coloured references, Format Cells, Paste Special,
-  conditional formatting, tables, charts and more. If you know Excel, you already know GridCraft.
+- **Familiar.** Ribbon, formula bar, Name Box, sheet tabs, keyboard shortcuts, fill handle,
+  conditional formatting, tables, charts and more. Everything is right where you expect it.
 - **Compatible.** XLSX is the native format: styles, themes, formulas (including dynamic arrays),
   tables, conditional formats, validation, comments, hyperlinks, charts, pictures, sparklines,
   PivotTables and print settings round-trip. CSV and TSV too.
-  Excel 97-2003 `.xls` workbooks open with their values, formulas and number formats (formatting and objects not yet).
+  Legacy 97-2003 `.xls` workbooks open with their values, formulas and number formats (formatting and objects not yet).
   [XLSB worksheet data can be imported](docs/xlsb-import.md), using saved values instead of formulas.
   [ODS worksheet data can be imported](docs/ods-import.md), using saved values instead of formulas.
   [Static pictures can live inside cells](docs/cell-pictures.md), fitting their size and moving with the data.
 - **Capable.** A dependency-graph calculation engine with dynamic arrays and spilling,
   500+ worksheet functions plus LET, LAMBDA, MAP, REDUCE, SCAN, BYROW, BYCOL and MAKEARRAY,
-  structured table references, Excel's full number-format language, sort and AutoFilter,
+  structured table references, Comprehensive number-format language, sort and AutoFilter,
   Flash Fill, data validation, outlining and subtotals.
 - **Fast.** Copy-on-write workbooks (undo snapshots are nearly free), incremental recalculation,
   and a virtualised grid that only lays out what's on screen.
@@ -187,7 +186,7 @@ egui frontend is a separate crate, so the UI can be swapped without touching the
 | L2 | `model` (workbook, sheets, copy-on-write cells, styles, tables, charts…) · `calc` (dependency graph, evaluator, dynamic arrays) · `xlsx` (XLSX, CSV, plus XLSB and ODS data import) |
 | L3 | `chart` (toolkit-free chart layout and rendering) |
 | L5 | `engine` (session, commands, history, clipboard, fill, sort, filter, file I/O) |
-| L6 | `ui-egui` (Excel-style UI, control channel) · `mcp` (MCP server) |
+| L6 | `ui-egui` (spreadsheet UI, control channel) · `mcp` (MCP server) |
 | L7 | `apps/gridcraft`, `apps/gridcraft-cli`, `apps/gridcraft-web` |
 
 - **Contributor and agent rules** (clean-room, asset policy, never-crash, quality gates): [`AGENTS.md`](AGENTS.md)
@@ -197,9 +196,9 @@ egui frontend is a separate crate, so the UI can be swapped without touching the
 ## Roadmap
 
 GridCraft is in **alpha**: the core workflow works end to end, but depth, fidelity and file
-compatibility are still rough. It covers 89% of the Excel ribbon commands in our catalog
-([`docs/parity-checklist.md`](docs/parity-checklist.md)) and 513 of Excel's 523 worksheet functions
-([`docs/function-parity.md`](docs/function-parity.md)); weighted by what Excel users rely on, we
+compatibility are still rough. It covers 89% of standard ribbon commands in our catalog
+([`docs/parity-checklist.md`](docs/parity-checklist.md)) and 513 standard worksheet functions
+([`docs/function-parity.md`](docs/function-parity.md)); weighted by what spreadsheet users rely on, we
 estimate it is about 50% ready for real work. Next up: XLSX fidelity on real-world files, very large
 workbooks and multi-threaded recalc, chart depth, text in every script, and `.xls` import. Stage,
 numbers and estimates are in [ROADMAP.md](ROADMAP.md); the ranked work list is [`docs/gaps.md`](docs/gaps.md).
@@ -236,7 +235,7 @@ bring back a crash in some Intel UHD Graphics drivers (`igvk64.dll`, #120). The 
 web backend defaults are unchanged.
 
 **If the app is slow on an older Windows PC, or DirectX 12 can't start:** when DirectX 12 finds no
-graphics card with a driver for it, it only offers Microsoft's software renderer, which draws every
+graphics card with a driver for it, it only offers the built-in software renderer, which draws every
 frame on the processor. In that case GridCraft uses OpenGL instead, without setting anything; if
 the first renderer fails to start, it tries the other one once. The log file records the choice
 (lines starting with `graphics:`). `WGPU_BACKEND` still overrides it (and then nothing else is
@@ -333,8 +332,6 @@ The ArtCraft name, wordmark and logos in [`docs/brand/`](docs/brand/) are tradem
 ArtCraft Team and are not covered by this license. They may be used only unmodified, and only as
 part of this repository and GridCraft, under [`docs/brand/LICENSE-brand.txt`](docs/brand/LICENSE-brand.txt).
 Forks and modified versions must remove them.
-
-<sub>Microsoft, Excel and Microsoft 365 are trademarks or registered trademarks of Microsoft Corporation in the United States and/or other countries. GridCraft is an independent, open-source project and is not affiliated with, sponsored by or endorsed by Microsoft Corporation; these names are used only to describe the workflows it is compatible with.</sub>
 
 <br>
 
