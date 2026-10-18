@@ -2020,7 +2020,7 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                 return;
             }
             let c = geo.col_at(sh, p.x);
-            if point_header(app, wb, sh, RangeRef::cols(c, c), mods.shift, mods.ctrl) {
+            if point_header(app, wb, sh, RangeRef::cols(c, c), mods.shift, mods.command) {
                 return;
             }
             if resp.drag_started()
@@ -2043,7 +2043,7 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                 return;
             }
             let r = geo.row_at(sh, p.y);
-            if point_header(app, wb, sh, RangeRef::rows(r, r), mods.shift, mods.ctrl) {
+            if point_header(app, wb, sh, RangeRef::rows(r, r), mods.shift, mods.command) {
                 return;
             }
             let range = if mods.shift { RangeRef::rows(sel.anchor.row.min(r), sel.anchor.row.max(r)) } else { RangeRef::rows(r, r) };
@@ -2337,10 +2337,16 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
 /// Point mode on a header: inserts a whole-row or whole-column reference instead of selecting.
 fn point_header(app: &mut SheetApp, wb: &Workbook, sh: &Sheet, range: RangeRef, extend: bool, add: bool) -> bool {
     let Some(ed) = app.editor.as_mut().filter(|ed| ed.can_point()) else { return false };
+    let edit_sheet = ed.sheet;
+    let active_sheet = wb.active_sheet;
     let range = if extend {
         ed.point
             .and_then(|point| crate::editor::formula_refs(&ed.text).into_iter().find(|(start, end, ..)| (*start, *end) == point))
-            .and_then(|(_, _, previous, _, _)| {
+            .and_then(|(_, _, previous, previous_sheet, _)| {
+                let previous_sheet = previous_sheet.as_deref().map(|name| wb.sheet_index(name)).unwrap_or(Some(edit_sheet));
+                if previous_sheet != Some(active_sheet) {
+                    return None;
+                }
                 if range.is_full_cols() && previous.is_full_cols() {
                     Some(RangeRef::cols(previous.start.col.min(range.start.col), previous.end.col.max(range.end.col)))
                 } else if range.is_full_rows() && previous.is_full_rows() {

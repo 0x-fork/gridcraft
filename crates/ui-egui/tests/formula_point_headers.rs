@@ -96,12 +96,12 @@ fn shift_selects_a_contiguous_column_range_while_editing_a_formula() {
 }
 
 #[test]
-fn ctrl_selects_discontiguous_columns_while_editing_a_formula() {
+fn command_selects_discontiguous_columns_while_editing_a_formula() {
     let mut h = harness();
     let first = header_center(&h, false, 2);
     click(&mut h, first);
     let second = header_center(&h, false, 4);
-    click_with_modifiers(&mut h, second, Modifiers::CTRL);
+    click_with_modifiers(&mut h, second, Modifiers::COMMAND);
     let app = h.state();
     let text = app.editor.as_ref().map_or("", |ed| ed.text.as_str());
     assert_eq!(text, "=SUM(C:C,E:E");
@@ -122,14 +122,54 @@ fn shift_selects_a_contiguous_row_range_while_editing_a_formula() {
 }
 
 #[test]
-fn ctrl_selects_discontiguous_rows_while_editing_a_formula() {
+fn command_selects_discontiguous_rows_while_editing_a_formula() {
     let mut h = harness();
     let first = header_center(&h, true, 3);
     click(&mut h, first);
     let second = header_center(&h, true, 5);
-    click_with_modifiers(&mut h, second, Modifiers::CTRL);
+    click_with_modifiers(&mut h, second, Modifiers::COMMAND);
     let app = h.state();
     let text = app.editor.as_ref().map_or("", |ed| ed.text.as_str());
     assert_eq!(text, "=SUM(4:4,6:6");
     assert_eq!(gridcraft_ui_egui::editor::formula_refs(text).iter().map(|r| r.2.a1()).collect::<Vec<_>>(), ["4:4", "6:6"]);
+}
+
+#[test]
+fn shift_does_not_extend_a_column_reference_across_sheets() {
+    let mut h = harness();
+    h.state_mut().session.execute("home.insertSheet", json!({"name": "Other sheet"})).unwrap();
+    h.state_mut().session.execute("sheet.activate", json!({"sheet": "Sheet1"})).unwrap();
+    h.run_steps(2);
+    let first = header_center(&h, false, 2);
+    click(&mut h, first);
+    h.state_mut().session.execute("sheet.activate", json!({"sheet": "Other sheet"})).unwrap();
+    h.run_steps(2);
+    let second = header_center(&h, false, 4);
+    click_with_modifiers(&mut h, second, Modifiers::SHIFT);
+    let text = h.state().editor.as_ref().map_or("", |ed| ed.text.as_str());
+    assert_eq!(text, "=SUM('Other sheet'!E:E");
+    assert_eq!(
+        gridcraft_ui_egui::editor::formula_refs(text).iter().map(|r| (r.2.a1(), r.3.clone())).collect::<Vec<_>>(),
+        [("E:E".into(), Some("Other sheet".into())),]
+    );
+}
+
+#[test]
+fn shift_does_not_extend_a_row_reference_across_sheets() {
+    let mut h = harness();
+    h.state_mut().session.execute("home.insertSheet", json!({"name": "Other sheet"})).unwrap();
+    h.state_mut().session.execute("sheet.activate", json!({"sheet": "Sheet1"})).unwrap();
+    h.run_steps(2);
+    let first = header_center(&h, true, 3);
+    click(&mut h, first);
+    h.state_mut().session.execute("sheet.activate", json!({"sheet": "Other sheet"})).unwrap();
+    h.run_steps(2);
+    let second = header_center(&h, true, 5);
+    click_with_modifiers(&mut h, second, Modifiers::SHIFT);
+    let text = h.state().editor.as_ref().map_or("", |ed| ed.text.as_str());
+    assert_eq!(text, "=SUM('Other sheet'!6:6");
+    assert_eq!(
+        gridcraft_ui_egui::editor::formula_refs(text).iter().map(|r| (r.2.a1(), r.3.clone())).collect::<Vec<_>>(),
+        [("6:6".into(), Some("Other sheet".into())),]
+    );
 }
