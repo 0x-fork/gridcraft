@@ -79,6 +79,7 @@
 ## Why GridCraft
 
 - **Familiar.** Ribbon, formula bar, Name Box, sheet tabs, keyboard shortcuts, fill handle,
+  point-mode formula entry with coloured references, Format Cells, Paste Special,
   conditional formatting, tables, charts and more. Everything is right where you expect it.
 - **Compatible.** XLSX is the native format: styles, themes, formulas (including dynamic arrays),
   tables, conditional formats, validation, comments, hyperlinks, charts, pictures, sparklines,
@@ -89,7 +90,7 @@
   [Static pictures can live inside cells](docs/cell-pictures.md), fitting their size and moving with the data.
 - **Capable.** A dependency-graph calculation engine with dynamic arrays and spilling,
   500+ worksheet functions plus LET, LAMBDA, MAP, REDUCE, SCAN, BYROW, BYCOL and MAKEARRAY,
-  structured table references, Comprehensive number-format language, sort and AutoFilter,
+  structured table references, a comprehensive number-format language, sort and AutoFilter,
   Flash Fill, data validation, outlining and subtotals.
 - **Fast.** Copy-on-write workbooks (undo snapshots are nearly free), incremental recalculation,
   and a virtualised grid that only lays out what's on screen.
@@ -198,7 +199,7 @@ egui frontend is a separate crate, so the UI can be swapped without touching the
 GridCraft is in **alpha**: the core workflow works end to end, but depth, fidelity and file
 compatibility are still rough. It covers 89% of standard ribbon commands in our catalog
 ([`docs/parity-checklist.md`](docs/parity-checklist.md)) and 513 standard worksheet functions
-([`docs/function-parity.md`](docs/function-parity.md)); weighted by what spreadsheet users rely on, we
+([`docs/function-parity.md`](docs/function-parity.md)); this is a parity inventory, not a count of working implementations. Weighted by what spreadsheet users rely on, we
 estimate it is about 50% ready for real work. Next up: XLSX fidelity on real-world files, very large
 workbooks and multi-threaded recalc, chart depth, text in every script, and `.xls` import. Stage,
 numbers and estimates are in [ROADMAP.md](ROADMAP.md); the ranked work list is [`docs/gaps.md`](docs/gaps.md).
@@ -235,7 +236,7 @@ bring back a crash in some Intel UHD Graphics drivers (`igvk64.dll`, #120). The 
 web backend defaults are unchanged.
 
 **If the app is slow on an older Windows PC, or DirectX 12 can't start:** when DirectX 12 finds no
-graphics card with a driver for it, it only offers the built-in software renderer, which draws every
+graphics card with a driver for it, it only offers the Windows-provided software renderer, which draws every
 frame on the processor. In that case GridCraft uses OpenGL instead, without setting anything; if
 the first renderer fails to start, it tries the other one once. The log file records the choice
 (lines starting with `graphics:`). `WGPU_BACKEND` still overrides it (and then nothing else is
