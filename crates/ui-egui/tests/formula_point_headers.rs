@@ -52,6 +52,8 @@ fn column_header_click_inserts_a_column_reference() {
     let app = h.state();
     assert_eq!(app.editor.as_ref().map(|e| e.text.as_str()), Some("=SUM(C:C"));
     assert_eq!(app.session.active().unwrap().selection.current().a1(), "F8");
+    let text = app.editor.as_ref().map_or("", |ed| ed.text.as_str());
+    assert_eq!(gridcraft_ui_egui::editor::formula_refs(text).first().map(|r| r.2.a1()).as_deref(), Some("C:C"));
 }
 
 #[test]
@@ -62,6 +64,8 @@ fn row_header_click_inserts_a_row_reference() {
     let app = h.state();
     assert_eq!(app.editor.as_ref().map(|e| e.text.as_str()), Some("=SUM(4:4"));
     assert_eq!(app.session.active().unwrap().selection.current().a1(), "F8");
+    let text = app.editor.as_ref().map_or("", |ed| ed.text.as_str());
+    assert_eq!(gridcraft_ui_egui::editor::formula_refs(text).first().map(|r| r.2.a1()).as_deref(), Some("4:4"));
 }
 
 #[test]
