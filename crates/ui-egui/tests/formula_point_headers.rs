@@ -35,13 +35,17 @@ fn header_center(h: &egui_kittest::Harness<'_, SheetApp>, rows: bool, index: u32
 }
 
 fn click(h: &mut egui_kittest::Harness<'_, SheetApp>, pos: Pos2) {
+    click_with_modifiers(h, pos, Modifiers::NONE);
+}
+
+fn click_with_modifiers(h: &mut egui_kittest::Harness<'_, SheetApp>, pos: Pos2, modifiers: Modifiers) {
+    h.input_mut().events.push(Event::ModifiersChanged(modifiers));
     for pressed in [true, false] {
-        h.input_mut()
-            .events
-            .extend([Event::PointerMoved(pos), Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE }]);
+        h.input_mut().events.extend([Event::PointerMoved(pos), Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers }]);
         h.step();
     }
     h.run_steps(2);
+    h.input_mut().events.push(Event::ModifiersChanged(Modifiers::NONE));
 }
 
 #[test]
@@ -76,4 +80,56 @@ fn a_second_header_click_replaces_the_pointed_reference() {
     let second = header_center(&h, false, 4);
     click(&mut h, second);
     assert_eq!(h.state().editor.as_ref().map(|e| e.text.as_str()), Some("=SUM(E:E"));
+}
+
+#[test]
+fn shift_selects_a_contiguous_column_range_while_editing_a_formula() {
+    let mut h = harness();
+    let first = header_center(&h, false, 2);
+    click(&mut h, first);
+    let second = header_center(&h, false, 4);
+    click_with_modifiers(&mut h, second, Modifiers::SHIFT);
+    let app = h.state();
+    let text = app.editor.as_ref().map_or("", |ed| ed.text.as_str());
+    assert_eq!(text, "=SUM(C:E");
+    assert_eq!(gridcraft_ui_egui::editor::formula_refs(text).iter().map(|r| r.2.a1()).collect::<Vec<_>>(), ["C:E"]);
+}
+
+#[test]
+fn ctrl_selects_discontiguous_columns_while_editing_a_formula() {
+    let mut h = harness();
+    let first = header_center(&h, false, 2);
+    click(&mut h, first);
+    let second = header_center(&h, false, 4);
+    click_with_modifiers(&mut h, second, Modifiers::CTRL);
+    let app = h.state();
+    let text = app.editor.as_ref().map_or("", |ed| ed.text.as_str());
+    assert_eq!(text, "=SUM(C:C,E:E");
+    assert_eq!(gridcraft_ui_egui::editor::formula_refs(text).iter().map(|r| r.2.a1()).collect::<Vec<_>>(), ["C:C", "E:E"]);
+}
+
+#[test]
+fn shift_selects_a_contiguous_row_range_while_editing_a_formula() {
+    let mut h = harness();
+    let first = header_center(&h, true, 3);
+    click(&mut h, first);
+    let second = header_center(&h, true, 5);
+    click_with_modifiers(&mut h, second, Modifiers::SHIFT);
+    let app = h.state();
+    let text = app.editor.as_ref().map_or("", |ed| ed.text.as_str());
+    assert_eq!(text, "=SUM(4:6");
+    assert_eq!(gridcraft_ui_egui::editor::formula_refs(text).iter().map(|r| r.2.a1()).collect::<Vec<_>>(), ["4:6"]);
+}
+
+#[test]
+fn ctrl_selects_discontiguous_rows_while_editing_a_formula() {
+    let mut h = harness();
+    let first = header_center(&h, true, 3);
+    click(&mut h, first);
+    let second = header_center(&h, true, 5);
+    click_with_modifiers(&mut h, second, Modifiers::CTRL);
+    let app = h.state();
+    let text = app.editor.as_ref().map_or("", |ed| ed.text.as_str());
+    assert_eq!(text, "=SUM(4:4,6:6");
+    assert_eq!(gridcraft_ui_egui::editor::formula_refs(text).iter().map(|r| r.2.a1()).collect::<Vec<_>>(), ["4:4", "6:6"]);
 }

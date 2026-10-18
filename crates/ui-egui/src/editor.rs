@@ -107,6 +107,23 @@ impl EditState {
         self.sync_caret = true;
     }
 
+    /// Adds a reference to the current point-mode union, keeping earlier references intact.
+    pub fn insert_ref_union(&mut self, r: &str, separator: char) {
+        let caret_b = self.byte_caret();
+        if !self.point.is_some_and(|(_, end)| end == caret_b) {
+            self.insert_ref(r);
+            return;
+        }
+        let (Some(before), Some(after)) = (self.text.get(..caret_b), self.text.get(caret_b..)) else { return };
+        let start = caret_b + separator.len_utf8();
+        let end = start + r.len();
+        self.text = format!("{before}{separator}{r}{after}");
+        self.point = Some((start, end));
+        self.caret = self.text.get(..end).map(|s| s.chars().count()).unwrap_or(0);
+        self.caret_to_end = false;
+        self.sync_caret = true;
+    }
+
     /// Updates function autocomplete for the word before the caret.
     pub fn update_autocomplete(&mut self, names: &[String]) {
         self.autocomplete.clear();
@@ -348,5 +365,16 @@ mod tests {
         assert_eq!(refs[2].2.a1(), "D:E");
         assert_eq!(refs[3].2.a1(), "7:8");
         assert_eq!(refs[3].3.as_deref(), Some("Sheet2"));
+    }
+
+    #[test]
+    fn inserting_a_union_keeps_each_reference_separately_pointed() {
+        let mut edit = EditState::new(0, CellRef::new(0, 0), "=SUM(".into(), true, false);
+        edit.insert_ref("C:C");
+        edit.insert_ref_union("E:E", ',');
+        assert_eq!(edit.text, "=SUM(C:C,E:E");
+        assert_eq!(formula_refs(&edit.text).iter().map(|r| r.2.a1()).collect::<Vec<_>>(), ["C:C", "E:E"]);
+        assert_eq!(edit.point, Some((9, 12)));
+        assert!(edit.can_point());
     }
 }
