@@ -133,6 +133,26 @@ fn file_options_opens_the_options_page_and_pages_are_reachable_by_command() {
 }
 
 #[test]
+fn translated_options_headings_show_no_context_prefix() {
+    for (code, headings, prefixed) in [
+        ("fr", ["Général", "Enregistrer"], ["Options|Général", "Options|Enregistrer"]),
+        ("sr", ["Opšte", "Sačuvaj"], ["Opcije|Opšte", "Opcije|Sačuvaj"]),
+    ] {
+        let mut h = harness(Services::default());
+        h.state_mut().run("app.language.set", serde_json::json!({"language": code})).unwrap();
+        h.state_mut().run("file.options", serde_json::json!({})).unwrap();
+        h.run_steps(3);
+        assert_eq!(page(&h), Some("options"));
+        for heading in headings {
+            assert!(h.query_all_by_label(heading).next().is_some(), "{code}: no {heading} heading");
+        }
+        for label in prefixed {
+            assert!(h.query_by_label(label).is_none(), "{code}: {label} shows its context");
+        }
+    }
+}
+
+#[test]
 fn export_as_pdf_is_delivered_as_a_download() {
     let files = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
     let capture = files.clone();
