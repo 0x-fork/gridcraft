@@ -49,10 +49,16 @@ fn err(e: CellError) -> Ev {
     Ev::V(Value::Error(e))
 }
 
+/// LAMBDA calls that one formula may have in progress at once, counted the same way on every build.
+/// The next call answers `#NUM!`. A countdown from 131, the deepest that `MAX_DEPTH` allows, has 132
+/// calls in progress, so it still runs.
+const MAX_LAMBDA_CALLS: usize = 140;
+
 /// Native stack, in bytes, that one formula's evaluation may use below its first `eval`. Past it,
-/// `eval` answers `#NUM!`. One level of `MAX_DEPTH` can take several stack frames. The Windows main
-/// thread and the web build have 1 MiB of stack.
-const STACK_BUDGET: usize = 512 * 1024;
+/// `eval` answers `#NUM!`. It guards the stack and leaves 128 KiB of a 1 MiB thread for the frames
+/// above the formula. A cell that another cell's formula computes on demand gets its own `Evaluator`,
+/// which starts its own budget.
+const STACK_BUDGET: usize = 896 * 1024;
 
 /// The address of a local variable, which shows how far down the native stack this call is.
 #[inline(always)]
@@ -96,6 +102,8 @@ pub struct Evaluator<'h> {
     pub at: CellRef,
     env: Vec<(String, Ev)>,
     depth: usize,
+    /// LAMBDA calls in progress.
+    calls: usize,
     /// `stack_position()` at the outermost `eval`.
     stack_top: usize,
 }
@@ -135,14 +143,22 @@ impl Ctx for FnCtx<'_, '_> {
                 _ => None,
             })
             .collect();
-        let mut ev = Evaluator { host: &mut *self.ev.host, sheet: area.sheet, at, env, depth: self.ev.depth, stack_top: self.ev.stack_top };
+        let mut ev = Evaluator {
+            host: &mut *self.ev.host,
+            sheet: area.sheet,
+            at,
+            env,
+            depth: self.ev.depth,
+            calls: self.ev.calls,
+            stack_top: self.ev.stack_top,
+        };
         Some(matches!(ev.value(&shifted).scalar().to_bool(), Ok(true)))
     }
 }
 
 impl<'h> Evaluator<'h> {
     pub fn new(host: &'h mut dyn Host, sheet: usize, at: CellRef) -> Self {
-        Evaluator { host, sheet, at, env: Vec::new(), depth: 0, stack_top: 0 }
+        Evaluator { host, sheet, at, env: Vec::new(), depth: 0, calls: 0, stack_top: 0 }
     }
 
     /// Evaluates to a value (references are dereferenced; multi-cell → array).
@@ -963,10 +979,15 @@ impl<'h> Evaluator<'h> {
     }
 
     fn call_lambda_values(&mut self, l: &Lambda, bound: Vec<(String, Ev)>) -> Ev {
+        if self.calls >= MAX_LAMBDA_CALLS {
+            return err(CellError::Num);
+        }
+        self.calls += 1;
         let saved = std::mem::replace(&mut self.env, l.env.clone());
         self.env.extend(bound);
         let r = self.eval(&l.body);
         self.env = saved;
+        self.calls -= 1;
         r
     }
 
