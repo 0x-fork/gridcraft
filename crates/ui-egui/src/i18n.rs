@@ -683,6 +683,24 @@ mod tests {
     }
 
     #[test]
+    fn translations_never_show_the_context_prefix() {
+        // `tr` returns a found translation as it is, so a catalog that keeps `context|` in its
+        // value shows it on screen (File › Options read "Options|Général" in French).
+        for language in Language::ALL {
+            for (english, _) in JAPANESE {
+                let shown = language.tr(english);
+                assert!(!shown.contains('|'), "{} shows a context prefix for {english}: {shown}", language.code());
+            }
+        }
+        assert_eq!(Language::Fr.tr("Options|General"), "Général");
+        assert_eq!(Language::Fr.tr("Options|Save"), "Enregistrer");
+        assert_eq!(Language::Fr.tr("Sheet Options|View"), "Affichage");
+        assert_eq!(Language::Sr.tr("Options|General"), "Opšte");
+        assert_eq!(Language::Sr.tr("Options|Save"), "Sačuvaj");
+        assert_eq!(Language::Sr.tr("Sheet Options|View"), "Prikaz");
+    }
+
+    #[test]
     fn unknown_saved_language_keeps_the_other_preferences() {
         let ui: crate::UiState = serde_json::from_str(r#"{"dark": true, "language": "xx"}"#).unwrap();
         assert!(ui.dark);
