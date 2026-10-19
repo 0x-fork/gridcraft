@@ -591,6 +591,19 @@ fn let_lambda() {
 }
 
 #[test]
+fn let_lambda_names_ignore_case_in_any_script() {
+    let mut t = T::new();
+    t.set("A1", "=LET(dług,100,DŁUG*2)");
+    assert_eq!(t.num("A1"), 200.0);
+    t.set("A3", "=LAMBDA(ćma,ĆMA+1)(1)");
+    assert_eq!(t.num("A3"), 2.0);
+    t.set("A4", "=LET(ŻAR,LAMBDA(x,x*3),żar(2))");
+    assert_eq!(t.num("A4"), 6.0);
+    t.set("A5", "=LET(λ,LAMBDA(x,x+1),SUM(MAP({1,2},Λ)))");
+    assert_eq!(t.num("A5"), 5.0);
+}
+
+#[test]
 fn functions_given_by_name() {
     let mut t = T::new();
     for (i, (k, v)) in [("a", 1), ("b", -2), ("a", 3)].iter().enumerate() {
