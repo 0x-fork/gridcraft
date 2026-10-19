@@ -55,8 +55,17 @@ pub fn open_bytes(name: &str, bytes: &[u8]) -> Result<(Workbook, Vec<String>)> {
 /// [`open_bytes`], first decrypting a password-protected workbook with `password`. Errors never
 /// quote the password.
 pub fn open_bytes_with_password(name: &str, bytes: &[u8], password: Option<&str>) -> Result<(Workbook, Vec<String>)> {
+    open_bytes_with(name, bytes, password, false)
+}
+
+/// [`open_bytes_with_password`], and with `csv_as_text` a CSV/TSV/TXT file keeps every field as
+/// the text it holds, with no number, date or boolean conversion (identifiers such as GTINs, SKUs
+/// and ZIP codes survive). It does not apply to other formats.
+pub fn open_bytes_with(name: &str, bytes: &[u8], password: Option<&str>, csv_as_text: bool) -> Result<(Workbook, Vec<String>)> {
     if gridcraft_xlsx::sniff(bytes) != gridcraft_xlsx::Format::Encrypted {
-        return open_plain(name, bytes);
+        let (mut wb, warnings) = open_plain(name, bytes, csv_as_text)?;
+        fit_imported_rows(&mut wb);
+        return Ok((wb, warnings));
     }
     // A scheme no password opens is said straight away, rather than after asking for one.
     let decrypt_error = |e: gridcraft_xlsx::DecryptError| EngineError::Other(decrypt_message(name, e));
@@ -68,9 +77,34 @@ pub fn open_bytes_with_password(name: &str, bytes: &[u8], password: Option<&str>
     if gridcraft_xlsx::sniff(&plain) == gridcraft_xlsx::Format::Encrypted {
         return Err(EngineError::Other(format!("We can't open '{name}': the encrypted file is damaged (it holds another encrypted file).")));
     }
-    let (wb, mut warnings) = open_plain(name, &plain)?;
+    let (mut wb, mut warnings) = open_plain(name, &plain, csv_as_text)?;
+    fit_imported_rows(&mut wb);
     warnings.insert(0, DECRYPTED_NOTICE.into());
     Ok((wb, warnings))
+}
+
+/// Excel auto-fits rows to their tallest font when opening a file: rows without a user-set
+/// height grow to fit their content. Rows the file made taller keep their height — our
+/// line-height estimate can differ from Excel's, and shrinking files that already look
+/// right would be a visible regression. Custom-height rows are left alone entirely.
+fn fit_imported_rows(wb: &mut Workbook) {
+    for si in 0..wb.sheets.len() {
+        let Some(sh) = wb.sheet(si) else { continue };
+        let mut rows: Vec<u32> = sh.cells.iter().map(|(c, _)| c.row).collect();
+        rows.sort_unstable();
+        rows.dedup();
+        for row in rows {
+            let before = wb.sheet(si).and_then(|sh| sh.rows.get(&row)).and_then(|i| i.size);
+            crate::cmd::auto_row_height(wb, si, row);
+            let Some(before) = before else { continue };
+            let after = wb.sheet(si).and_then(|sh| sh.rows.get(&row)).and_then(|i| i.size);
+            if after.is_none_or(|a| before > a + 0.5)
+                && let Some(sh) = wb.sheet_mut(si)
+            {
+                sh.rows.entry(row).or_default().size = Some(before);
+            }
+        }
+    }
 }
 
 /// What to tell the user when an encrypted workbook can't be decrypted. Never quotes the password.
@@ -85,7 +119,7 @@ fn decrypt_message(name: &str, e: gridcraft_xlsx::DecryptError) -> String {
 }
 
 /// Parses bytes that aren't encrypted.
-fn open_plain(name: &str, bytes: &[u8]) -> Result<(Workbook, Vec<String>)> {
+fn open_plain(name: &str, bytes: &[u8], csv_as_text: bool) -> Result<(Workbook, Vec<String>)> {
     let kind = FileKind::from_path(name);
     let sniffed = gridcraft_xlsx::sniff(bytes);
     if sniffed == gridcraft_xlsx::Format::Xls {
@@ -102,6 +136,8 @@ fn open_plain(name: &str, bytes: &[u8]) -> Result<(Workbook, Vec<String>)> {
     let import = match sniffed {
         gridcraft_xlsx::Format::Ods => Some(FileKind::Ods),
         gridcraft_xlsx::Format::Xlsb => Some(FileKind::Xlsb),
+        // An XLSX package is never read as ODS/XLSB just because of its name.
+        gridcraft_xlsx::Format::Xlsx => None,
         _ => kind.filter(|k| matches!(k, FileKind::Ods | FileKind::Xlsb)),
     };
     if let Some(import) = import {
@@ -109,7 +145,8 @@ fn open_plain(name: &str, bytes: &[u8]) -> Result<(Workbook, Vec<String>)> {
         let (wb, report) = read(bytes).map_err(|e| EngineError::Other(format!("We can't import '{name}': {e}")))?;
         return Ok((wb, report.warnings));
     }
-    if sniffed == gridcraft_xlsx::Format::Xlsx || kind == Some(FileKind::Xlsx) {
+    // Text named `.xlsx` is read as text.
+    if sniffed == gridcraft_xlsx::Format::Xlsx || (kind == Some(FileKind::Xlsx) && sniffed != gridcraft_xlsx::Format::Csv) {
         let (wb, report) = gridcraft_xlsx::read_xlsx(bytes).map_err(|e| EngineError::Other(format!("We can't open '{name}': {e}")))?;
         return Ok((wb, report.warnings));
     }
@@ -123,7 +160,7 @@ fn open_plain(name: &str, bytes: &[u8]) -> Result<(Workbook, Vec<String>)> {
             Ok((wb, vec![]))
         }
         Some(FileKind::Tsv) => {
-            let opts = gridcraft_xlsx::CsvOptions { delimiter: b'\t', ..Default::default() };
+            let opts = gridcraft_xlsx::CsvOptions { delimiter: b'\t', parse_values: !csv_as_text, ..Default::default() };
             let mut wb = gridcraft_xlsx::read_csv(bytes, &opts).map_err(|e| EngineError::Other(e.to_string()))?;
             // Tab is what makes it a .tsv/.txt; saved as .csv it gets the CSV default.
             wb.csv_delimiter = None;
@@ -131,7 +168,7 @@ fn open_plain(name: &str, bytes: &[u8]) -> Result<(Workbook, Vec<String>)> {
             Ok((wb, vec![]))
         }
         _ => {
-            let opts = gridcraft_xlsx::CsvOptions { delimiter: 0, ..Default::default() };
+            let opts = gridcraft_xlsx::CsvOptions { delimiter: 0, parse_values: !csv_as_text, ..Default::default() };
             let mut wb = gridcraft_xlsx::read_csv(bytes, &opts).map_err(|e| EngineError::Other(e.to_string()))?;
             rename_first_sheet(&mut wb, name);
             Ok((wb, vec![]))
@@ -144,7 +181,9 @@ fn rename_first_sheet(wb: &mut Workbook, path: &str) {
     let stem = std::path::Path::new(path).file_stem().and_then(|s| s.to_str()).unwrap_or("Sheet1");
     let clean: String = stem.chars().filter(|c| !matches!(c, ':' | '\\' | '/' | '?' | '*' | '[' | ']')).take(31).collect();
     let clean = clean.trim_matches('\'').to_string();
+    // "History" is reserved (see `Workbook::check_sheet_name`): keep the default name instead.
     if !clean.is_empty()
+        && !clean.eq_ignore_ascii_case("History")
         && let Some(sh) = wb.sheet_mut(0)
     {
         sh.name = clean;
@@ -153,8 +192,19 @@ fn rename_first_sheet(wb: &mut Workbook, path: &str) {
 
 /// Encodes a workbook in the format chosen by `path`'s extension.
 pub fn save_bytes(wb: &Workbook, path: &str) -> Result<Vec<u8>> {
+    // An unknown or missing extension is refused rather than written as an XLSX under that name:
+    // a typo like `.cvs` would otherwise produce a file no other app recognises.
+    let Some(kind) = FileKind::from_path(path) else {
+        let name = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(path);
+        return Err(EngineError::Other(format!("{name}: unknown file format. Save as .xlsx, .csv, .tsv, .json or .html.")));
+    };
+    save_bytes_as(wb, path, kind)
+}
+
+/// Encodes a workbook as `kind`, whatever `path`'s extension says.
+pub fn save_bytes_as(wb: &Workbook, path: &str, kind: FileKind) -> Result<Vec<u8>> {
     let sheet = wb.active_sheet;
-    match FileKind::from_path(path).unwrap_or(FileKind::Xlsx) {
+    match kind {
         // The extension picks the package kind; only the macro-enabled kinds (.xlsm, .xltm) carry
         // the VBA project, so any other name saves without it, as Excel does.
         FileKind::Xlsx => gridcraft_xlsx::write_xlsx_as(wb, gridcraft_xlsx::XlsxKind::from_path(path)).map_err(|e| EngineError::Other(e.to_string())),
@@ -164,25 +214,51 @@ pub fn save_bytes(wb: &Workbook, path: &str) -> Result<Vec<u8>> {
         FileKind::Xlsb => Err(EngineError::Other("XLSB is supported for data import only. Save as .xlsx or another supported export format.".into())),
         FileKind::Ods => Err(EngineError::Other("ODS is supported for data import only. Save as .xlsx or another supported export format.".into())),
         // A workbook read from CSV keeps the separator it was read with (a `;` file stays `;`).
-        FileKind::Csv => Ok(wb.sheet(sheet).map(|sh| csv(wb, sh, wb.csv_delimiter.unwrap_or(b','))).unwrap_or_default()),
-        FileKind::Tsv => Ok(wb.sheet(sheet).map(|sh| csv(wb, sh, b'\t')).unwrap_or_default()),
+        FileKind::Csv => wb.sheet(sheet).map(|sh| csv(wb, sh, wb.csv_delimiter.unwrap_or(b','))).transpose().map(Option::unwrap_or_default),
+        FileKind::Tsv => wb.sheet(sheet).map(|sh| csv(wb, sh, b'\t')).transpose().map(Option::unwrap_or_default),
         FileKind::Json => serde_json::to_vec_pretty(wb).map_err(|e| EngineError::Other(e.to_string())),
-        FileKind::Html => Ok(to_html(wb, sheet).into_bytes()),
+        FileKind::Html => to_html(wb, sheet).map(String::into_bytes),
     }
+}
+
+/// [`save_bytes`] for the file at `path`: relative paths to linked workbooks are rewritten for
+/// its folder, so they still name the same files.
+pub fn save_file_bytes(wb: &Workbook, path: &str) -> Result<Vec<u8>> {
+    match source_dir(path).and_then(|f| gridcraft_xlsx::rebase_links(wb, &f)) {
+        Some(rebased) => save_bytes(&rebased, path),
+        None => save_bytes(wb, path),
+    }
+}
+
+/// The folder of the file at `path`, which relative paths to linked workbooks are relative to.
+pub fn source_dir(path: &str) -> Option<std::path::PathBuf> {
+    std::path::absolute(path).ok()?.parent().map(std::path::Path::to_path_buf)
 }
 
 /// Save As CSV/Text writes "the text and values as they are displayed in cells" with "all
 /// characters in each cell" (Microsoft Support, *Excel formatting and features that are not
 /// transferred to other file formats*): number formats applied, never column-width `#####`.
-fn csv(wb: &Workbook, sh: &Sheet, delimiter: u8) -> Vec<u8> {
-    gridcraft_xlsx::write_csv(sh, delimiter, |c| crate::display::value_text(wb, sh, c))
+fn csv(wb: &Workbook, sh: &Sheet, delimiter: u8) -> Result<Vec<u8>> {
+    gridcraft_xlsx::write_csv(sh, delimiter, |c| {
+        // General's grid-width formatting rounds large identifiers to scientific notation.
+        // Delimited files have no column width, so preserve the whole numeric value instead.
+        if wb.styles.get(sh.style_id(c)).num_fmt.as_str().eq_ignore_ascii_case("General")
+            && let gridcraft_core::Value::Number(number) = sh.value(c)
+            && number.is_finite()
+        {
+            number.to_string()
+        } else {
+            crate::display::value_text(wb, sh, c)
+        }
+    })
+    .map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
-fn html_cell_css(wb: &Workbook, sh: &Sheet, c: CellRef) -> String {
+fn html_cell_css(wb: &Workbook, sh: &Sheet, c: CellRef, dir: CellDir) -> String {
     let st = wb.styles.get(sh.style_id(c));
     let mut css = String::new();
     if st.font.bold {
@@ -201,14 +277,57 @@ fn html_cell_css(wb: &Workbook, sh: &Sheet, c: CellRef) -> String {
     }
     let v = sh.value(c);
     let align = match st.align.h {
-        gridcraft_model::HAlign::Center => "center",
-        gridcraft_model::HAlign::Right => "right",
-        gridcraft_model::HAlign::Left => "left",
-        _ if v.is_number() => "right",
-        _ => "left",
+        gridcraft_model::HAlign::Center => Some("center"),
+        gridcraft_model::HAlign::Right => Some("right"),
+        gridcraft_model::HAlign::Left => Some("left"),
+        _ if v.is_number() => Some(if sh.right_to_left { "left" } else { "right" }),
+        _ if dir == CellDir::Auto => None,
+        _ => Some("left"),
     };
-    let _ = write!(css, "text-align:{align};");
+    if let Some(align) = align {
+        let _ = write!(css, "text-align:{align};");
+    }
     css
+}
+
+/// How a cell marks its direction in HTML. Text on a right-to-left sheet, or text with
+/// right-to-left letters, follows its first strong character (`dir="auto"`), so General
+/// alignment puts Arabic and Hebrew on the right. Numbers on a right-to-left sheet stay left to
+/// right so `-5` doesn't read `5-`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CellDir {
+    Inherit,
+    Auto,
+    Ltr,
+}
+
+impl CellDir {
+    fn of(sh: &Sheet, c: CellRef, text: &str) -> CellDir {
+        if sh.value(c).is_number() {
+            if sh.right_to_left { CellDir::Ltr } else { CellDir::Inherit }
+        } else if sh.right_to_left || text.chars().any(is_right_to_left_letter) {
+            CellDir::Auto
+        } else {
+            CellDir::Inherit
+        }
+    }
+
+    fn attr(self) -> &'static str {
+        match self {
+            CellDir::Inherit => "",
+            CellDir::Auto => " dir=\"auto\"",
+            CellDir::Ltr => " dir=\"ltr\"",
+        }
+    }
+}
+
+/// Hebrew, Arabic, Syriac, Thaana, N'Ko and their presentation forms.
+fn is_right_to_left_letter(c: char) -> bool {
+    matches!(c, '\u{0590}'..='\u{08FF}' | '\u{FB1D}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFF}')
+}
+
+fn table_dir(sh: &Sheet) -> &'static str {
+    if sh.right_to_left { " dir=\"rtl\"" } else { "" }
 }
 
 const CLIPBOARD_HTML_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -223,7 +342,7 @@ pub(crate) fn range_html(wb: &Workbook, sheet: usize, r: RangeRef, plain_text: &
     }
     let sh = wb.sheet(sheet)?;
     let mut out = ClipboardHtml(String::new());
-    out.write_str("<table style=\"border-collapse:collapse;font-family:Calibri,Carlito,Arial,sans-serif;font-size:11pt\">").ok()?;
+    write!(out, "<table{} style=\"border-collapse:collapse;font-family:Calibri,Carlito,Arial,sans-serif;font-size:11pt\">", table_dir(sh)).ok()?;
     for row in r.start.row..=r.end.row {
         if sh.is_row_hidden(row) {
             continue;
@@ -241,11 +360,12 @@ pub(crate) fn range_html(wb: &Workbook, sheet: usize, r: RangeRef, plain_text: &
             } else {
                 String::new()
             };
-            let css = html_cell_css(wb, sh, c);
-            write!(out, "<td style=\"border:1px solid #d4d4d4;padding:2px 4px;white-space:pre-wrap;{css}\"{span}>").ok()?;
             // Use the visible selected cell, even when the merge's original anchor
             // is outside the range or hidden. This matches the plain-text copy.
             let text = crate::display::cell_text(wb, sh, c);
+            let dir = CellDir::of(sh, c, &text);
+            let css = html_cell_css(wb, sh, c, dir);
+            write!(out, "<td style=\"border:1px solid #d4d4d4;padding:2px 4px;white-space:pre-wrap;{css}\"{}{span}>", dir.attr()).ok()?;
             let mut chars = text.chars().peekable();
             while let Some(ch) = chars.next() {
                 match ch {
@@ -285,17 +405,27 @@ impl std::fmt::Write for ClipboardHtml {
     }
 }
 
+/// Most rows Save as Web Page writes. A sheet whose used range is taller fails instead of losing cells.
+const HTML_EXPORT_MAX_ROWS: u32 = 100_001;
+
 /// A sheet as a standalone HTML table (Save as Web Page).
-pub fn to_html(wb: &Workbook, sheet: usize) -> String {
-    let Some(sh) = wb.sheet(sheet) else { return String::new() };
+pub fn to_html(wb: &Workbook, sheet: usize) -> Result<String> {
+    let Some(sh) = wb.sheet(sheet) else { return Ok(String::new()) };
     let mut out = String::new();
     let _ = write!(
         out,
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>{}</title><style>table{{border-collapse:collapse;font-family:Calibri,Carlito,Arial,sans-serif;font-size:11pt}}td{{border:1px solid #d4d4d4;padding:2px 4px;white-space:nowrap}}</style></head><body><table>",
-        esc(&sh.name)
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>{}</title><style>table{{border-collapse:collapse;font-family:Calibri,Carlito,Arial,sans-serif;font-size:11pt}}td{{border:1px solid #d4d4d4;padding:2px 4px;white-space:nowrap}}</style></head><body><table{}>",
+        esc(&sh.name),
+        table_dir(sh)
     );
     if let Some(r) = sh.used_range() {
-        for row in r.start.row..=r.end.row.min(r.start.row + 100_000) {
+        if r.height() > HTML_EXPORT_MAX_ROWS {
+            return Err(EngineError::Other(format!(
+                "the sheet is too tall for a web page ({} rows, at most {HTML_EXPORT_MAX_ROWS}). Save as .xlsx or CSV instead.",
+                r.height()
+            )));
+        }
+        for row in r.start.row..=r.end.row {
             if sh.is_row_hidden(row) {
                 continue;
             }
@@ -305,20 +435,22 @@ pub fn to_html(wb: &Workbook, sheet: usize) -> String {
                 if sh.merges.iter().any(|m| m.contains(c) && m.start != c) {
                     continue;
                 }
-                let css = html_cell_css(wb, sh, c);
+                let text = crate::display::cell_text(wb, sh, c);
+                let dir = CellDir::of(sh, c, &text);
+                let css = html_cell_css(wb, sh, c, dir);
                 let span = sh
                     .merges
                     .iter()
                     .find(|m| m.start == c)
                     .map(|m| format!(" rowspan=\"{}\" colspan=\"{}\"", m.height(), m.width()))
                     .unwrap_or_default();
-                let _ = write!(out, "<td style=\"{css}\"{span}>{}</td>", esc(&crate::display::cell_text(wb, sh, c)));
+                let _ = write!(out, "<td style=\"{css}\"{}{span}>{}</td>", dir.attr(), esc(&text));
             }
             out.push_str("</tr>");
         }
     }
     out.push_str("</table></body></html>");
-    out
+    Ok(out)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -339,8 +471,12 @@ pub fn read_file(path: &str) -> Result<Vec<u8>> {
 pub fn write_file(path: &str, bytes: &[u8]) -> Result<()> {
     // Write to a temporary file, then rename: a crash never leaves a half-written workbook.
     let tmp = format!("{path}.sctmp");
-    std::fs::write(&tmp, bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    std::fs::rename(&tmp, path).map_err(|e| EngineError::Other(format!("{path}: {e}")))
+    std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path)).map_err(|e| {
+        // A write or rename that fails (full disk, the workbook locked by another app) leaves
+        // no temporary file beside the user's workbook.
+        let _ = std::fs::remove_file(&tmp);
+        EngineError::Other(format!("{path}: {e}"))
+    })
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -418,6 +554,122 @@ pub fn image_size(data: &[u8]) -> Option<(u32, u32)> {
 mod tests {
     use super::*;
 
+    fn book(rtl: bool, cells: &[(&str, gridcraft_core::Value, gridcraft_model::HAlign)]) -> Workbook {
+        let mut wb = Workbook::new();
+        let ids: Vec<_> = cells.iter().map(|(_, _, h)| wb.styles.derive(gridcraft_model::StyleId::DEFAULT, |st| st.align.h = *h)).collect();
+        let sh = wb.sheet_mut(0).unwrap();
+        sh.right_to_left = rtl;
+        for ((at, value, _), id) in cells.iter().zip(ids) {
+            let c = CellRef::parse(at).unwrap();
+            sh.set_value(c, value.clone());
+            sh.set_style(c, id);
+        }
+        wb
+    }
+
+    fn copied(wb: &Workbook, range: &str) -> String {
+        let r = RangeRef::parse(range).unwrap();
+        range_html(wb, 0, r, &crate::display::range_text(wb, 0, r)).unwrap()
+    }
+
+    #[test]
+    fn html_export_marks_right_to_left_sheets() {
+        use gridcraft_core::Value;
+        use gridcraft_model::HAlign;
+        let wb = book(true, &[("A1", Value::text("Hello!"), HAlign::General), ("B1", Value::Number(-5.0), HAlign::General)]);
+        let html = to_html(&wb, 0).unwrap();
+        assert!(html.contains("<body><table dir=\"rtl\">"), "{html}");
+        assert!(html.contains("<td style=\"\" dir=\"auto\">Hello!</td>"), "Latin text keeps its own direction: {html}");
+        assert!(
+            html.contains("<td style=\"text-align:left;\" dir=\"ltr\">-5</td>"),
+            "numbers mirror to the left and keep their sign in front: {html}"
+        );
+        let clip = copied(&wb, "A1:B1");
+        assert!(clip.starts_with("<table dir=\"rtl\" style="), "{clip}");
+        assert_eq!(clip.matches("dir=\"auto\"").count(), 1, "{clip}");
+        assert!(clip.contains("text-align:left;\" dir=\"ltr\">-5</td>"), "{clip}");
+
+        let ltr = book(false, &[("A1", Value::text("Hello!"), HAlign::General)]);
+        assert!(to_html(&ltr, 0).unwrap().contains("<body><table><tr>"));
+        assert!(copied(&ltr, "A1").starts_with("<table style="));
+    }
+
+    #[test]
+    fn html_export_lets_arabic_general_text_align_by_direction() {
+        use gridcraft_core::Value;
+        use gridcraft_model::HAlign;
+        let wb = book(
+            false,
+            &[
+                ("A1", Value::text("مرحبا!"), HAlign::General),
+                ("B1", Value::text("שלום"), HAlign::Left),
+                ("C1", Value::text("مرحبا"), HAlign::Center),
+                ("D1", Value::text("Hello"), HAlign::General),
+            ],
+        );
+        let html = to_html(&wb, 0).unwrap();
+        assert!(html.contains("<td style=\"\" dir=\"auto\">مرحبا!</td>"), "General Arabic text aligns by its direction: {html}");
+        assert!(html.contains("<td style=\"text-align:left;\" dir=\"auto\">שלום</td>"), "explicit alignment stays: {html}");
+        assert!(html.contains("<td style=\"text-align:center;\" dir=\"auto\">مرحبا</td>"), "{html}");
+        assert!(html.contains("<td style=\"text-align:left;\">Hello</td>"), "{html}");
+        assert!(html.contains("<body><table><tr>"), "a left-to-right sheet has no table direction: {html}");
+
+        let clip = copied(&wb, "A1:D1");
+        let cells: Vec<&str> = clip.split("<td ").skip(1).collect();
+        assert_eq!(cells.len(), 4, "{clip}");
+        assert!(cells[0].contains("dir=\"auto\"") && !cells[0].contains("text-align"), "{clip}");
+        assert!(cells[1].contains("text-align:left;") && cells[1].contains("dir=\"auto\""), "{clip}");
+        assert!(cells[3].contains("text-align:left;") && !cells[3].contains("dir="), "{clip}");
+    }
+
+    #[test]
+    fn html_export_of_latin_ltr_sheet_is_unchanged() {
+        use gridcraft_core::Value;
+        use gridcraft_model::HAlign;
+        let mut wb = book(
+            false,
+            &[
+                ("A1", Value::text("Name"), HAlign::General),
+                ("B1", Value::text("Qty"), HAlign::Center),
+                ("A2", Value::text("Apples & <pears>"), HAlign::General),
+                ("B2", Value::Number(3.0), HAlign::General),
+                ("A3", Value::text("Total"), HAlign::Right),
+            ],
+        );
+        wb.sheet_mut(0).unwrap().merges.push(RangeRef::parse("A3:B3").unwrap());
+        assert_eq!(
+            to_html(&wb, 0).unwrap(),
+            "<!doctype html><html><head><meta charset=\"utf-8\"><title>Sheet1</title><style>table{border-collapse:collapse;font-family:Calibri,Carlito,Arial,sans-serif;font-size:11pt}td{border:1px solid #d4d4d4;padding:2px 4px;white-space:nowrap}</style></head><body><table>\
+             <tr><td style=\"text-align:left;\">Name</td><td style=\"text-align:center;\">Qty</td></tr>\
+             <tr><td style=\"text-align:left;\">Apples &amp; &lt;pears&gt;</td><td style=\"text-align:right;\">3</td></tr>\
+             <tr><td style=\"text-align:right;\" rowspan=\"1\" colspan=\"2\">Total</td></tr>\
+             </table></body></html>"
+        );
+        let cell = "border:1px solid #d4d4d4;padding:2px 4px;white-space:pre-wrap;";
+        assert_eq!(
+            copied(&wb, "A1:B2"),
+            format!(
+                "<table style=\"border-collapse:collapse;font-family:Calibri,Carlito,Arial,sans-serif;font-size:11pt\">\
+                 <tr><td style=\"{cell}text-align:left;\">Name</td><td style=\"{cell}text-align:center;\">Qty</td></tr>\
+                 <tr><td style=\"{cell}text-align:left;\">Apples &amp; &lt;pears&gt;</td><td style=\"{cell}text-align:right;\">3</td></tr></table>"
+            )
+        );
+    }
+
+    #[test]
+    fn html_export_fails_instead_of_dropping_cells_past_the_row_limit() {
+        let mut wb = Workbook::new();
+        let sh = wb.sheet_mut(0).unwrap();
+        sh.set_value(CellRef::new(0, 0), gridcraft_core::Value::text("near"));
+        sh.set_value(CellRef::new(149_999, 0), gridcraft_core::Value::text("far"));
+        assert!(save_bytes(&wb, "book.html").is_err());
+        let sh = wb.sheet_mut(0).unwrap();
+        sh.remove_cell(CellRef::new(149_999, 0));
+        sh.set_value(CellRef::new(100_000, 0), gridcraft_core::Value::text("far"));
+        let html = String::from_utf8(save_bytes(&wb, "book.html").unwrap()).unwrap();
+        assert!(html.contains(">near</td>") && html.contains(">far</td>"));
+    }
+
     #[test]
     fn macros_are_saved_only_into_xlsm() {
         let mut wb = Workbook::new();
@@ -432,6 +684,37 @@ mod tests {
         assert!(has_macros("book.xltm"), "a macro-enabled template keeps the VBA project");
         assert!(!has_macros("book.xltx"), "a macro-free template never carries a VBA project");
         assert!(wb.vba_project.is_some(), "the open workbook keeps its macros");
+    }
+
+    #[test]
+    fn csv_named_history_does_not_get_the_reserved_sheet_name() {
+        for file in ["History.csv", "hIsToRy.csv", "history.tsv"] {
+            let (wb, _) = open_bytes(file, b"1\n").unwrap();
+            let name = wb.sheets[0].name.clone();
+            assert!(wb.check_sheet_name(&name, Some(0)).is_ok(), "{file} opened as {name:?}");
+        }
+        let (wb, _) = open_bytes("Sales.csv", b"1\n").unwrap();
+        assert_eq!(wb.sheets[0].name, "Sales");
+    }
+
+    /// A save that can't be put in place (here a folder already has the workbook's name, as
+    /// with a file another app holds locked) fails without leaving `<name>.sctmp` behind.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn failed_save_leaves_no_temporary_file() {
+        let dir = std::env::temp_dir().join(format!("gridcraft-write-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let blocked = dir.join("Book1.xlsx");
+        std::fs::create_dir(&blocked).unwrap();
+        assert!(write_file(blocked.to_str().unwrap(), b"workbook").is_err());
+        assert!(!dir.join("Book1.xlsx.sctmp").exists(), "the temporary file is removed");
+        // An ordinary save still works and leaves only the workbook.
+        let ok = dir.join("Book2.xlsx");
+        write_file(ok.to_str().unwrap(), b"workbook").unwrap();
+        assert_eq!(std::fs::read(&ok).unwrap(), b"workbook");
+        assert!(!dir.join("Book2.xlsx.sctmp").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A minimal compound (CFB/OLE2) file — FAT in sector 0, directory in sector 1 — holding a
@@ -569,6 +852,22 @@ mod tests {
     }
 
     #[test]
+    fn delimited_exports_preserve_general_precision_and_explicit_number_formats() {
+        use gridcraft_core::Value;
+        use gridcraft_model::{Cell, NumFmt, StyleId};
+        let mut workbook = Workbook::new();
+        let scientific = workbook.styles.derive(StyleId::DEFAULT, |style| style.num_fmt = NumFmt::new("0.00E+00"));
+        let sheet = workbook.sheet_mut(0).unwrap();
+        sheet.set_cell(CellRef::new(0, 0), Cell { value: Value::Number(124412140710.0), ..Default::default() });
+        sheet.set_cell(CellRef::new(0, 1), Cell { value: Value::Number(1.23456789012345), ..Default::default() });
+        sheet.set_cell(CellRef::new(0, 2), Cell { value: Value::Number(124412140710.0), style: scientific, ..Default::default() });
+        for (path, separator) in [("data.csv", ","), ("data.tsv", "\t")] {
+            let output = String::from_utf8(save_bytes(&workbook, path).unwrap()).unwrap();
+            assert_eq!(output, format!("124412140710{separator}1.23456789012345{separator}1.24E+11\r\n"));
+        }
+    }
+
+    #[test]
     fn template_extension_saves_template_content_type() {
         let bytes = save_bytes(&Workbook::new(), "Budget.xltx").unwrap();
         let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
@@ -580,5 +879,20 @@ mod tests {
             ),
             "{types}"
         );
+    }
+
+    #[test]
+    fn content_wins_over_a_mismatched_extension() {
+        let mut wb = Workbook::new();
+        wb.sheet_mut(0).unwrap().set_value(CellRef::new(0, 0), gridcraft_core::Value::Number(7.0));
+        let package = save_bytes(&wb, "book.xlsx").unwrap();
+        for name in ["book.xlsx", "book.ods", "book.xlsb", "book.csv"] {
+            let (opened, _) = open_bytes(name, &package).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(opened.sheet(0).unwrap().value(CellRef::new(0, 0)), gridcraft_core::Value::Number(7.0), "{name}");
+        }
+        for name in ["data.xlsx", "data.csv"] {
+            let (opened, _) = open_bytes(name, b"a,b\n1,2\n").unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert_eq!(opened.sheet(0).unwrap().value(CellRef::new(0, 1)), gridcraft_core::Value::text("b"), "{name}");
+        }
     }
 }
