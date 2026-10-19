@@ -2,6 +2,7 @@
 //! free-text box stuck on "A", and the column list offers the region's columns.
 
 use egui::{Key, Modifiers};
+use egui_kittest::kittest::Queryable;
 use gridcraft_engine::Session;
 use gridcraft_ui_egui::SheetApp;
 use serde_json::json;
@@ -40,6 +41,23 @@ fn sort_dialog_seeds_the_active_column() {
     h.state_mut().open_dialog("sort", json!({}));
     h.run_steps(2);
     assert_eq!(col(&h), "B", "Sort by starts on the column the cursor is in, not A");
+}
+
+#[test]
+fn add_level_picks_a_column_no_level_uses_yet() {
+    let mut h = harness(sales());
+    h.state_mut().open_dialog("sort", json!({}));
+    h.run_steps(2);
+    // Level 1 seeded B; clicking "+ Add Level" must not default level 2 to B too (#1906 review).
+    h.run_steps(6);
+    h.get_by_label("+ Add Level").click();
+    h.run_steps(6);
+    let cols: Vec<String> = h.state().dialog.as_ref().unwrap().values["levels"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|l| l["column"].as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+    assert_eq!(cols.len(), 2, "two levels after Add Level");
+    assert_ne!(cols[0], cols[1], "the second level defaults to a different column: {cols:?}");
 }
 
 #[test]

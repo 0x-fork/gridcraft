@@ -1938,7 +1938,10 @@ fn sort(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut boo
                 (region.start.col..=region.end.col)
                     .map(|c| {
                         let letter = gridcraft_engine::core::col_to_letters(c);
-                        let label_row = if header { region.start.row + 1 } else { region.start.row };
+                        // The region starts at the header row when one is present, so the
+                        // label always comes from start.row: header text with headers on,
+                        // first data value with them off.
+                        let label_row = region.start.row;
                         let text = gridcraft_engine::display::cell_text(&d.wb, sh, gridcraft_engine::core::CellRef::new(label_row, c));
                         let text: String = text.chars().take(24).collect();
                         (letter.clone(), if text.is_empty() { letter } else { format!("{letter}: {text}") })
@@ -1990,7 +1993,14 @@ fn sort(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut boo
         levels.remove(i);
     }
     if ui.button("+ Add Level").clicked() {
-        let next = columns.get(levels.len()).map(|(l, _)| l.clone()).unwrap_or_else(|| "B".into());
+        let used: Vec<String> = levels.iter().filter_map(|l| l.get("column").and_then(Json::as_str).map(str::to_string)).collect();
+        let next = columns
+            .iter()
+            .map(|(l, _)| l)
+            .find(|l| !used.contains(l))
+            .cloned()
+            .or_else(|| columns.last().map(|(l, _)| l.clone()))
+            .unwrap_or_else(|| "B".into());
         levels.push(json!({"column": next, "order": "asc"}));
     }
     d.values.insert("levels".into(), Json::Array(levels.clone()));
