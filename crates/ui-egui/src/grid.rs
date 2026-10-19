@@ -1178,7 +1178,7 @@ pub(crate) fn paint_quadrant(
                 _ if numeric => HAlign::Right,
                 _ => HAlign::Left,
             },
-            h => h,
+            h => painted_halign(h, geo.rtl),
         };
         let indent = st.align.indent as f32 * 9.0 * z;
         let pad = 2.5 * z;
@@ -1296,7 +1296,7 @@ pub(crate) fn paint_quadrant(
             } else {
                 galley.clone()
             };
-            let pos = rotated_text_pos(*rect, galley.size(), angle, st.align.h, st.align.v, pad, indent);
+            let pos = rotated_text_pos(*rect, galley.size(), angle, painted_halign(st.align.h, geo.rtl), st.align.v, pad, indent);
             let mut shape = egui::epaint::TextShape::new(pos, galley, color);
             shape.angle = angle;
             cp.add(shape);
@@ -3336,8 +3336,34 @@ mod selection_fill_tests {
     }
 }
 
+/// The horizontal alignment to paint with. Cells are painted left to right and a right-to-left
+/// sheet is mirrored afterwards, so an explicit Left or Right is swapped first to end up on the
+/// side the user chose: Align Right stays on the right in either sheet direction, as in Excel.
+/// General alignment is resolved from the value before this and follows the sheet direction.
+fn painted_halign(h: HAlign, rtl: bool) -> HAlign {
+    match h {
+        HAlign::Left if rtl => HAlign::Right,
+        HAlign::Right if rtl => HAlign::Left,
+        h => h,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn explicit_left_and_right_keep_their_side_on_a_right_to_left_sheet() {
+        use super::{HAlign, painted_halign};
+        // Painted before the mirror: swapped, so they land where the user put them.
+        assert_eq!(painted_halign(HAlign::Right, true), HAlign::Left);
+        assert_eq!(painted_halign(HAlign::Left, true), HAlign::Right);
+        // Left-to-right sheets and the other alignments are painted as they are.
+        assert_eq!(painted_halign(HAlign::Right, false), HAlign::Right);
+        assert_eq!(painted_halign(HAlign::Left, false), HAlign::Left);
+        for h in [HAlign::Center, HAlign::Justify, HAlign::Fill] {
+            assert_eq!(painted_halign(h, true), h);
+        }
+    }
     use super::*;
 
     #[test]
