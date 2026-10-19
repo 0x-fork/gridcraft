@@ -133,7 +133,7 @@ impl Language {
         translated.unwrap_or_else(|| text.rsplit_once('|').map_or(text, |(_, label)| label))
     }
 
-   pub(crate) fn tr_error(self, message: &str) -> String {
+    pub(crate) fn tr_error(self, message: &str) -> String {
     let message = if message.starts_with("command `") {
         crate::clean_error(message)
     } else {
