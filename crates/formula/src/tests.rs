@@ -435,3 +435,21 @@ fn longest_flat_chains_clone_compare_walk_and_adjust_without_deep_recursion() {
         .expect("spawn");
     handle.join().expect("long chains must not overflow the stack");
 }
+
+#[test]
+fn spanish_input_counts_left_operand_of_a_chain_at_the_same_depth() {
+    // The leftmost operand of a flat chain is not nested, so `(((…1)))+1` is accepted whenever
+    // `(((…1)))` is, in both the pre-check and `normalize`.
+    let wrap = |n: usize| {
+        let mut e = Expr::Number(1.0);
+        for _ in 0..n {
+            e = Expr::Paren(Box::new(e));
+        }
+        e
+    };
+    let es = |e: &Expr| crate::print_input(e, FormulaLocale::Es, |_| false);
+    let deepest = (0..400).take_while(|&n| es(&wrap(n)).is_ok()).last().expect("depth 0 is accepted");
+    assert!(deepest > 1 && deepest < 400);
+    let chain = Expr::Binary(BinOp::Add, Box::new(wrap(deepest)), Box::new(Expr::Number(1.0)));
+    assert!(es(&chain).is_ok());
+}

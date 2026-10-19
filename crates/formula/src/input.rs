@@ -194,7 +194,7 @@ fn normalize(expr: &mut Expr, known_name: &impl Fn(&str) -> bool, bindings: &mut
                 normalize(right, known_name, bindings, depth + 1, display)?;
                 node = left;
             }
-            normalize(node, known_name, bindings, depth + 1, display)?;
+            normalize(node, known_name, bindings, depth, display)?;
         }
         Expr::Array(rows) if display => {
             for row in rows {
