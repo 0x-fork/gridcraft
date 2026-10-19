@@ -769,6 +769,10 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     }
     // Interaction.
     let previous_popups = (app.grid.filter_menu, app.grid.list_picker, app.grid.header_menu);
+    // A pan the grid never saw end (it was hidden mid-drag) must not swallow the next press.
+    if app.grid.touch_pan && !resp.dragged() && !resp.drag_stopped() {
+        app.grid.touch_pan = false;
+    }
     if app.grid.touch_pan {
         // Skip the frames of a touch pan, its release included.
         if !resp.dragged() {
