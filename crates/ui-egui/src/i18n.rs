@@ -78,6 +78,12 @@ impl Language {
         Self::from_tag(code)
     }
 
+    /// Every code `app.language.set` takes, quoted and joined (`"en"|"es"|…`), for command docs
+    /// and errors.
+    pub fn code_list(separator: &str) -> String {
+        Self::ALL.iter().map(|l| format!("\"{}\"", l.code())).collect::<Vec<_>>().join(separator)
+    }
+
     fn from_tag(tag: &str) -> Option<Self> {
         match tag.trim().split(['-', '_']).next()?.to_ascii_lowercase().as_str() {
             "en" => Some(Self::En),
@@ -761,6 +767,10 @@ mod tests {
         app.run("app.language.set", serde_json::json!({"code": "ja"})).unwrap();
         assert_eq!(app.ui.language, Language::Ja, "`code` is an alias for `language`");
         assert!(app.run("app.language.set", serde_json::json!({})).is_err(), "no language is an error, not a dialog");
+        let unknown = app.run("app.language.set", serde_json::json!({"language": "xx"})).unwrap_err().to_string();
+        for l in Language::ALL {
+            assert!(unknown.contains(&format!("\"{}\"", l.code())), "the error lists {:?}: {unknown}", l.code());
+        }
         app.run("app.language.english", serde_json::json!({})).unwrap();
         assert_eq!(app.ui.language, Language::En);
         for l in Language::ALL {
