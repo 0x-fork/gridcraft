@@ -410,6 +410,13 @@ struct PassHost<'a> {
     waiting: HashSet<Key>,
     /// The formulas abandoned since the last suspension.
     abandoned: Vec<Key>,
+    /// Other formulas read at [`MAX_NESTED`] levels deep by the evaluations being abandoned. They
+    /// are calculated along with the suspended one, rather than one per restart (a wide range
+    /// read at the limit would restart the abandoned evaluations once per cell in it).
+    also: Vec<Key>,
+    /// Suspensions so far (tests check that a wide read at the limit needs one, not one per cell).
+    #[cfg(test)]
+    suspensions: usize,
     /// The formulas in `cycles`.
     cycle_seen: HashSet<Key>,
     /// Iterative calculation: a circular reference reads the cell's previous value instead of
@@ -445,6 +452,9 @@ impl<'a> PassHost<'a> {
             suspend: None,
             waiting: HashSet::default(),
             abandoned: Vec::new(),
+            also: Vec::new(),
+            #[cfg(test)]
+            suspensions: 0,
             cycle_seen: HashSet::default(),
             iterate: false,
             prev: HashMap::default(),
@@ -489,10 +499,24 @@ impl PassHost<'_> {
             self.compute(top);
             match self.suspend.take() {
                 Some(next) => {
+                    #[cfg(test)]
+                    {
+                        self.suspensions += 1;
+                    }
                     let held = std::mem::take(&mut self.abandoned);
                     self.waiting.extend(held.iter().copied());
                     if let Some(entry) = work.last_mut() {
                         entry.1 = held;
+                    }
+                    // The other formulas read at the limit are calculated after `next`, before the
+                    // held evaluations restart. Each has nothing held of its own, so the held ones
+                    // are released only when the last of them is done.
+                    let mut seen: HashSet<Key> = HashSet::default();
+                    seen.insert(next);
+                    for s in std::mem::take(&mut self.also) {
+                        if seen.insert(s) {
+                            work.push((s, Vec::new()));
+                        }
                     }
                     work.push((next, Vec::new()));
                 }
@@ -520,7 +544,11 @@ impl PassHost<'_> {
             return self.wb.sheet(k.0).map(|s| s.value(k.1)).unwrap_or_default();
         };
         if self.suspend.is_some() {
-            // Unwinding to `calculate`: the value is thrown away.
+            // Unwinding to `calculate`: the value is thrown away. A formula read at the limit is
+            // calculated with the suspended one, so the evaluations are not restarted for each.
+            if self.depth >= MAX_NESTED && !self.in_progress.contains(&k) && !self.waiting.contains(&k) {
+                self.also.push(k);
+            }
             return Value::Error(CellError::Calc);
         }
         if self.in_progress.contains(&k) || self.waiting.contains(&k) {
@@ -1393,6 +1421,35 @@ pub(crate) mod tests {
         deps.clear();
         calc.graph.dependents(1, CellRef::parse("A2").unwrap(), &mut deps);
         assert_eq!(deps, vec![at("DA9"), at("DA9")]);
+    }
+
+    /// A formula at the nesting limit reading thousands of formulas not calculated yet suspends the
+    /// evaluations in progress once, not once per formula read.
+    #[test]
+    fn wide_read_at_the_nesting_limit_suspends_once() {
+        const WIDTH: u32 = 3000;
+        let mut wb = Workbook::new();
+        let mut exprs = HashMap::default();
+        let mut put = |wb: &mut Workbook, at: String, text: String| {
+            let at = CellRef::parse(&at).unwrap();
+            wb.sheet_mut(0).unwrap().cells.set(at, Cell::formula(Formula::new(&text)));
+            exprs.insert((0, at), std::sync::Arc::new(gridcraft_formula::parse(&text[1..]).unwrap()));
+        };
+        // A1 reads A2, ..., A64 (the 64th formula deep) reads a wide range of formulas.
+        for r in 1..64 {
+            put(&mut wb, format!("A{r}"), format!("=A{}+1", r + 1));
+        }
+        put(&mut wb, "A64".to_string(), format!("=SUM(B1:B{WIDTH})"));
+        for r in 1..=WIDTH {
+            put(&mut wb, format!("B{r}"), format!("={r}*2"));
+        }
+        let mut rng = 1u64;
+        let mut host = PassHost::new(&wb, &exprs, &mut rng, 0.0);
+        host.calculate((0, CellRef::parse("A1").unwrap()));
+        let total = (WIDTH * (WIDTH + 1)) as f64;
+        assert_eq!(host.results.get(&(0, CellRef::parse("A1").unwrap())), Some(&Value::Number(total + 63.0)));
+        assert!(host.cycles.is_empty());
+        assert!(host.suspensions <= 3, "{} suspensions", host.suspensions);
     }
 
     /// For tests of `PassHost::visit_range`, which can't be reached from outside this module: the
