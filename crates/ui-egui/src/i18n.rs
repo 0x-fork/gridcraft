@@ -148,7 +148,8 @@ impl Language {
     } else {
         translated.to_owned()
     }
-}}
+  }
+}
 
 /// Deserializes a saved language leniently: an unknown or malformed value (a language removed in a
 /// later version, a hand-edited `ui.json`) reads as English instead of failing the whole `UiState`,
