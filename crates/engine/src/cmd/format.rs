@@ -204,14 +204,17 @@ const COMMA: &str = "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)";
 /// currency; `symbol` is how the control channel picks another one, e.g. `"L"` for lempiras).
 fn accounting(s: &mut Session, p: &Json) -> Result<Json> {
     let symbol = str_param(p, "symbol").unwrap_or("$");
-    if symbol.contains(['"', '\\']) {
-        return Err(bad("home.accounting", "the symbol can't contain a quote or a backslash"));
+    // The symbol goes into a quoted literal: a quote or a backslash would end it, and a control
+    // character would reach the format's text as-is.
+    if symbol.contains(['"', '\\']) || symbol.chars().any(char::is_control) {
+        return Err(bad("home.accounting", "the symbol can't contain a quote, a backslash or a control character"));
     }
     set_fmt(s, p, &accounting_format(symbol))
 }
 
 fn accounting_format(symbol: &str) -> String {
-    format!("_({symbol:?}* #,##0.00_);_({symbol:?}* \\(#,##0.00\\);_({symbol:?}* \"-\"??_);_(@_)")
+    let symbol = format!("\"{symbol}\"");
+    format!("_({symbol}* #,##0.00_);_({symbol}* \\(#,##0.00\\);_({symbol}* \"-\"??_);_(@_)")
 }
 
 fn with(p: &Json, key: &str, v: Json) -> Json {

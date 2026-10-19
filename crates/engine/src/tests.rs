@@ -1274,9 +1274,10 @@ fn accounting_format_takes_the_symbol_it_is_given() {
     // Without a symbol it stays the default `$` format, character for character.
     s.execute("home.accounting", json!({"range": "A1"})).unwrap();
     assert_eq!(text(&s, "A1"), " $ 1,234.50 ");
-    // A quote or a backslash would break the format string, so the symbol is refused.
-    for bad in ["\"", "\\"] {
-        assert!(s.execute("home.accounting", json!({"range": "A1", "symbol": bad})).is_err(), "{bad}");
+    // A quote or a backslash would end the format's quoted text, and a control character would
+    // reach it as-is, so those symbols are refused.
+    for bad in ["\"", "\\", "\n", "L\t"] {
+        assert!(s.execute("home.accounting", json!({"range": "A1", "symbol": bad})).is_err(), "{bad:?}");
     }
 }
 
