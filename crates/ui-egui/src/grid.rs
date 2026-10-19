@@ -2707,10 +2707,18 @@ fn in_cell_editor(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet, 
     let st = wb.styles.get(sh.style_id(cell)).clone();
     let size = st.font.size * 96.0 / 72.0 * geo.z;
     let font = FontId::new(size, theme::cell_family(&st.font.name, st.font.bold, st.font.italic));
-    let text_w = ui.painter().layout_no_wrap(ed.text.clone(), font.clone(), Color32::BLACK).size().x;
     let lines = ed.text.lines().count().max(1) as f32 + if ed.text.ends_with('\n') { 1.0 } else { 0.0 };
-    let w = (text_w + 14.0).max(rect.width()).min(geo.cells.right() - rect.left());
-    let h = (size * 1.3 * lines + 4.0).max(rect.height());
+    // Wrap Text: the editor keeps the column's width and wraps, growing down as Excel's does.
+    // Otherwise it widens to the text's one-line width.
+    let wrap = st.align.wrap;
+    let (w, h) = if wrap {
+        // The field's own margins (4 px a side) and the 2 px inset leave this much for the text.
+        let wrapped = ui.painter().layout(ed.text.clone(), font.clone(), Color32::BLACK, (rect.width() - 12.0).max(1.0));
+        (rect.width(), (wrapped.size().y.max(size * 1.3 * lines) + 4.0).max(rect.height()))
+    } else {
+        let text_w = ui.painter().layout_no_wrap(ed.text.clone(), font.clone(), Color32::BLACK).size().x;
+        ((text_w + 14.0).max(rect.width()).min(geo.cells.right() - rect.left()), (size * 1.3 * lines + 4.0).max(rect.height()))
+    };
     // Grows to the left on a right-to-left sheet.
     let erect = geo.mirror_rect(Rect::from_min_size(rect.min, vec2(w, h)));
     let fill = match st.fill.pattern {
@@ -2729,7 +2737,7 @@ fn in_cell_editor(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet, 
     let id = egui::Id::new("gridcraft.cell_editor");
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(erect.shrink2(vec2(2.0, 1.0))));
     child.set_clip_rect(clip);
-    crate::formula_bar::editor_widget(app, &mut child, id, font, false, erect.width() - 4.0);
+    crate::formula_bar::editor_widget(app, &mut child, id, font, wrap, erect.width() - 4.0);
 }
 
 /// Test the popup itself, not whether the pointer is over any part of the app.

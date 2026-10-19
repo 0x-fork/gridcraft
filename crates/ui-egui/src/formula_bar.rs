@@ -279,7 +279,13 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
         job.wrap.max_width = if multiline { wrap_width } else { f32::INFINITY };
         ui.fonts_mut(|f| f.layout_job(job))
     };
-    let edit = if multiline || ed.text.contains('\n') { TextEdit::multiline(&mut ed.text) } else { TextEdit::singleline(&mut ed.text) };
+    // The in-cell editor is as tall as its lines (a multiline field reserves four rows).
+    let in_cell = id == egui::Id::new("gridcraft.cell_editor");
+    let edit = if multiline || ed.text.contains('\n') {
+        TextEdit::multiline(&mut ed.text).desired_rows(if in_cell { 1 } else { 4 })
+    } else {
+        TextEdit::singleline(&mut ed.text)
+    };
     let mut output = edit
         .id(id)
         .frame(egui::Frame::NONE)
