@@ -210,7 +210,7 @@ impl RangeRef {
             if let (Some(x), Some(y)) = (CellRef::parse(a), CellRef::parse(b)) {
                 return Some(RangeRef::new(x, y));
             }
-            let strip = |t: &str| t.trim_start_matches('$').to_string();
+            let strip = |t: &str| t.strip_prefix('$').unwrap_or(t).to_string();
             if let (Some(x), Some(y)) = (letters_to_col(&strip(a)), letters_to_col(&strip(b))) {
                 return Some(RangeRef::cols(x.min(y), x.max(y)));
             }
@@ -247,6 +247,8 @@ mod tests {
         assert!(RangeRef::parse("-1:3").is_none());
         assert!(RangeRef::parse("$$1:3").is_none());
         assert!(RangeRef::parse(":3").is_none());
+        assert!(RangeRef::parse("$$A:$$C").is_none());
+        assert!(RangeRef::parse("$A:$C").is_some());
         let r = RangeRef::parse("$1:$3").unwrap();
         assert_eq!((r.start.row, r.end.row), (0, 2));
     }
