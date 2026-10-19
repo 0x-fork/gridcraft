@@ -1,6 +1,6 @@
 //! Formulas tab: AutoSum, Insert Function, names, auditing, calculation.
 
-use gridcraft_core::{CellRef, RangeRef};
+use gridcraft_core::{CellRef, RangeRef, Value};
 use gridcraft_model::{CalcMode, DefinedName, Formula};
 use serde_json::{Value as Json, json};
 
@@ -485,7 +485,6 @@ fn trace_dependents(s: &mut Session, p: &Json) -> Result<Json> {
 /// another sheet, jump there. `all` walks every level (Ctrl+Shift+[ / Ctrl+Shift+]).
 fn select_trace_cells(s: &mut Session, p: &Json, precedents: bool) -> Result<Json> {
     use std::collections::BTreeSet;
-    const CAP: usize = 4096;
     let d = s.doc()?;
     let at = cell_param(s, p, "cell")?.unwrap_or(d.selection.active);
     let sheet = d.wb.active_sheet;
@@ -495,15 +494,23 @@ fn select_trace_cells(s: &mut Session, p: &Json, precedents: bool) -> Result<Jso
     let mut seen: BTreeSet<(usize, CellRef)> = BTreeSet::new();
     let mut frontier = vec![(sheet, at)];
     seen.insert((sheet, at));
-    loop {
-        let Some((ks, kc)) = frontier.pop() else { break };
+    while let Some((ks, kc)) = frontier.pop() {
         if precedents {
             for a in d.calc.graph.precedents_of((ks, kc)) {
                 if all {
-                    for c in a.range.iter().take(CAP) {
+                    // Walk the sheet's stored cells inside the precedent area: blanks are
+                    // never selected and only formula cells extend the frontier, so a
+                    // formula late in a large range is not skipped.
+                    let Some(sh) = d.wb.sheet(a.sheet) else { continue };
+                    for (c, cell) in sh.cells.iter() {
+                        if !a.range.contains(c) || matches!(cell.value, Value::Empty) {
+                            continue;
+                        }
                         if seen.insert((a.sheet, c)) {
                             found.insert((a.sheet, c.a1()));
-                            frontier.push((a.sheet, c));
+                            if cell.formula.is_some() {
+                                frontier.push((a.sheet, c));
+                            }
                         }
                     }
                 } else {
@@ -538,7 +545,6 @@ fn select_trace_cells(s: &mut Session, p: &Json, precedents: bool) -> Result<Jso
     if si != sheet {
         params["sheet"] = json!(si);
     }
-    drop(d);
     s.execute("selection.set", params)
 }
 

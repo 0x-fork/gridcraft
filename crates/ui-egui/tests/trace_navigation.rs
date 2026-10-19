@@ -73,6 +73,23 @@ fn ctrl_shift_bracket_walks_every_level() {
 }
 
 #[test]
+fn transitive_walk_reaches_formulas_late_in_a_wide_area() {
+    // =SUM(A1:Z1) has a wide precedent area; a formula stored late in it must still be
+    // walked, and blank positions must not be selected (#1865 review).
+    let mut s = Session::new();
+    s.new_workbook();
+    s.execute("cell.set", json!({"cell": "Z1", "input": "5"})).unwrap();
+    s.execute("cell.set", json!({"cell": "AB1", "input": "=SUM(A1:Z1)"})).unwrap();
+    s.execute("cell.set", json!({"cell": "AD1", "input": "=AB1*2"})).unwrap();
+    let mut h = harness(s);
+    h.state_mut().session.execute("selection.set", json!({"range": "AD1"})).unwrap();
+    key(&mut h, Key::OpenBracket, Modifiers::CTRL | Modifiers::SHIFT);
+    let r = ranges(&h);
+    assert!(r.contains(&"Z1".to_string()), "the formula late in the area is reached, got {r:?}");
+    assert_eq!(r.len(), 2, "only the stored cells (AB1, Z1) are selected, no blanks, got {r:?}");
+}
+
+#[test]
 fn no_precedents_leaves_selection_untouched() {
     let mut h = harness(chain());
     h.state_mut().session.execute("selection.set", json!({"range": "A1"})).unwrap();
