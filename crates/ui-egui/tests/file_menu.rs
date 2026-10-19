@@ -134,9 +134,9 @@ fn file_options_opens_the_options_page_and_pages_are_reachable_by_command() {
 
 #[test]
 fn translated_options_headings_show_no_context_prefix() {
-    for (code, headings, prefixed) in [
-        ("fr", ["Général", "Enregistrer"], ["Options|Général", "Options|Enregistrer"]),
-        ("sr", ["Opšte", "Sačuvaj"], ["Opcije|Opšte", "Opcije|Sačuvaj"]),
+    for (code, headings, prefixed, (view, view_prefixed)) in [
+        ("fr", ["Général", "Enregistrer"], ["Options|Général", "Options|Enregistrer"], ("Affichage", "Options de la feuille|Affichage")),
+        ("sr", ["Opšte", "Sačuvaj"], ["Opcije|Opšte", "Opcije|Sačuvaj"], ("Prikaz", "Opcije lista|Prikaz")),
     ] {
         let mut h = harness(Services::default());
         h.state_mut().run("app.language.set", serde_json::json!({"language": code})).unwrap();
@@ -149,6 +149,13 @@ fn translated_options_headings_show_no_context_prefix() {
         for label in prefixed {
             assert!(h.query_by_label(label).is_none(), "{code}: {label} shows its context");
         }
+        // Page Layout › Sheet Options: the Gridlines and Headings "View" checkboxes had the same
+        // prefix. The View tab may share the word, so count at least the two checkboxes.
+        h.state_mut().run("ui.backstage", serde_json::json!({"page": "close"})).unwrap();
+        h.state_mut().ui.ribbon_tab = "Page Layout".into();
+        h.run_steps(3);
+        assert!(h.query_by_label(view_prefixed).is_none(), "{code}: {view_prefixed} shows its context");
+        assert!(h.query_all_by_label(view).count() >= 2, "{code}: the Sheet Options checkboxes don't read {view}");
     }
 }
 
