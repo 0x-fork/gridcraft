@@ -84,3 +84,23 @@ fn the_editor_measures_the_text_at_the_fields_wrap_width() {
     assert!(own != with_margin, "the test text must wrap differently 8 px narrower");
     assert!((field.height() - own).abs() < 1.0, "the field wraps at its whole width, no text margin: {} vs {own}", field.height());
 }
+
+/// An edit with line breaks (Alt+Enter) in a cell without Wrap Text shows every line: the field's
+/// one row is a minimum, it grows with the text and never scrolls.
+#[test]
+fn an_unwrapped_multiline_edit_shows_every_line() {
+    let field = |text: &str| {
+        let ctx = Context::default();
+        let mut session = Session::new();
+        session.new_workbook();
+        let mut app = SheetApp::new(session, Default::default());
+        frames(&ctx, &mut app);
+        app.begin_edit(Some(text.into()), false);
+        frames(&ctx, &mut app);
+        ctx.read_response(Id::new("gridcraft.cell_editor")).expect("the in-cell editor is shown").rect
+    };
+    let one = field("one").height();
+    let three = field("one\ntwo\nthree").height();
+    assert!(three > 2.5 * one, "three lines are shown: {three} vs one line {one}");
+    assert!(three < 3.5 * one, "and no more rows are reserved: {three} vs one line {one}");
+}
