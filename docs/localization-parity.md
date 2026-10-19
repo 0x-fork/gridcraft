@@ -3,6 +3,7 @@
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (defined-name length limit counts characters, so long Arabic names are accepted) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (Table names are limited to 255 characters) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (right-to-left sheets in `.xls` files open right-to-left) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** trivial (text boxes and shapes keep right-to-left paragraph direction through XLSX save; previously minor: Format Cells dialog looks its labels up in the catalog) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Per-language status against Excel, which ships its UI in dozens of languages (Windows language
 packs cover 100+), with localized function names, argument separators, number and date formats,
@@ -33,7 +34,9 @@ right-to-left sheets and full complex-script support. Part of
   (`view.rightToLeft`, Page Layout › Sheet Options, XLSX `rightToLeft`, `.xls` WINDOW2 fRightToLeft) mirrors the grid (#146):
   column A and the row headers on the right, the vertical scrollbar on the left; hit-testing,
   arrow keys, editor, popups and floating objects follow; text stays left-to-right inside its box
-  (no bidi), and the sheet tabs, horizontal scrollbar and printing/PDF are not mirrored yet. IME input goes
+  (no bidi), and the sheet tabs, horizontal scrollbar and printing/PDF are not mirrored yet.
+  Text boxes and shapes keep their paragraphs' right-to-left direction (`a:pPr rtl`) through XLSX
+  save, though GridCraft still draws that text left to right. IME input goes
   through egui/winit and is unverified for Chinese, Japanese and Korean.
 - **Names in any script.** Defined names (Define Name, Create from Selection) are limited to
   255 characters, counted as characters rather than UTF-8 bytes, so a 255-letter Arabic name is
@@ -86,6 +89,7 @@ language (none so far) and of localized function names.
 | 2026-10-19 | minor | Defined-name length counts characters, not bytes: Arabic names up to 255 letters are accepted, and Create from Selection keeps long Arabic headers |
 | 2026-10-19 | minor | Table names are limited to 255 Unicode characters |
 | 2026-10-19 | minor | Right-to-left sheets in legacy `.xls` files (common in older Arabic workbooks) open right-to-left |
+| 2026-10-19 | trivial | Text boxes and shapes keep right-to-left paragraph direction (`a:pPr rtl`) on XLSX save, so Excel-authored Arabic and Hebrew text boxes reopen right to left |
 | 2026-10-12 | minor | Format Cells looks up its tabs, labels, options and note through `Language::tr` (Fill tab keyed `Format Cells\|Fill`); dialog titles and OK/Cancel too. Labels already in a table (Number, Currency, Fill…) show translated; the rest fall back to English until the tables add them |
 | 2026-10-12 | minor | Brazilian Portuguese catalog (`i18n/pt.rs`) grows from 377 to 923 entries: every key the other catalogs translate, including the dialog strings #669 starts looking up (~42%) |
 | 2026-10-11 | minor | German ribbon catalog (`i18n/de.rs`, 266 labels, ~12%); `de` locale tags (de-DE, de-AT, de-CH…) resolve to German. PR #163 (localized German formulas/numbers) still open |
