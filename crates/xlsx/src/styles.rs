@@ -438,7 +438,7 @@ fn font_xml(f: &Font, dxf: bool, minor: bool) -> String {
         s.push_str("<color theme=\"1\"/>");
     }
     if !dxf {
-        let family = f.family.unwrap_or(DEFAULT_FONT_FAMILY);
+        let family = f.family.filter(|v| *v <= MAX_FONT_FAMILY).unwrap_or(DEFAULT_FONT_FAMILY);
         let _ = write!(s, "<name val=\"{}\"/><family val=\"{family}\"/>", esc_attr(&f.name));
         if let Some(charset) = f.charset {
             let _ = write!(s, "<charset val=\"{charset}\"/>");

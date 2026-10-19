@@ -1175,6 +1175,15 @@ fn out_of_range_family_is_ignored() {
     let mut pkg = Package::open(&saved).unwrap();
     let xml = String::from_utf8(pkg.read("xl/styles.xml").unwrap().unwrap()).unwrap();
     assert!(xml.contains("<name val=\"Arial\"/><family val=\"2\"/>"), "{xml}");
+
+    let mut set_directly = wb.clone();
+    let wide = set_directly.styles.derive(StyleId::DEFAULT, |st| st.font.family = Some(200));
+    set_directly.sheet_mut(0).unwrap().set_value(CellRef::new(0, 0), Value::text("x"));
+    set_directly.sheet_mut(0).unwrap().set_style(CellRef::new(0, 0), wide);
+    let saved = write_xlsx(&set_directly).unwrap();
+    let mut pkg = Package::open(&saved).unwrap();
+    let xml = String::from_utf8(pkg.read("xl/styles.xml").unwrap().unwrap()).unwrap();
+    assert!(!xml.contains("<family val=\"200\"/>"), "{xml}");
 }
 
 #[test]
