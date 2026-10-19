@@ -606,6 +606,9 @@ fn let_lambda_names_ignore_case_in_any_script() {
     // `ß` upper-cases to `SS`, yet `ẞ` is its capital.
     t.set("A6", "=LET(ß,100,ẞ*2)");
     assert_eq!(t.num("A6"), 200.0);
+    // Dotless ı is a different name from i.
+    t.set("A7", "=LET(i,1,ı,2,i)");
+    assert_eq!(t.num("A7"), 1.0);
 }
 
 #[test]

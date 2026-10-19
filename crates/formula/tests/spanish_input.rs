@@ -105,5 +105,10 @@ fn local_names_match_aliases_in_any_case_like_the_evaluator() {
     assert_eq!(input("LET(ſi;LAMBDA(x;x*2);SI(3))"), "LET(ſi,LAMBDA(x,x*2),SI(3))");
     assert!(gridcraft_formula::same_name("ß", "ẞ"));
     assert!(gridcraft_formula::same_name("dług", "DŁUG"));
+    assert!(gridcraft_formula::same_name("ſi", "SI"));
+    assert!(gridcraft_formula::same_name("σοφός", "ΣΟΦΌΣ"));
+    // Dotless ı is its own letter outside Turkic languages.
+    assert!(!gridcraft_formula::same_name("ı", "i"));
+    assert!(!gridcraft_formula::same_name("ı", "I"));
     assert!(!gridcraft_formula::same_name("a", "b"));
 }
