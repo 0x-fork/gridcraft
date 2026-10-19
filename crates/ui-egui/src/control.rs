@@ -29,12 +29,35 @@ pub struct ControlRequest {
     pub method: String,
     pub params: Json,
     pub reply: Sender<ControlResponse>,
+    /// Who has the request: [`PENDING`], [`TAKEN`] (the app runs it) or [`ABANDONED`] (the sender
+    /// gave up waiting, so the app must not run it late: a client told its request timed out had
+    /// it applied anyway on the next UI pass, and an agent that retried ran it twice (#1914).
+    pub state: std::sync::Arc<std::sync::atomic::AtomicU8>,
 }
+
+/// Queued, not yet run.
+pub const PENDING: u8 = 0;
+/// The app has started it: it will answer.
+pub const TAKEN: u8 = 1;
+/// Its sender gave up waiting (the reply timeout expired): it is dropped unrun.
+pub const ABANDONED: u8 = 2;
 
 impl ControlRequest {
     pub fn new(method: impl Into<String>, params: Json) -> (Self, std::sync::mpsc::Receiver<ControlResponse>) {
         let (tx, rx) = std::sync::mpsc::channel();
-        (Self { method: method.into(), params, reply: tx }, rx)
+        (Self { method: method.into(), params, reply: tx, state: Default::default() }, rx)
+    }
+
+    /// Claim the request for running; false when its sender already gave up on it.
+    pub fn take(&self) -> bool {
+        use std::sync::atomic::Ordering;
+        self.state.compare_exchange(PENDING, TAKEN, Ordering::SeqCst, Ordering::SeqCst).is_ok() || self.state.load(Ordering::SeqCst) == TAKEN
+    }
+
+    /// Give up on the request; false when the app has already started it (it will answer).
+    pub fn abandon(state: &std::sync::atomic::AtomicU8) -> bool {
+        use std::sync::atomic::Ordering;
+        state.compare_exchange(PENDING, ABANDONED, Ordering::SeqCst, Ordering::SeqCst).is_ok() || state.load(Ordering::SeqCst) == ABANDONED
     }
 }
 
@@ -391,6 +414,11 @@ pub fn handle(app: &mut SheetApp, ctx: &egui::Context, method: &str, p: &Json) -
 pub fn poll(app: &mut SheetApp, ctx: &egui::Context) {
     let Some(rx) = app.control_rx.take() else { return };
     while let Ok(req) = rx.try_recv() {
+        // A request whose sender stopped waiting is dropped unrun: running it would apply a
+        // command the client was told had failed, and its reply would go nowhere (#1914).
+        if !req.take() {
+            continue;
+        }
         let outcome = handle(app, ctx, &req.method, &req.params);
         match outcome {
             Outcome::Done(v) => {
