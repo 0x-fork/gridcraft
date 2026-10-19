@@ -119,7 +119,6 @@ pub struct GridState {
     pub glide: crate::selection_glide::SelectionGlide,
     pub last_click: Option<(CellRef, f64)>,
     pub hover_cell: Option<CellRef>,
-    pub autosave: bool,
     pub last_autosave: f64,
     pub last_border: String,
     pub last_fill: String,
@@ -176,15 +175,6 @@ impl WheelZoom {
             w.glide = None;
         }
         w
-    }
-}
-
-impl GridState {
-    pub fn autosave(&self) -> bool {
-        self.autosave
-    }
-    pub fn toggle_autosave(&mut self) {
-        self.autosave = !self.autosave;
     }
 }
 
