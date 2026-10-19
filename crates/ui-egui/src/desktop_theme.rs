@@ -67,11 +67,16 @@ impl DesktopTheme {
     }
 }
 
-/// The session-bus connection the watcher keeps between reads, opened on first use.
+/// The session-bus connection the watcher keeps between reads, opened on first use. Off Linux
+/// there is no bus to keep, and a unit struct rather than `()` keeps `let mut link = …` from
+/// reading as a unit binding, which `cargo xtask ci` refuses on those platforms.
 #[cfg(target_os = "linux")]
 type Link = Option<zbus::blocking::Connection>;
 #[cfg(not(target_os = "linux"))]
-type Link = ();
+#[derive(Default)]
+pub(crate) struct NoLink;
+#[cfg(not(target_os = "linux"))]
+type Link = NoLink;
 
 /// Ask the portal once, over `link`'s connection (opened if absent, dropped if the bus went
 /// away). D-Bus calls block, so this belongs off the UI thread: the watcher's thread is its
