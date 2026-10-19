@@ -1,9 +1,6 @@
 # Localization parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (defined-name length limit counts characters, so long Arabic names are accepted) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (Table names are limited to 255 characters) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (right-to-left sheets in `.xls` files open right-to-left) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** trivial (text boxes and shapes keep right-to-left paragraph direction through XLSX save; previously minor: Format Cells dialog looks its labels up in the catalog) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (defined-name length limit counts characters, so long Arabic names are accepted; Table names are limited to 255 characters; right-to-left sheets in `.xls` files open right-to-left; text boxes and shapes keep right-to-left paragraph direction through XLSX save) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Per-language status against Excel, which ships its UI in dozens of languages (Windows language
 packs cover 100+), with localized function names, argument separators, number and date formats,
