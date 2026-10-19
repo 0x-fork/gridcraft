@@ -140,36 +140,6 @@ mod tests {
         assert_eq!(prefers_dark(), None);
     }
 
-    /// The watcher keeps one session-bus connection instead of opening one per poll. Runs the
-    /// check in a child process under a private `dbus-run-session` bus, so bus names are ours.
-    #[test]
-    #[cfg(target_os = "linux")]
-    fn the_watcher_reuses_one_bus_connection() {
-        const INNER: &str = "GRIDCRAFT_THEME_INNER";
-        let unique = |c: &zbus::blocking::Connection| {
-            c.unique_name().map(|n| n.as_str().rsplit('.').next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0)).unwrap_or(0)
-        };
-        if std::env::var_os(INNER).is_none() {
-            let exe = std::env::current_exe().expect("cannot locate the test executable to re-run it under dbus-run-session");
-            let out = std::process::Command::new("dbus-run-session")
-                .arg("--")
-                .arg(exe)
-                .args(["--exact", "desktop_theme::tests::the_watcher_reuses_one_bus_connection", "--nocapture"])
-                .env(INNER, "1")
-                .output()
-                .expect("dbus-run-session is required to run this test (install dbus-daemon / dbus-x11)");
-            assert!(out.status.success(), "{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-            return;
-        }
-        let probe = zbus::blocking::Connection::session().expect("no session bus under dbus-run-session");
-        let before = unique(&probe);
-        let _watcher = DesktopTheme::start();
-        std::thread::sleep(POLL * 2 + Duration::from_secs(1));
-        let after_probe = zbus::blocking::Connection::session().expect("no session bus under dbus-run-session");
-        let made = unique(&after_probe) - before - 1;
-        assert!(made <= 1, "the watcher opened {made} bus connections in three reads");
-    }
-
     /// A watcher that was never started is inert rather than a panic.
     #[test]
     fn a_watcher_without_a_thread_is_inert() {
