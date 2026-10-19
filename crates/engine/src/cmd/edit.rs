@@ -612,7 +612,8 @@ fn undo(s: &mut Session, p: &Json) -> Result<Json> {
     let now = d.wb.clone();
     for _ in 0..steps {
         let Some(e) = d.undo.pop() else { break };
-        let cur = crate::HistoryEntry { label: e.label.clone(), wb: d.wb.clone(), selection: d.selection.clone() };
+        // Redo goes back to the undone edit's cells, not wherever the user clicked before undoing (#1855).
+        let cur = crate::HistoryEntry { label: e.label.clone(), wb: d.wb.clone(), selection: e.selection.clone() };
         d.redo.push(cur);
         label = e.label.clone();
         d.wb = e.wb;
