@@ -133,13 +133,22 @@ impl Language {
         translated.unwrap_or_else(|| text.rsplit_once('|').map_or(text, |(_, label)| label))
     }
 
-    pub(crate) fn tr_error(self, message: &str) -> String {
-        let message = crate::clean_error(message);
-        let translated = self.tr(&message);
-        let fallback = message.rsplit_once('|').map_or(message.as_str(), |(_, label)| label);
-        if translated == fallback { message } else { translated.to_owned() }
+   pub(crate) fn tr_error(self, message: &str) -> String {
+    let message = if message.starts_with("command `") {
+        crate::clean_error(message)
+    } else {
+        message.to_owned()
+    };
+
+    let translated = self.tr(&message);
+    let fallback = message.rsplit_once('|').map_or(message.as_str(), |(_, label)| label);
+
+    if translated == fallback {
+        message
+    } else {
+        translated.to_owned()
     }
-}
+}}
 
 /// Deserializes a saved language leniently: an unknown or malformed value (a language removed in a
 /// later version, a hand-edited `ui.json`) reads as English instead of failing the whole `UiState`,
@@ -627,6 +636,7 @@ mod tests {
         assert_eq!(Language::PtBr.tr_error("Select a chart first."), "Selecione um gráfico primeiro.");
         assert_eq!(Language::PtBr.tr_error("Sheet|Unknown failure"), "Sheet|Unknown failure");
         assert_eq!(Language::PtBr.tr_error("command `chart`: Select a chart first."), "Selecione um gráfico primeiro.");
+        assert_eq!(Language::PtBr.tr_error("Printer Office: permission denied"),"Printer Office: permission denied");
         assert_eq!(Language::Es.tr("Data"), "Datos");
         assert_eq!(Language::Es.tr("Freeze Panes"), "Inmovilizar paneles");
         assert_eq!(Language::Es.tr("Sheet1!A1"), "Sheet1!A1");
