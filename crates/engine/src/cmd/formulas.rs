@@ -498,12 +498,13 @@ fn select_trace_cells(s: &mut Session, p: &Json, precedents: bool) -> Result<Jso
         if precedents {
             for a in d.calc.graph.precedents_of((ks, kc)) {
                 if all {
-                    // Walk the sheet's stored cells inside the precedent area: blanks are
-                    // never selected and only formula cells extend the frontier, so a
-                    // formula late in a large range is not skipped.
+                    // Walk only the stored cells inside the precedent area (sparse
+                    // range iterator, not the whole sheet): blanks are never selected
+                    // and only formula cells extend the frontier, so a formula late in
+                    // a large range is not skipped.
                     let Some(sh) = d.wb.sheet(a.sheet) else { continue };
-                    for (c, cell) in sh.cells.iter() {
-                        if !a.range.contains(c) || matches!(cell.value, Value::Empty) {
+                    for (c, cell) in sh.cells.iter_range(a.range) {
+                        if matches!(cell.value, Value::Empty) {
                             continue;
                         }
                         if seen.insert((a.sheet, c)) {
