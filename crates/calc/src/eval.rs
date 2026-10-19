@@ -158,8 +158,13 @@ impl<'h> Evaluator<'h> {
         Ok(self.resolve_sheet(&r.sheet)?.into_iter().map(|sheet| Area { sheet, range }).collect())
     }
 
-    /// Dereferences: one cell → its value; a block → an array (trimmed to the used range);
-    /// several areas → `#VALUE!`.
+    /// Dereferences: one cell → its value; a block → an array; several areas → `#VALUE!`.
+    ///
+    /// A block keeps its full shape (blanks included) when it holds at most `FULL_SIZE_CELLS`
+    /// cells, or when it holds at most `FULL_SIZE_BOUNDED_CELLS` cells (one full column's worth)
+    /// and does not run to the sheet's last row or column. Every other block (larger, or a
+    /// bigger one that runs to the sheet's edge, such as `A:A` or `1:1`) is trimmed to the
+    /// sheet's used range before its values are read. An array over `MAX_CELLS` is `#NUM!`.
     pub fn deref(&mut self, ev: Ev) -> Value {
         match ev {
             Ev::V(v) => v,
