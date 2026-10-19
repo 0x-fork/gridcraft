@@ -57,3 +57,30 @@ fn a_short_wrap_text_edit_stays_one_line_tall() {
     let field = ctx.read_response(Id::new("gridcraft.cell_editor")).expect("the in-cell editor is shown").rect;
     assert!(field.height() < 30.0, "a one-line edit doesn't reach over the rows below: {field:?}");
 }
+
+/// The editor is sized from the text wrapped where the field wraps it: the editor's width less its
+/// 2 px inset a side, with no text margin (the field has no frame). Measured narrower, the editor
+/// would count rows the field doesn't have and reach over the cells below.
+#[test]
+fn the_editor_measures_the_text_at_the_fields_wrap_width() {
+    let ctx = Context::default();
+    let mut session = Session::new();
+    session.new_workbook();
+    session.execute("home.columnWidth", json!({"cols": "A:A", "chars": 12})).unwrap();
+    session.execute("home.wrapText", json!({"range": "A1", "on": true})).unwrap();
+    let mut app = SheetApp::new(session, Default::default());
+    frames(&ctx, &mut app);
+    app.begin_edit(Some(TEXT.into()), false);
+    frames(&ctx, &mut app);
+    let field = ctx.read_response(Id::new("gridcraft.cell_editor")).expect("the in-cell editor is shown").rect;
+    let sheet = app.session.active().unwrap().wb.active().unwrap().clone();
+    let st = app.session.active().unwrap().wb.styles.get(sheet.style_id(gridcraft_engine::cell(0, 0))).clone();
+    // The grid draws at its zoom: the cell is the field plus the 2 px inset a side, the font scales.
+    let z = (field.width() + 4.0) / sheet.col_width(0);
+    let font = egui::FontId::new(st.font.size * 96.0 / 72.0 * z, gridcraft_ui_egui::theme::cell_family(&st.font.name, st.font.bold, st.font.italic));
+    let at =
+        |w: f32| ctx.fonts_mut(|f| f.layout_job(egui::text::LayoutJob::simple(TEXT.into(), font.clone(), egui::Color32::PLACEHOLDER, w)).size().y);
+    let (own, with_margin) = (at(field.width()), at(field.width() - 8.0));
+    assert!(own != with_margin, "the test text must wrap differently 8 px narrower");
+    assert!((field.height() - own).abs() < 1.0, "the field wraps at its whole width, no text margin: {} vs {own}", field.height());
+}

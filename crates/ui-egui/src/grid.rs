@@ -2712,8 +2712,9 @@ fn in_cell_editor(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet, 
     // Otherwise it widens to the text's one-line width.
     let wrap = st.align.wrap;
     let (w, h) = if wrap {
-        // The field's own margins (4 px a side) and the 2 px inset leave this much for the text.
-        let wrapped = ui.painter().layout(ed.text.clone(), font.clone(), Color32::BLACK, (rect.width() - 12.0).max(1.0));
+        // The field wraps at the width it is given (the editor's less its 2 px inset a side): its
+        // frame is `Frame::NONE`, so no text margin is taken off.
+        let wrapped = ui.painter().layout(ed.text.clone(), font.clone(), Color32::BLACK, (rect.width() - 4.0).max(1.0));
         (rect.width(), (wrapped.size().y.max(size * 1.3 * lines) + 4.0).max(rect.height()))
     } else {
         let text_w = ui.painter().layout_no_wrap(ed.text.clone(), font.clone(), Color32::BLACK).size().x;
