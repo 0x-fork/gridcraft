@@ -595,12 +595,17 @@ fn let_lambda_names_ignore_case_in_any_script() {
     let mut t = T::new();
     t.set("A1", "=LET(dług,100,DŁUG*2)");
     assert_eq!(t.num("A1"), 200.0);
+    t.set("A2", "=LAMBDA(λ,ISOMITTED(Λ))()");
+    assert_eq!(t.get("A2"), Value::Bool(true));
     t.set("A3", "=LAMBDA(ćma,ĆMA+1)(1)");
     assert_eq!(t.num("A3"), 2.0);
     t.set("A4", "=LET(ŻAR,LAMBDA(x,x*3),żar(2))");
     assert_eq!(t.num("A4"), 6.0);
     t.set("A5", "=LET(λ,LAMBDA(x,x+1),SUM(MAP({1,2},Λ)))");
     assert_eq!(t.num("A5"), 5.0);
+    // `ß` upper-cases to `SS`, yet `ẞ` is its capital.
+    t.set("A6", "=LET(ß,100,ẞ*2)");
+    assert_eq!(t.num("A6"), 200.0);
 }
 
 #[test]

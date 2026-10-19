@@ -114,7 +114,7 @@ workbooks; results checked in as data, not Excel files) and fixing what it finds
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-19 | minor | LET and LAMBDA names compare case-insensitively in any script, as in Excel: `=LET(dług,100,DŁUG*2)` is 200 (was #NAME?); also LET-bound lambdas called or passed by name (`żar(2)`, `MAP(…,Λ)`) |
+| 2026-10-19 | minor | LET and LAMBDA names compare case-insensitively in any script, as in Excel: `=LET(dług,100,DŁUG*2)` is 200 (was #NAME?); also LET-bound lambdas called or passed by name (`żar(2)`, `MAP(…,Λ)`), `ISOMITTED`, and formula-bar alias translation (one shared `gridcraft_formula::same_name`, which also matches `ß` with `ẞ`) |
 | 2026-10-15 | minor | MEDIAN and AGGREGATE median use an overflow-safe midpoint (#1579); regressions cover finite extremes, tiny values and dependent recalculation |
 | 2026-10-13 | minor | Clear reports changed stored cells sparsely, including those beyond the first million coordinates; dependent formulas and removed spills update, while clearing empty merges still unblocks spills (#1032) |
 | 2026-10-12 | minor | USDOLLAR added as a Compatibility function (not on Microsoft's list, so the counts don't change); MIRR with no positive flow is -1, COUNTIF's bare `"<="` / `">="` skip empty strings, INDIRECT with `a1` = FALSE gives `#REF!` for A1-style text (#738) |
