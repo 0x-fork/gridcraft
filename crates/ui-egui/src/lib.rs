@@ -1129,6 +1129,10 @@ impl SheetApp {
         // The language the widgets translate with this frame (see `i18n::current`).
         i18n::set_current(&ctx, self.ui.language);
         let t = theme::Tokens::get(&ctx);
+        // A host can turn the File tab off while Backstage is already open: close it.
+        if !self.chrome.file_tab {
+            self.backstage = None;
+        }
         if self.backstage.is_none() {
             self.ribbon_keys(&ctx);
         }

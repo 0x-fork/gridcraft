@@ -52,3 +52,14 @@ fn without_the_file_tab_the_backstage_view_never_opens() {
     assert!(h.state().backstage.is_none(), "so is every page, Print and Save As included");
     assert!(h.query_by_label("AutoSave").is_some(), "the title bar can stay on its own");
 }
+
+#[test]
+fn turning_the_file_tab_off_closes_an_open_backstage() {
+    let mut h = harness(Chrome::default());
+    h.state_mut().open_backstage(Page::Home);
+    h.run_steps(3);
+    assert!(h.state().backstage.is_some(), "Backstage opens with the File tab on");
+    h.state_mut().chrome.file_tab = false;
+    h.run_steps(3);
+    assert!(h.state().backstage.is_none(), "and closes when the host turns the File tab off");
+}
