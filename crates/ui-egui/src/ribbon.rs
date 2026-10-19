@@ -2462,7 +2462,8 @@ pub fn shortcut(app: &mut SheetApp, key: Key, m: Modifiers) {
                 None
             }
         },
-        Key::Plus | Key::Equals if shift => match whole_lines(app) {
+        // Insert works on one area at a time, so several areas still go through the dialog.
+        Key::Plus | Key::Equals if shift => match whole_lines(app).filter(|_| single_area(app)) {
             Some(true) => Some(("home.insertRows", json!({}))),
             Some(false) => Some(("home.insertColumns", json!({}))),
             None => {
@@ -2523,6 +2524,11 @@ mod checkbox_on_tests {
         assert!(checkbox_on(false, false));
         assert!(!checkbox_on(false, true));
     }
+}
+
+/// Whether the selection is a single area.
+fn single_area(app: &SheetApp) -> bool {
+    app.session.active().is_some_and(|d| d.selection.ranges.len() == 1)
 }
 
 /// `Some(true)` when every selected area is whole rows, `Some(false)` when every one is whole
