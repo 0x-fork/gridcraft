@@ -1701,7 +1701,7 @@ pub(crate) fn paint_headers(
     t: &Tokens,
     quads: &[((u32, u32), (u32, u32), Rect)],
 ) {
-    let font = theme::ui_font((11.5 * (geo.z / DISPLAY_SCALE).max(0.75)).min(16.0));
+    let font = theme::ui_font(heading_font_size(geo.z));
     // The headers' own area: inside the outline bands.
     let r = Rect::from_min_max(pos2(geo.head_left(), geo.head_top()), geo.rect.max);
     let top = Rect::from_min_max(pos2(geo.cells.left(), r.top()), pos2(r.right(), geo.cells.top()));
@@ -3336,8 +3336,23 @@ mod selection_fill_tests {
     }
 }
 
+/// Row and column heading labels grow with the zoom as the cells do, as in Excel (at 400% the
+/// labels are four times their 100% size), and never get smaller than a readable 8.5 points.
+pub(crate) fn heading_font_size(zoom: f32) -> f32 {
+    (11.5 * (zoom / DISPLAY_SCALE)).max(8.5)
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn heading_labels_scale_with_the_zoom_without_a_cap() {
+        use super::{DISPLAY_SCALE, heading_font_size};
+        let at = |percent: f32| heading_font_size(percent / 100.0 * DISPLAY_SCALE);
+        assert!((at(400.0) / at(100.0) - 4.0).abs() < 1e-4, "four times as large at 400%");
+        assert!(at(200.0) > at(100.0) && at(400.0) > at(200.0));
+        assert_eq!(at(10.0), 8.5, "never below a readable size");
+    }
     use super::*;
 
     #[test]
