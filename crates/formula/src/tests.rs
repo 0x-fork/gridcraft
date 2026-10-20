@@ -401,3 +401,16 @@ fn formulas_longer_than_excel_allows_are_refused() {
     assert!(text.len() > crate::MAX_FORMULA_LEN);
     assert!(parse(&text).is_ok());
 }
+
+#[test]
+fn missing_closing_parentheses_are_closed_and_errors_describe_the_typed_text() {
+    // #2030: `1+` reported "unexpected `)`", the error of the last retry with `)` appended.
+    let entry = |src: &str| parse_closing_parens(src, parse);
+    assert_eq!(entry("SUM(1,2").map(|e| print(&e)), Ok("SUM(1,2)".to_string()));
+    assert_eq!(entry("((1+2").map(|e| print(&e)), Ok("((1+2))".to_string()));
+    assert_eq!(entry("1+2").map(|e| print(&e)), Ok("1+2".to_string()));
+    for src in ["1+", "--", "SUM(1,+", "1+*2", &format!("{}1", "(".repeat(9))] {
+        assert_eq!(entry(src).unwrap_err(), parse(src).unwrap_err(), "{src}");
+    }
+    assert_eq!(entry("1+").unwrap_err().msg, "unexpected end of formula");
+}
