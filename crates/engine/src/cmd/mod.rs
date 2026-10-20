@@ -453,6 +453,38 @@ fn same_content(a: Option<&gridcraft_model::Cell>, b: Option<&gridcraft_model::C
     }
 }
 
+/// Lines a single text line needs when word-wrapped into `width` points. The grid wraps whole
+/// words (egui's LayoutJob), so dividing the total width by the column width undercounts: each
+/// drawn line ends early at the last word that fits. A word wider than the column breaks
+/// mid-word, the way egui does. (#1969)
+fn wrapped_line_count(line: &str, width: f32, size: f32, bold: bool) -> f32 {
+    let word_w = |w: &str| crate::cmd::format::approx_text_width(w, size, bold);
+    let space_w = word_w(" ");
+    let mut lines = 1.0f32;
+    let mut used = 0.0f32;
+    for word in line.split_whitespace() {
+        let w = word_w(word);
+        if w > width {
+            // wider than the column: egui fills the current line, then breaks it across lines
+            if used > 0.0 {
+                lines += 1.0;
+            }
+            let chunks = (w / width).ceil();
+            lines += chunks - 1.0;
+            used = w - (chunks - 1.0) * width;
+            continue;
+        }
+        let gap = if used > 0.0 { space_w } else { 0.0 };
+        if used + gap + w > width {
+            lines += 1.0;
+            used = w;
+        } else {
+            used += gap + w;
+        }
+    }
+    lines
+}
+
 /// Recomputes an automatic row height from its content: the largest font, and wrapped or
 /// multi-line text. Rows with a user-set height keep it.
 pub fn auto_row_height(wb: &mut Workbook, si: usize, row: u32) {
@@ -491,10 +523,7 @@ pub fn auto_row_height(wb: &mut Workbook, si: usize, row: u32) {
             let explicit = text.lines().count().max(1) as f32;
             lines = if st.align.wrap {
                 let w = sh.col_width(c).max(1.0) - 6.0;
-                text.lines()
-                    .map(|l| (crate::cmd::format::approx_text_width(l, size, st.font.bold) / w.max(1.0)).ceil().max(1.0))
-                    .sum::<f32>()
-                    .max(1.0)
+                text.lines().map(|l| wrapped_line_count(l, w.max(1.0), size, st.font.bold)).sum::<f32>().max(1.0)
             } else {
                 explicit
             };
