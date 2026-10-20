@@ -315,33 +315,38 @@ impl Clone for Expr {
 
 impl PartialEq for Expr {
     fn eq(&self, other: &Self) -> bool {
-        // Compare the left spines of operator chains in a loop (see [`Expr`]).
+        // Compare the left spines of operator chains in a loop (see [`Expr`]). The right-hand
+        // operands are compared only once the whole spine matches, so a mismatch on the left
+        // returns before any (possibly deep) right operand is walked.
         let (mut x, mut y) = (self, other);
-        loop {
+        let mut right_operands = Vec::new();
+        let equal = loop {
             match (x, y) {
                 (Expr::Binary(o1, a1, b1), Expr::Binary(o2, a2, b2)) => {
-                    if o1 != o2 || b1 != b2 {
+                    if o1 != o2 {
                         return false;
                     }
+                    right_operands.push((b1, b2));
                     x = a1;
                     y = a2;
                 }
-                (Expr::Number(a), Expr::Number(b)) => return a == b,
-                (Expr::Text(a), Expr::Text(b)) => return a == b,
-                (Expr::Bool(a), Expr::Bool(b)) => return a == b,
-                (Expr::Error(a), Expr::Error(b)) => return a == b,
-                (Expr::Array(a), Expr::Array(b)) => return a == b,
-                (Expr::Ref(a), Expr::Ref(b)) => return a == b,
-                (Expr::Name(a), Expr::Name(b)) => return a == b,
-                (Expr::Struct(a), Expr::Struct(b)) => return a == b,
-                (Expr::Unary(o1, a), Expr::Unary(o2, b)) => return o1 == o2 && a == b,
-                (Expr::Call(n1, a), Expr::Call(n2, b)) => return n1 == n2 && a == b,
-                (Expr::Invoke(c1, a), Expr::Invoke(c2, b)) => return c1 == c2 && a == b,
-                (Expr::Missing, Expr::Missing) => return true,
-                (Expr::Paren(a), Expr::Paren(b)) => return a == b,
-                _ => return false,
+                (Expr::Number(a), Expr::Number(b)) => break a == b,
+                (Expr::Text(a), Expr::Text(b)) => break a == b,
+                (Expr::Bool(a), Expr::Bool(b)) => break a == b,
+                (Expr::Error(a), Expr::Error(b)) => break a == b,
+                (Expr::Array(a), Expr::Array(b)) => break a == b,
+                (Expr::Ref(a), Expr::Ref(b)) => break a == b,
+                (Expr::Name(a), Expr::Name(b)) => break a == b,
+                (Expr::Struct(a), Expr::Struct(b)) => break a == b,
+                (Expr::Unary(o1, a), Expr::Unary(o2, b)) => break o1 == o2 && a == b,
+                (Expr::Call(n1, a), Expr::Call(n2, b)) => break n1 == n2 && a == b,
+                (Expr::Invoke(c1, a), Expr::Invoke(c2, b)) => break c1 == c2 && a == b,
+                (Expr::Missing, Expr::Missing) => break true,
+                (Expr::Paren(a), Expr::Paren(b)) => break a == b,
+                _ => break false,
             }
-        }
+        };
+        equal && right_operands.into_iter().rev().all(|(b1, b2)| b1 == b2)
     }
 }
 
