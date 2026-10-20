@@ -1339,7 +1339,9 @@ fn preset_style(name: &str) -> Style {
 /// files carrying it, even in repair mode. Validated here so the API and the New Rule dialog
 /// (which dispatches this command) share one gate, the way Excel's object model refuses.
 fn check_cf_formula(cmd: &str, what: &str, formula: &str) -> Result<()> {
-    if gridcraft_formula::parse(formula.trim_start_matches('=')).is_err() {
+    // Strip exactly one leading '=', the way the XLSX writer does: a value like '===A1'
+    // only parses after several strips and would still be saved unparseable. (#1999 review)
+    if gridcraft_formula::parse(formula.strip_prefix('=').unwrap_or(formula)).is_err() {
         return Err(bad(cmd, format!("invalid {what} formula `{formula}` — it does not parse; Excel would reject the saved file")));
     }
     Ok(())

@@ -20,6 +20,10 @@ fn invalid_cf_formulas_are_rejected() {
         // more garbage that the parser rejects
         json!({"type": "expression", "formula": "=IF(A1", "preset": "lightRedFill"}),
         json!({"type": "cellIs", "operator": "equal", "value": "=((A1", "preset": "lightRedFill"}),
+        // multiple leading '=' on a stored-as-typed threshold: the writer strips one,
+        // the rest must still parse (#1999 review)
+        json!({"type": "dataBar", "min": {"type": "formula", "value": "===A1"}}),
+        json!({"type": "dataBar", "max": {"type": "formula", "value": "==1+"}}),
     ] {
         let err = session()
             .execute("home.conditionalFormat", json!({"range": "A1:A5", "rule": rule.clone()}))
