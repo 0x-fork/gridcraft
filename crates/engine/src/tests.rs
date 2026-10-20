@@ -3344,3 +3344,32 @@ fn csv_as_text_keeps_identifier_columns_as_written() {
     let saved = s.execute("file.saveBytes", json!({"format": "csv"})).unwrap();
     assert_eq!(crate::io::base64_decode(saved["base64"].as_str().unwrap()).unwrap(), csv.replace('\n', "\r\n").as_bytes());
 }
+
+#[test]
+fn convert_to_number_turns_numbers_stored_as_text_into_numbers() {
+    let mut s = s();
+    let value = |s: &mut Session, cell: &str| s.execute("cell.get", json!({"cell": cell})).unwrap()["value"].clone();
+    for (cell, input) in [("A1", "'123"), ("A2", "'1,000.5"), ("A3", "'abc"), ("A4", "'3/4/2026"), ("A5", "=\"7\"")] {
+        s.execute("cell.set", json!({"cell": cell, "input": input})).unwrap();
+    }
+    s.execute("home.bold", json!({"range": "A1", "on": true})).unwrap();
+    let r = s.execute("formulas.convertToNumber", json!({"range": "A1:A5"})).unwrap();
+    assert_eq!(r["converted"], 2);
+    assert_eq!(value(&mut s, "A1"), json!(123.0));
+    assert_eq!(value(&mut s, "A2"), json!(1000.5));
+    // Words, date text and a formula's text result stay as they are.
+    assert_eq!(value(&mut s, "A3"), json!("abc"));
+    assert_eq!(value(&mut s, "A4"), json!("3/4/2026"));
+    assert_eq!(value(&mut s, "A5"), json!("7"));
+    assert_eq!(s.execute("cell.get", json!({"cell": "A1"})).unwrap()["style"]["font"]["bold"], true, "the format is kept");
+    // SUM now counts them; undo brings the text back in one step.
+    s.execute("cell.set", json!({"cell": "B1", "input": "=SUM(A1:A2)"})).unwrap();
+    assert_eq!(value(&mut s, "B1"), json!(1123.5));
+    s.execute("edit.undo", json!({})).unwrap();
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(value(&mut s, "A1"), json!("123"));
+    // With no range it works on the selection.
+    s.execute("selection.set", json!({"range": "A2"})).unwrap();
+    assert_eq!(s.execute("formulas.convertToNumber", json!({})).unwrap()["converted"], 1);
+    assert_eq!(value(&mut s, "A1"), json!("123"));
+}

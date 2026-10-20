@@ -1,6 +1,6 @@
 //! Formulas tab: AutoSum, Insert Function, names, auditing, calculation.
 
-use gridcraft_core::{CellRef, RangeRef};
+use gridcraft_core::{CellRef, RangeRef, Value};
 use gridcraft_model::{CalcMode, DefinedName, Formula};
 use serde_json::{Value as Json, json};
 
@@ -51,6 +51,15 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(query "formulas.traceDependents", "Trace Dependents", ["Formulas", "Formula Auditing"], None, "{cell?} → cells", has_doc, trace_dependents),
         cmd!(noundo "formulas.removeArrows", "Remove Arrows", ["Formulas", "Formula Auditing"], None, "{}", has_doc, |_, _| ok()),
         cmd!("formulas.showFormulas", "Show Formulas", ["Formulas", "Formula Auditing"], Some("Ctrl+`"), "{on?}", has_doc, show_formulas),
+        cmd!(
+            "formulas.convertToNumber",
+            "Convert to Number",
+            [],
+            None,
+            "{range?} → {converted} (numbers stored as text in the range or selection become numbers)",
+            has_doc,
+            convert_to_number
+        ),
         cmd!(query "formulas.errorChecking", "Error Checking", ["Formulas", "Formula Auditing"], None, "{} → cells with errors", has_doc, error_checking),
         cmd!(query "formulas.evaluateFormula", "Evaluate Formula", ["Formulas", "Formula Auditing"], None, "{cell?, formula?} → steps", has_doc, evaluate_formula),
         cmd!(query "formulas.evaluate", "Evaluate", [], None, "{formula: \"=SUM(A1:A3)\", cell?} → value without changing the sheet", has_doc, evaluate),
@@ -486,6 +495,40 @@ fn show_formulas(s: &mut Session, p: &Json) -> Result<Json> {
     edit(s, |cx| {
         cx.sheet_mut(sheet)?.show_formulas = on;
         Ok(json!({"on": on}))
+    })
+}
+
+/// The number a cell's text stands for when Excel's background check flags it as a number stored
+/// as text: a constant (not a formula's result) that would be a number if typed.
+pub fn number_stored_as_text(cell: &gridcraft_model::Cell) -> Option<f64> {
+    match &cell.value {
+        Value::Text(t) if cell.formula.is_none() => gridcraft_core::parse::number_stored_as_text(t),
+        _ => None,
+    }
+}
+
+/// Convert to Number: each number stored as text in the range becomes that number, keeping the
+/// cell's format.
+fn convert_to_number(s: &mut Session, p: &Json) -> Result<Json> {
+    let sheet = target_sheet(s, p)?;
+    let ranges = target_ranges(s, p)?;
+    edit(s, |cx| {
+        let mut converted = 0;
+        for r in &ranges {
+            let Some(r) = cx.wb.sheet(sheet).and_then(|sh| sh.used_range()).and_then(|u| r.intersection(&u)) else { continue };
+            let found: Vec<(CellRef, f64)> = cx
+                .wb
+                .sheet(sheet)
+                .map(|sh| sh.cells.iter_range(r).filter_map(|(c, x)| number_stored_as_text(x).map(|n| (c, n))).collect())
+                .unwrap_or_default();
+            let sh = cx.sheet_mut(sheet)?;
+            for (c, n) in &found {
+                sh.set_value(*c, Value::number(*n));
+            }
+            cx.changed.extend(found.iter().map(|(c, _)| (sheet, *c)));
+            converted += found.len();
+        }
+        Ok(json!({"converted": converted}))
     })
 }
 

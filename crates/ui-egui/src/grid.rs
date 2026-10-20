@@ -790,6 +790,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     list_picker(app, ui, &geo, previous_popups.1 == app.grid.list_picker);
     header_menu(app, ui, previous_popups.2 == app.grid.header_menu);
     context_menu(app, ui);
+    error_check_tag(app, ui, &geo, sh);
     let track_x = if rtl { (available.left(), rect.left()) } else { (rect.right(), available.right()) };
     vertical_scrollbar(app, ui, sh, &geo, track_x, max_y, &t);
     if app.session.clipboard.is_some() {
@@ -1380,6 +1381,15 @@ pub(crate) fn paint_quadrant(
             p.add(egui::Shape::convex_polygon(
                 vec![rect.right_top(), pos2(rect.right(), rect.top() + s), pos2(rect.right() - s, rect.top())],
                 tri_col,
+                Stroke::NONE,
+            ));
+        }
+        // Background error checking: a number stored as text gets Excel's green corner (#1994).
+        if !sh.show_formulas && sh.cell(*c).and_then(gridcraft_engine::cmd::formulas::number_stored_as_text).is_some() {
+            let s = 6.0 * z.max(0.7);
+            p.add(egui::Shape::convex_polygon(
+                vec![rect.left_top(), pos2(rect.left() + s, rect.top()), pos2(rect.left(), rect.top() + s)],
+                ERROR_CHECK_GREEN,
                 Stroke::NONE,
             ));
         }
@@ -2968,6 +2978,53 @@ fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
     {
         app.grid.context_menu = None;
     }
+}
+
+/// Excel's background error-checking indicator colour.
+const ERROR_CHECK_GREEN: Color32 = Color32::from_rgb(0x1E, 0x8E, 0x3E);
+
+/// The warning button beside an active cell holding a number stored as text, as in Excel: its
+/// menu names the problem and offers Convert to Number for the selection (#1994).
+fn error_check_tag(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet) {
+    if app.editor.is_some() || app.dialog.is_some() || sh.show_formulas || app.grid.drag != Drag::None {
+        return;
+    }
+    let Some(active) = app.session.active().map(|d| d.selection.active) else { return };
+    if sh.cell(active).and_then(gridcraft_engine::cmd::formulas::number_stored_as_text).is_none() {
+        return;
+    }
+    let cell = geo.cell_rect(sh, active);
+    let size = vec2(18.0, 18.0);
+    // Left of the cell, or right of it when that would cover the row headings.
+    let left = if cell.left() - size.x - 2.0 >= geo.cells.left() { cell.left() - size.x - 2.0 } else { cell.right() + 2.0 };
+    let tag = geo.mirror_rect(Rect::from_min_size(pos2(left, cell.top()), size));
+    if !geo.cells.intersects(tag) {
+        return;
+    }
+    let lang = crate::i18n::current(ui.ctx());
+    let resp = ui.interact(tag, egui::Id::new("gridcraft.error_check_tag"), Sense::click()).on_hover_text(lang.tr("Number Stored as Text"));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, lang.tr("Error checking options")));
+    let t = Tokens::get(ui.ctx());
+    let p = ui.painter();
+    p.rect_filled(tag, 3.0, if resp.hovered() { t.hover } else { t.window });
+    p.rect_stroke(tag, 3.0, Stroke::new(1.0, t.separator), egui::StrokeKind::Inside);
+    // A warning sign: an amber diamond with an exclamation mark.
+    let c = tag.center();
+    let r = 6.0;
+    p.add(egui::Shape::convex_polygon(
+        vec![pos2(c.x, c.y - r), pos2(c.x + r, c.y), pos2(c.x, c.y + r), pos2(c.x - r, c.y)],
+        Color32::from_rgb(0xF2, 0xB7, 0x05),
+        Stroke::NONE,
+    ));
+    p.text(c, egui::Align2::CENTER_CENTER, "!", egui::FontId::proportional(10.0), Color32::BLACK);
+    egui::Popup::menu(&resp).show(|ui| {
+        ui.label(egui::RichText::new(lang.tr("Number Stored as Text")).strong());
+        ui.separator();
+        if ui.button(lang.tr("Convert to Number")).clicked() {
+            app.run_or_alert("formulas.convertToNumber", json!({}));
+            ui.close();
+        }
+    });
 }
 
 /// Used by `EditState` users to keep the active cell visible while pointing.
