@@ -133,7 +133,7 @@ impl Language {
         translated.unwrap_or_else(|| text.rsplit_once('|').map_or(text, |(_, label)| label))
     }
 
-    pub(crate) fn tr_error(self, message: &str) -> String {
+pub(crate) fn tr_error(self, message: &str) -> String {
     let message = if message.starts_with("command `") {
         crate::clean_error(message)
     } else {
@@ -141,14 +141,15 @@ impl Language {
     };
 
     let translated = self.tr(&message);
-    let fallback = message.rsplit_once('|').map_or(message.as_str(), |(_, label)| label);
+    let fallback = message
+        .rsplit_once('|')
+        .map_or(message.as_str(), |(_, label)| label);
 
     if translated == fallback {
         message
     } else {
         translated.to_owned()
     }
-  }
 }
 
 /// Deserializes a saved language leniently: an unknown or malformed value (a language removed in a
