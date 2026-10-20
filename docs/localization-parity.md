@@ -83,7 +83,7 @@ language (none so far) and of localized function names.
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-20 | minor | Dutch (nl) interface catalog (`i18n/nl.rs`, 518 labels, ~24%): every key the other catalogs translate; `nl-NL`, `nl-BE` locale tags resolve to Dutch |
+| 2026-10-20 | minor | Dutch (nl) interface catalog (`i18n/nl.rs`, 518 labels, ~24%): the shared key set every language must cover (ribbon, context menus, File view, dialog titles, Options page), matching the German, French and Czech catalogs; `nl-NL`, `nl-BE` locale tags resolve to Dutch |
 | 2026-10-19 | minor | Defined-name length counts characters, not bytes: Arabic names up to 255 letters are accepted, and Create from Selection keeps long Arabic headers |
 | 2026-10-19 | minor | Table names are limited to 255 Unicode characters |
 | 2026-10-19 | minor | Right-to-left sheets in legacy `.xls` files (common in older Arabic workbooks) open right-to-left |
