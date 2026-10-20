@@ -131,6 +131,13 @@ pub struct Theme {
     /// The body font's complex-script typeface (`<a:cs>`); empty when the file did not set one.
     #[serde(default)]
     pub minor_font_cs: String,
+    /// The heading font's per-script typefaces (`<a:font script="Arab" typeface="…"/>`), as
+    /// (script, typeface) in file order.
+    #[serde(default)]
+    pub major_font_scripts: Vec<(String, String)>,
+    /// The body font's per-script typefaces, as (script, typeface) in file order.
+    #[serde(default)]
+    pub minor_font_scripts: Vec<(String, String)>,
 }
 
 impl Default for Theme {
@@ -146,6 +153,8 @@ impl Default for Theme {
             minor_font_ea: String::new(),
             major_font_cs: String::new(),
             minor_font_cs: String::new(),
+            major_font_scripts: Vec::new(),
+            minor_font_scripts: Vec::new(),
         }
     }
 }
@@ -450,6 +459,14 @@ mod tests {
         assert_eq!(t.derive(bold, |s| s.font.bold = false), StyleId::DEFAULT);
         assert_eq!(t.len(), 2);
         assert!(!t.get(StyleId(999)).font.bold);
+    }
+
+    #[test]
+    fn a_theme_saved_before_per_script_fonts_still_opens() {
+        let mut json = serde_json::to_value(Theme::default()).unwrap();
+        let fields = json.as_object_mut().unwrap();
+        assert!(fields.remove("major_font_scripts").is_some() && fields.remove("minor_font_scripts").is_some());
+        assert_eq!(serde_json::from_value::<Theme>(json).unwrap(), Theme::default());
     }
 
     #[test]
