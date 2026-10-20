@@ -8,6 +8,7 @@
 
 pub mod catalog;
 pub mod cf;
+mod chart_svg;
 mod clip_html;
 pub mod cmd;
 pub mod display;

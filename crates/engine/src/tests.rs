@@ -3344,3 +3344,34 @@ fn csv_as_text_keeps_identifier_columns_as_written() {
     let saved = s.execute("file.saveBytes", json!({"format": "csv"})).unwrap();
     assert_eq!(crate::io::base64_decode(saved["base64"].as_str().unwrap()).unwrap(), csv.replace('\n', "\r\n").as_bytes());
 }
+
+#[test]
+fn html_export_draws_charts_as_inline_svg_with_their_text() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Month", "Sales"], ["Jan", 5], ["Feb", 7], ["Mar", 9]]})).unwrap();
+    s.execute("insert.chart", json!({"range": "A1:B4", "type": "column", "title": "Quarterly <Sales>", "at": "D2", "width": 300, "height": 200}))
+        .unwrap();
+    let html = crate::io::to_html(&s.doc().unwrap().wb, 0).unwrap();
+    assert!(html.contains("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"300\" height=\"200\""), "{html}");
+    assert!(html.contains(">Quarterly &lt;Sales&gt;</text>"), "the title is drawn as escaped text: {html}");
+    assert!(html.contains("position:absolute;left:"), "{html}");
+    assert!(html.contains("<rect "), "{html}");
+}
+
+#[test]
+fn html_export_draws_pie_wedges_as_svg_paths() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Region", "Share"], ["North", 60], ["South", 40]]})).unwrap();
+    s.execute("insert.chart", json!({"range": "A1:B3", "type": "pie", "title": "Share"})).unwrap();
+    let html = crate::io::to_html(&s.doc().unwrap().wb, 0).unwrap();
+    assert!(html.matches("<path d=\"M").count() >= 2, "one wedge per slice: {html}");
+    assert!(html.contains(">North</text>") && html.contains(">South</text>"), "the legend names the slices: {html}");
+}
+
+#[test]
+fn html_export_without_pictures_or_charts_has_no_fixed_geometry() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["a", "b"]]})).unwrap();
+    let html = crate::io::to_html(&s.doc().unwrap().wb, 0).unwrap();
+    assert!(!html.contains("<colgroup>") && !html.contains("table-layout") && !html.contains("<svg") && !html.contains("<img"), "{html}");
+}
