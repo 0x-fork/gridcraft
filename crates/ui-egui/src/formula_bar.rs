@@ -163,7 +163,9 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
     let has_focus = focused == Some(id) || (mine && (ed.request_focus || focused.is_none()));
     let mut action: Option<(i64, i64, bool, bool)> = None;
     let mut cancel = false;
-    if has_focus && mine {
+    // A message box over the editor (a data validation alert, a formula error) gets Enter and Esc;
+    // the editor used to take them, so the first Esc cancelled the edit behind the message.
+    if has_focus && mine && app.message.is_none() {
         let (enter, tab, esc, alt_enter, cmd_enter, ctrl_shift_enter, shift) = ui.input_mut(|i| {
             let m = i.modifiers;
             let alt_enter =

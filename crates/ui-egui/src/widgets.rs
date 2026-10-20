@@ -293,6 +293,11 @@ pub fn message_box(app: &mut SheetApp, ctx: &egui::Context) {
     });
     if close {
         app.message = None;
+        // Back to the entry the message was about (a validation alert, a formula error), so it can
+        // be fixed from the keyboard without clicking the cell again.
+        if let Some(ed) = &mut app.editor {
+            ed.request_focus = true;
+        }
     }
 }
 
