@@ -133,22 +133,13 @@ impl Language {
         translated.unwrap_or_else(|| text.rsplit_once('|').map_or(text, |(_, label)| label))
     }
 
-pub(crate) fn tr_error(self, message: &str) -> String {
-    let message = if message.starts_with("command `") {
-        crate::clean_error(message)
-    } else {
-        message.to_owned()
-    };
+    pub(crate) fn tr_error(self, message: &str) -> String {
+        let message = if message.starts_with("command `") { crate::clean_error(message) } else { message.to_owned() };
 
-    let translated = self.tr(&message);
-    let fallback = message
-        .rsplit_once('|')
-        .map_or(message.as_str(), |(_, label)| label);
+        let translated = self.tr(&message);
+        let fallback = message.rsplit_once('|').map_or(message.as_str(), |(_, label)| label);
 
-    if translated == fallback {
-        message
-    } else {
-        translated.to_owned()
+        if translated == fallback { message } else { translated.to_owned() }
     }
 }
 
