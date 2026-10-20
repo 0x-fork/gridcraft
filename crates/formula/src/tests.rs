@@ -453,3 +453,20 @@ fn spanish_input_counts_left_operand_of_a_chain_at_the_same_depth() {
     let chain = Expr::Binary(BinOp::Add, Box::new(wrap(deepest)), Box::new(Expr::Number(1.0)));
     assert!(es(&chain).is_ok());
 }
+
+#[test]
+fn walk_is_preorder_and_map_is_postorder_left_to_right() {
+    // `(A1+B1)+SUM(C1,D1)-E1`: a chain with a call on its right. walk visits parents before
+    // children, map rewrites children (left to right) before their parent.
+    let e = parse("(A1+B1)+SUM(C1,D1)-E1").unwrap();
+    let mut walked = Vec::new();
+    e.walk(&mut |n| walked.push(print(n)));
+    assert_eq!(walked, ["(A1+B1)+SUM(C1,D1)-E1", "(A1+B1)+SUM(C1,D1)", "(A1+B1)", "A1+B1", "A1", "B1", "SUM(C1,D1)", "C1", "D1", "E1"]);
+    let mut mapped = Vec::new();
+    let out = e.map(&mut |n| {
+        mapped.push(print(&n));
+        n
+    });
+    assert_eq!(mapped, ["A1", "B1", "A1+B1", "(A1+B1)", "C1", "D1", "SUM(C1,D1)", "(A1+B1)+SUM(C1,D1)", "E1", "(A1+B1)+SUM(C1,D1)-E1"]);
+    assert_eq!(print(&out), "(A1+B1)+SUM(C1,D1)-E1");
+}
