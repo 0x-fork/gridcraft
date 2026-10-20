@@ -14,6 +14,7 @@ mod de;
 mod es;
 mod fr;
 mod ko;
+mod nl;
 mod pt;
 mod ru;
 mod sr;
@@ -35,10 +36,12 @@ pub enum Language {
     Cs,
     Fr,
     Sr,
+    Nl,
 }
 
 impl Language {
-    pub const ALL: [Self; 11] = [Self::En, Self::Es, Self::Zh, Self::Ja, Self::Ko, Self::Ru, Self::PtBr, Self::De, Self::Cs, Self::Fr, Self::Sr];
+    pub const ALL: [Self; 12] =
+        [Self::En, Self::Es, Self::Zh, Self::Ja, Self::Ko, Self::Ru, Self::PtBr, Self::De, Self::Cs, Self::Fr, Self::Sr, Self::Nl];
 
     /// The language's own name, shown in the switcher.
     pub fn name(self) -> &'static str {
@@ -54,6 +57,7 @@ impl Language {
             Self::Cs => "Čeština",
             Self::Fr => "Français",
             Self::Sr => "Srpski",
+            Self::Nl => "Nederlands",
         }
     }
 
@@ -71,6 +75,7 @@ impl Language {
             Self::Cs => "cs",
             Self::Fr => "fr",
             Self::Sr => "sr",
+            Self::Nl => "nl",
         }
     }
 
@@ -91,6 +96,7 @@ impl Language {
             "cs" => Some(Self::Cs),
             "fr" => Some(Self::Fr),
             "sr" => Some(Self::Sr),
+            "nl" => Some(Self::Nl),
             _ => None,
         }
     }
@@ -129,6 +135,7 @@ impl Language {
             Self::Cs => cs::translate(text),
             Self::Fr => fr::translate(text),
             Self::Sr => sr::translate(text),
+            Self::Nl => nl::translate(text),
         };
         translated.unwrap_or_else(|| text.rsplit_once('|').map_or(text, |(_, label)| label))
     }
@@ -611,6 +618,7 @@ mod tests {
             assert!(cs::translate(english).is_some_and(|text| !text.is_empty()), "missing Czech: {english}");
             assert!(fr::translate(english).is_some_and(|text| !text.is_empty()), "missing French: {english}");
             assert!(sr::translate(english).is_some_and(|text| !text.is_empty()), "missing Serbian: {english}");
+            assert!(nl::translate(english).is_some_and(|text| !text.is_empty()), "missing Dutch: {english}");
         }
         assert_eq!(Language::Ja.tr("Data"), "データ");
         assert_eq!(Language::Zh.tr("Data"), "数据");
@@ -644,6 +652,10 @@ mod tests {
         assert_eq!(Language::Sr.tr("Sheet1!A1"), "Sheet1!A1");
         assert_eq!(Language::Sr.tr("Page Layout|Orientation"), "Orijentacija");
         assert_eq!(Language::Sr.tr("Orientation"), "Orijentacija");
+        assert_eq!(Language::Nl.tr("Data"), "Gegevens");
+        assert_eq!(Language::Nl.tr("Sheet1!A1"), "Sheet1!A1");
+        assert_eq!(Language::Nl.tr("Page Layout|Orientation"), "Paginastand");
+        assert_eq!(Language::Nl.tr("Orientation"), "Richting");
         assert_eq!(Language::parse("xx"), None);
     }
 
@@ -698,6 +710,9 @@ mod tests {
         assert_eq!(Language::Sr.tr("Options|General"), "Opšte");
         assert_eq!(Language::Sr.tr("Options|Save"), "Sačuvaj");
         assert_eq!(Language::Sr.tr("Sheet Options|View"), "Prikaz");
+        assert_eq!(Language::Nl.tr("Options|General"), "Algemeen");
+        assert_eq!(Language::Nl.tr("Options|Save"), "Opslaan");
+        assert_eq!(Language::Nl.tr("Sheet Options|View"), "Weergeven");
     }
 
     #[test]
@@ -738,6 +753,9 @@ mod tests {
         assert_eq!(Language::from_tag("sr-Latn-RS"), Some(Language::Sr));
         assert_eq!(Language::from_tag("sr-RS"), Some(Language::Sr));
         assert_eq!(Language::parse("sr"), Some(Language::Sr));
+        assert_eq!(Language::from_tag("nl-NL"), Some(Language::Nl));
+        assert_eq!(Language::from_tag("nl_BE"), Some(Language::Nl));
+        assert_eq!(Language::parse("nl"), Some(Language::Nl));
     }
 
     #[test]
