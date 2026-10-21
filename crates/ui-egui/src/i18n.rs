@@ -629,7 +629,7 @@ mod tests {
         assert_eq!(Language::PtBr.tr_error("Select a chart first."), "Selecione um gráfico primeiro.");
         assert_eq!(Language::PtBr.tr_error("Sheet|Unknown failure"), "Sheet|Unknown failure");
         assert_eq!(Language::PtBr.tr_error("command `chart`: Select a chart first."), "Selecione um gráfico primeiro.");
-        assert_eq!(Language::PtBr.tr_error("Printer Office: permission denied"),"Printer Office: permission denied");
+        assert_eq!(Language::PtBr.tr_error("Printer Office: permission denied"), "Printer Office: permission denied");
         assert_eq!(Language::Es.tr("Data"), "Datos");
         assert_eq!(Language::Es.tr("Freeze Panes"), "Inmovilizar paneles");
         assert_eq!(Language::Es.tr("Sheet1!A1"), "Sheet1!A1");
