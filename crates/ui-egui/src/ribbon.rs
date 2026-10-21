@@ -1663,7 +1663,28 @@ fn page_layout(app: &mut SheetApp, ui: &mut Ui) {
     let s = big_button(ui, Icon::Paper, "Size", "Paper Size", true);
     control_keytip(app, ui, &s, "pageLayout.size");
     egui::Popup::menu(&s).show(|ui| {
-        for p in ["Letter", "Legal", "Tabloid", "Executive", "A3", "A4", "A5"] {
+        // B4/B5/B6 are the JIS sizes Japanese Excel uses; the ISO ones stay selectable by name.
+        for p in [
+            "Letter",
+            "Legal",
+            "Tabloid",
+            "Executive",
+            "A3",
+            "A4",
+            "A5",
+            "A6",
+            "B4",
+            "B5",
+            "B6",
+            "Japanese Postcard",
+            "Japanese Double Postcard",
+            "Japanese Envelope #3",
+            "Japanese Envelope #4",
+            "Japanese Envelope Kaku #2",
+            "Japanese Envelope Kaku #3",
+            "B4 (ISO)",
+            "B5 (ISO)",
+        ] {
             if ui.button(p).clicked() {
                 act(app, "pageLayout.size", json!({"paper": p}));
             }
