@@ -392,7 +392,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Print Active Sheets" => "Imprimare foi active",
         "Print Entire Workbook" => "Imprimare tot registrul",
         "Fit Sheet on One Page" => "Încadrare foaie pe o pagină",
-        "Page Setup…" => "Inițializare pagină…",
+        "Page Setup…" => "Configurare pagină…",
         "Page {page} of {pages}" => "Pagina {page} din {pages}",
         "Nothing to print." => "Nimic de imprimat.",
         "Previous page" => "Pagina anterioară",
@@ -985,6 +985,37 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Tabular" => "Tabelar",
         "Use a field's menu to move it between areas:" => "Folosiți meniul unui câmp ca să-l mutați între zone:",
         "Values" => "Valori",
+        "Header (&L left, &C center, &R right; &P page, &N pages, &D date, &A sheet):" => {
+            "Antet (&L stânga, &C centru, &R dreapta; &P pagina, &N pagini, &D data, &A foaia):"
+        }
+        "Forecast start (a date or number in the history; blank: after the last point):" => {
+            "Începutul prognozei (o dată sau un număr din istoric; gol: după ultimul punct):"
+        }
+        "Source:" => "Sursă:",
+        "End date:" => "Data de sfârșit:",
+        "Protect workbook for: Structure (sheets can't be added, moved, renamed, hidden or deleted)." => {
+            "Protejare registru pentru: structură (foile nu pot fi adăugate, mutate, redenumite, ascunse sau șterse)."
+        }
+        "Printer" => "Imprimantă",
+        "Select a printer" => "Selectați o imprimantă",
+        "Refresh printers" => "Reîmprospătare imprimante",
+        "Copies" => "Copii",
+        "Two-sided printing" => "Imprimare față-verso",
+        "Printer default" => "Setarea imprimantei",
+        "One-sided" => "O singură față",
+        "Two-sided: long edge" => "Față-verso: latura lungă",
+        "Two-sided: short edge" => "Față-verso: latura scurtă",
+        "Grayscale" => "Tonuri de gri",
+        "Finding printers…" => "Se caută imprimante…",
+        "No printers found. Configure a system printer or export a PDF." => {
+            "Nu s-a găsit nicio imprimantă. Configurați o imprimantă în sistem sau exportați un PDF."
+        }
+        "Printer discovery failed." => "Căutarea imprimantelor a eșuat.",
+        "Submitting print job…" => "Se trimite lucrarea de imprimare…",
+        "Print job submitted." => "Lucrarea de imprimare a fost trimisă.",
+        "Print job submitted: {receipt}" => "Lucrarea de imprimare a fost trimisă: {receipt}",
+        "Print failed: {error}" => "Imprimarea a eșuat: {error}",
+        "Print failed: the printing worker stopped." => "Imprimarea a eșuat: procesul de imprimare s-a oprit.",
         _ => return None,
     })
 }
