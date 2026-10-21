@@ -1684,6 +1684,7 @@ fn page_layout(app: &mut SheetApp, ui: &mut Ui) {
             "Japanese Envelope Kaku #3",
             "B4 (ISO)",
             "B5 (ISO)",
+            "B6 (ISO)",
         ] {
             if ui.button(p).clicked() {
                 act(app, "pageLayout.size", json!({"paper": p}));

@@ -97,7 +97,8 @@ fn known_paper(name: &str) -> Option<(f32, f32)> {
         "japanesepostcard" | "postcard" => (283.46, 419.53),
         "japanesedoublepostcard" | "doublepostcard" => (419.53, 566.93),
         "japaneseenvelope#3" | "chou#3" => (340.16, 666.14),
-        "japaneseenvelope#4" | "chou#4" => (255.12, 637.80),
+        // 長形4号 is 90×205 mm; 90×225 mm is 長形40号, a different envelope, so it stays out.
+        "japaneseenvelope#4" | "chou#4" => (255.12, 581.10),
         "japaneseenvelopekaku#2" | "kaku#2" => (680.31, 941.10),
         "japaneseenvelopekaku#3" | "kaku#3" => (612.28, 785.20),
         _ => return None,
@@ -2095,13 +2096,18 @@ mod tests {
             ("Japanese Postcard", 283.46, 419.53),
             ("japanese double postcard", 419.53, 566.93),
             ("Japanese Envelope #3", 340.16, 666.14),
-            ("chou #4", 255.12, 637.80),
+            ("chou #4", 255.12, 581.10),
             ("Japanese Envelope Kaku #2", 680.31, 941.10),
             ("kaku #3", 612.28, 785.20),
         ] {
             let got = paper_size(name);
             assert!((got.0 - w).abs() < 0.01 && (got.1 - h).abs() < 0.01, "{name}: {got:?}");
         }
+        // 長形4号 is 90×205 mm (90×225 mm is 長形40号), so its height is 205 mm = 581.10 pt — not the
+        // 225 mm it once had.
+        let chou4 = paper_size("Japanese Envelope #4");
+        assert_eq!((chou4.0, chou4.1), (255.12, 581.10));
+        assert_eq!(chou4, paper_size("chou #4"));
         // Unknown names keep the old Letter fallback.
         assert_eq!(paper_size("Napkin"), (612.0, 792.0));
     }
