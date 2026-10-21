@@ -137,6 +137,7 @@ fn translated_options_headings_show_no_context_prefix() {
     for (code, headings, prefixed, (view, view_prefixed)) in [
         ("fr", ["Général", "Enregistrer"], ["Options|Général", "Options|Enregistrer"], ("Affichage", "Options de la feuille|Affichage")),
         ("sr", ["Opšte", "Sačuvaj"], ["Opcije|Opšte", "Opcije|Sačuvaj"], ("Prikaz", "Opcije lista|Prikaz")),
+        ("ro", ["General", "Salvare"], ["Opțiuni|General", "Opțiuni|Salvare"], ("Vizualizare", "Opțiuni foaie|Vizualizare")),
     ] {
         let mut h = harness(Services::default());
         h.state_mut().run("app.language.set", serde_json::json!({"language": code})).unwrap();
