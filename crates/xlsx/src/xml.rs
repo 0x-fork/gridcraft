@@ -398,6 +398,10 @@ pub fn t_el(s: &str) -> String {
 /// phonetic (furigana) data — its `<rPh sb="…" eb="…"><t>…</t></rPh>` runs in document order and
 /// its `<phoneticPr …/>`. Behaviour reference: ISO/IEC 29500-1 §18.4.8 `si` with §18.4.6 `rPh` and
 /// §18.4.7 `phoneticPr`. A string without phonetic data gives exactly [`t_el`]'s output.
+///
+/// The runs and the properties are independent: `<phoneticPr>` is a valid child of `<si>` on its
+/// own (§18.4.8's `CT_SharedStringItem` allows it without any `rPh`), so a string whose runs were
+/// all dropped still keeps its settings.
 pub fn si_body(text: &str, phonetic: Option<&PhoneticString>) -> String {
     let mut s = t_el(text);
     let Some(p) = phonetic else { return s };
@@ -406,7 +410,6 @@ pub fn si_body(text: &str, phonetic: Option<&PhoneticString>) -> String {
     // `sb` before `eb`, both inside the base text, a non-empty reading; §18.18.56/57: a known enum
     // value). Damaged data is dropped, never written back invalid.
     let len = u32::try_from(text.encode_utf16().count()).unwrap_or(u32::MAX);
-    let mut runs = 0usize;
     for r in &p.runs {
         let start = r.start.min(len);
         let end = r.end.min(len);
@@ -414,10 +417,6 @@ pub fn si_body(text: &str, phonetic: Option<&PhoneticString>) -> String {
             continue;
         }
         let _ = write!(s, "<rPh sb=\"{start}\" eb=\"{end}\">{}</rPh>", t_el(&r.text));
-        runs += 1;
-    }
-    if runs == 0 {
-        return s;
     }
     if let Some(pr) = &p.props {
         let _ = write!(s, "<phoneticPr fontId=\"{}\"", pr.font_id);
@@ -482,9 +481,13 @@ mod tests {
         };
         let s = si_body(text, Some(&damaged));
         assert_eq!(s, "<t>課きく</t><rPh sb=\"1\" eb=\"3\"><t>く</t></rPh><phoneticPr fontId=\"7\" alignment=\"center\"/>");
-        // Without a single valid run, no phonetic markup at all (a lone <phoneticPr> is pointless).
+        // With no run left, valid properties are still written: `<phoneticPr>` is a legal child of
+        // `<si>` on its own, and Excel keeps the settings when the last reading is removed.
         let empty = PhoneticString { text: text.into(), runs: vec![], props: damaged.props.clone() };
-        assert_eq!(si_body(text, Some(&empty)), t_el(text));
+        assert_eq!(si_body(text, Some(&empty)), "<t>課きく</t><phoneticPr fontId=\"7\" alignment=\"center\"/>");
+        // With neither runs nor properties there is nothing to write.
+        let none = PhoneticString { text: text.into(), runs: vec![], props: None };
+        assert_eq!(si_body(text, Some(&none)), t_el(text));
         // A known kind is written; the schema default ("none") is not invented for a missing one.
         let known = PhoneticString {
             text: text.into(),

@@ -81,6 +81,33 @@ fn a_plain_japanese_string_writes_the_plain_si() {
 }
 
 #[test]
+fn property_only_shared_string_survives_open_and_save() {
+    // `phoneticPr` without any `rPh` is valid (a shared string item permits it on its own), so
+    // open + save must not delete it.
+    let sst = r#"<?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="1" uniqueCount="1"><si><t>東京</t><phoneticPr fontId="2" type="Hiragana" alignment="left"/></si></sst>"#;
+    let body = r#"<sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row></sheetData>"#;
+    let bytes = minimal(body, &[("xl/sharedStrings.xml", sst)], SST_RELS, "");
+    let (wb, report) = read_xlsx(&bytes).unwrap();
+    assert!(!report.warnings.iter().any(|w| w.contains("phonetic")), "{:?}", report.warnings);
+    assert_eq!(
+        wb.phonetics,
+        vec![PhoneticString {
+            text: "東京".into(),
+            runs: vec![],
+            props: Some(PhoneticProps { font_id: 2, kind: Some("Hiragana".into()), alignment: Some("left".into()) }),
+        }]
+    );
+    let written = write_xlsx(&wb).unwrap();
+    let out = part(&written, "xl/sharedStrings.xml");
+    assert!(out.contains(r#"<si><t>東京</t><phoneticPr fontId="2" type="Hiragana" alignment="left"/></si>"#), "{out}");
+    // A second open + save reproduces the same part.
+    let (again, report) = read_xlsx(&written).unwrap();
+    assert_eq!(again.phonetics, wb.phonetics);
+    assert!(!report.warnings.iter().any(|w| w.contains("phonetic")), "{:?}", report.warnings);
+    assert_eq!(part(&write_xlsx(&again).unwrap(), "xl/sharedStrings.xml"), out);
+}
+
+#[test]
 fn hostile_phonetic_runs_lose_only_the_runs() {
     // Missing `eb`, missing `sb`, `sb >= eb`, offsets past the text, junk offsets, no offsets at
     // all, no `<t>`, an empty `<t>`, and junk `phoneticPr` attributes.
