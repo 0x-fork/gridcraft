@@ -39,3 +39,17 @@ fn form_fields_are_translated() {
         }
     }
 }
+
+#[test]
+fn notes_with_a_pipe_show_in_full() {
+    // `tr` reads `|` as a context separator; the Open Hyperlink note carries the URL, which must
+    // be shown whole so the user sees where the link really goes.
+    let url = "https://example.com/report|evil.example";
+    for language in ["en", "pt"] {
+        let mut h = harness();
+        h.state_mut().run("app.language.set", json!({"language": language})).unwrap();
+        h.state_mut().open_dialog("openLink", json!({"url": url}));
+        h.run_steps(3);
+        assert!(h.query_by_label_contains(url).is_some(), "{language}: the link note lost part of {url}");
+    }
+}

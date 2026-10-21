@@ -1462,7 +1462,10 @@ fn form_fields(ui: &mut egui::Ui, d: &mut Dialog) {
                     }
                 }
                 Field::Note(t) => {
-                    ui.label(egui::RichText::new(lang.tr(&t)).small());
+                    // A note can carry user data (a URL, a file or sheet name); `tr` reads a `|` as a
+                    // context separator, so such a note is shown as it is.
+                    let text = if t.contains('|') { t.as_str() } else { lang.tr(&t) };
+                    ui.label(egui::RichText::new(text).small());
                 }
             }
             ui.end_row();
