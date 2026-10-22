@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~25 points of "ready for real work" and ~160–240 h away
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-13 · **Change:** minor (formula-entry Command/Ctrl-click adds arguments and Shift-click extends references; readiness unchanged) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-14 · **Change:** minor (XLSX dynamic-array formulas keep their `cm` metadata on save) · **Target:** Microsoft Excel (Microsoft 365)
 
 GridCraft aims at full Microsoft Excel parity, and at being better in places: faster, open (XLSX
 is the native format), fully scriptable by agents (MCP, control channel, CLI), and on the web.
@@ -132,6 +132,9 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-10-15 | Function help follows the interface language: argument hints, autocomplete, Insert Function (search and readable categories) and the Formulas-tab menus read per-language tables of descriptions and argument names; Spanish keeps its 10 functions in the new format |
+| 2026-10-14 | Protect Sheet on a protected sheet: Home › Format, its keytips (HOP, RPS) and the tab menu now read Unprotect Sheet… and unprotect (straight away without a password); a protected sheet that forbids selecting locked (or unlocked) cells is enforced for clicks, arrows and Go To, and the Protect Sheet dialog has the select options (#1346) |
+| 2026-10-14 | XLSX: formulas opened with dynamic-array metadata (`cm`) keep it on save, with `xl/metadata.xml`. Before, a formula returning one value lost it (11 of 40 corpus files that have the part lost it entirely), and Excel recalculated some of them with implicit intersection (`SUMPRODUCT(IFERROR(...))` changed value) |
 | 2026-10-13 | Formula-entry Command/Ctrl-click inserts another reference with the locale's argument separator; Shift-click extends from a stable, sheet-aware anchor. Pointer tests cover repeated clicks, reversed ranges, ordinary replacement, typed separators, Spanish syntax, sheet switches and keyboard continuation. Readiness estimates unchanged. |
 | 2026-10-13 | `formulas.evaluate` (`gridcraft-cli eval`, MCP `evaluate_formula`) refuses what entering the formula in a cell refuses, with the reason (`=SUM(1;2)`: "expected `,` or `)`"), instead of `#NAME?` for any formula that doesn't parse |
 | 2026-10-13 | Colour menus: Fill Color, Font Color and the Format Cells pickers end with Recent Colors (the last ten custom colours) and More Colors… (hue/saturation area, RGB, hex box, preview, OK/Cancel) (#928) |
@@ -198,6 +201,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | minor | XLSX dynamic-array `cm` metadata kept on save; progress log row |
 | 2026-10-13 | trivial | Progress log: More Colors… and Recent Colors in the colour menus (#928) |
 | 2026-10-13 | minor | Multi-level category axes (read, drawn, written); progress log row |
 | 2026-10-12 | minor | Rows auto-fit oversized fonts on open and whole-row/column formatting (#833); progress log row |

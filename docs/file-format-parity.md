@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-19 · **Change:** minor (.xls dialog sheets are skipped instead of read as worksheets; `.xls` import reads each sheet's display options from WINDOW2: right-to-left, gridlines, headings, zeros, formulas; XLSX text boxes and shapes keep their paragraphs' right-to-left direction on save; CSV/TSV/TXT can open with every field kept as text via `file.open {csvAsText}`; formulas over Excel's 8,192 characters, and `%` or call chains past the nesting limit, are parse errors instead of stack overflows when a file is opened; XLSX PivotTables read and write `rowGrandTotals`/`colGrandTotals` the way Excel does, so a table saved with only one grand total opens with the right one; HTML export keeps right-to-left) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-19 · **Change:** minor (XLSX formulas and PivotTable sources quote sheet names like Excel, so `'.x'!A1` no longer saves as `.x!A1` (#1458); .xls dialog sheets are skipped instead of read as worksheets; `.xls` import reads each sheet's display options from WINDOW2: right-to-left, gridlines, headings, zeros, formulas; XLSX text boxes and shapes keep their paragraphs' right-to-left direction on save; CSV/TSV/TXT can open with every field kept as text via `file.open {csvAsText}`; formulas over Excel's 8,192 characters, and `%` or call chains past the nesting limit, are parse errors instead of stack overflows when a file is opened; XLSX PivotTables read and write `rowGrandTotals`/`colGrandTotals` the way Excel does, so a table saved with only one grand total opens with the right one; HTML export keeps right-to-left) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Every format Excel opens or saves, with GridCraft's read and write support, fidelity and tests.
 Part of [target-app-parity.md](target-app-parity.md). **File formats: ~50% ready, 80–120 h**
@@ -19,6 +19,16 @@ colour, integer width and anchor. Curves, filled paths, transforms and unsupport
 not interpreted as ink. This does not implement Office InkML or fix inserted icons (#551).
 Command and package tests cover repeated saves and unrelated cell edits; external Excel rendering
 and repair-free opening remain unverified.
+
+Dynamic-array formulas keep their mark on save. A formula read with dynamic-array cell metadata
+(`cm`, the `XLDAPR` record in `xl/metadata.xml`) is written back with it, together with the
+metadata part, even when it returns one value and GridCraft's own shape analysis would not need
+array evaluation. Dropping the mark turned such formulas into legacy ones, which Excel evaluates
+with implicit intersection: `SUMPRODUCT(IFERROR(B1:B3/C1:C3,0))` recalculated to a different
+value in Excel. Moving the formula, inserting or deleting rows and columns, and renaming sheets or
+names keep the mark; retyping the formula drops it, and the writer then decides from the
+formula's shape. Rich-value metadata other than cell pictures (data types, `#SPILL!` error
+values) is still dropped.
 
 | Format | Excel | GridCraft read | GridCraft write | Fidelity / notes | Tests |
 |---|---|---|---|---|---|
@@ -91,7 +101,10 @@ refresh. Counted under features (Get & Transform, ~10% ready), not here.
 | 2026-10-18 | trivial | `file.open {csvAsText: true}` keeps every CSV/TSV/TXT field as the text the file holds, so identifiers (GTINs, SKUs, ZIP codes) keep their digits and leading zeros (#1808; a preference and a CLI flag are separate work) |
 | 2026-10-18 | trivial | XLSX PivotTables: `rowGrandTotals` is the Grand Total row and `colGrandTotals` the Grand Total column. Both were read and written the other way round, which a GridCraft round trip hid, so an Excel file with only one grand total opened showing the other |
 | 2026-10-19 | minor | HTML (Save as Web Page and clipboard) marks right-to-left sheets and right-to-left cell text with `dir` |
+| 2026-10-16 | trivial | XLSX charts: `[0]!Name` (a workbook-scoped defined name) in series references is read as the name, so the series resolve instead of showing `#NAME?`. Names in chart references are written qualified (`[0]!Name`, or `Sheet!Name` for a sheet-scoped name): Excel draws a chart with a bare name blank (#1686) |
+| 2026-10-15 | minor | XLSX: formulas and PivotTable sources quote sheet names like Excel (a leading `.`, R1C1-like and cell-like names), so `'.x'!A1` no longer saves as `.x!A1`, which Excel could not open (#1458) |
 | 2026-10-14 | trivial | Formula parser: text longer than Excel's 8,192 characters, and postfix chains (`1%%%…`, `f(1)(1)…`) past the 256-level nesting limit, are parse errors (the cell keeps its formula text and cached value) instead of trees deep enough to overflow the stack when a hostile file is opened, saved or dropped |
+| 2026-10-14 | minor | XLSX formulas read with dynamic-array metadata (`cm`) keep it on save, so Excel does not recalculate them with implicit intersection |
 | 2026-10-12 | trivial | XLSX chart sheets are kept on save (#727) |
 | 2026-10-12 | trivial | CSV and TSV export is capped at 512 MiB and refuses a larger used range with an error (#528) |
 | 2026-10-12 | minor | `.xls` import reads the calculation settings (CalcMode, CalcIter, CalcCount, CalcDelta, CalcPrecision), so circular models calculate instead of showing `#CIRC!` (#724) |

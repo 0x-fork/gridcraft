@@ -401,3 +401,15 @@ fn formulas_longer_than_excel_allows_are_refused() {
     assert!(text.len() > crate::MAX_FORMULA_LEN);
     assert!(parse(&text).is_ok());
 }
+
+#[test]
+fn sheet_names_excel_quotes_stay_quoted() {
+    // Excel quotes R1C1-looking names, a leading `.`, cells within the sheet and booleans (#1458).
+    for name in ["R", "C", "RC", "R1C", "RC1", "R1C1", "r2c3", "R1", "C1", "A1", "XFD1", "AB1048576", ".x", "TRUE", "false"] {
+        assert_eq!(rt(&format!("'{name}'!A1")), format!("'{name}'!A1"), "{name}");
+    }
+    // Names Excel leaves bare.
+    for name in ["XFE1", "AB1048577", "Sheet.1", "_x", "A1A", "\u{3a3}"] {
+        assert_eq!(rt(&format!("'{name}'!A1")), format!("{name}!A1"), "{name}");
+    }
+}

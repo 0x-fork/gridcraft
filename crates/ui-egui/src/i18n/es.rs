@@ -183,6 +183,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Protect\nWorkbook" => "Proteger\nlibro",
         "Unprotect\nSheet" => "Desproteger\nhoja",
         "Protect Sheet…" => "Proteger hoja…",
+        "Unprotect Sheet…" => "Desproteger hoja…",
         "Comments" => "Comentarios",
         "Notes" => "Notas",
         "Page Break\nPreview" => "Vista previa de\nsalto de página",
@@ -438,6 +439,23 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Compact" => "Compacto",
         "Outline" => "Esquema",
         "Tabular" => "Tabular",
+        "Insert Sheet" => "Insertar hoja",
+        "Rename" => "Cambiar nombre",
+        "Move or Copy…" => "Mover o copiar…",
+        "Duplicate" => "Duplicar",
+        "Tab Color" => "Color de etiqueta",
+        "No Color" => "Sin color",
+        "Hide" => "Ocultar",
+        "Unhide…" => "Mostrar…",
+        "Select All Sheets" => "Seleccionar todas las hojas",
+        "AutoSave" => "Autoguardado",
+        "AutoSave: save after every change (workbooks saved to a file)" => {
+            "Autoguardado: guardar después de cada cambio (libros guardados en un archivo)"
+        }
+        "Previous sheet" => "Hoja anterior",
+        "Next sheet" => "Hoja siguiente",
+        "All sheets" => "Todas las hojas",
+        "New sheet (⇧F11)" => "Nueva hoja (⇧F11)",
         _ => return None,
     })
 }

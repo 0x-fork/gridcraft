@@ -198,6 +198,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Allow Edit Ranges" => "Permitir Edição de Intervalos",
         "Unprotect\nSheet" => "Desproteger\nPlanilha",
         "Protect Sheet…" => "Proteger Planilha…",
+        "Unprotect Sheet…" => "Desproteger Planilha…",
         "Comments" => "Comentários",
         "Notes" => "Notas",
         "Page Break\nPreview" => "Visualização\nde Quebras de Página",
@@ -945,6 +946,17 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Protect\nSheet" => "Proteger\nPlanilha",
         "Watch\nWindow" => "Janela de\nInspeção",
         "Workbook\nStatistics" => "Estatísticas da\nPasta de Trabalho",
+        "Rename" => "Renomear",
+        "Move or Copy…" => "Mover ou copiar…",
+        "Duplicate" => "Duplicar",
+        "Tab Color" => "Cor da guia",
+        "No Color" => "Sem cor",
+        "Unhide…" => "Reexibir…",
+        "Select All Sheets" => "Selecionar todas as planilhas",
+        "AutoSave: save after every change (workbooks saved to a file)" => {
+            "Salvamento automático: salvar após cada alteração (pastas de trabalho salvas em um arquivo)"
+        }
+        "All sheets" => "Todas as planilhas",
         _ => return None,
     })
 }

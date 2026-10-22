@@ -52,14 +52,14 @@ pub fn title_bar(app: &mut SheetApp, ui: &mut Ui) {
         ui.horizontal_centered(|ui| {
             ui.add_space(TITLE_LEFT_PAD);
             // AutoSave toggle (saves after each change when the workbook has a file).
-            ui.label(egui::RichText::new("AutoSave").font(theme::ui_font(12.5)).color(t.text_dim));
+            ui.label(egui::RichText::new(app.ui.language.tr("AutoSave")).font(theme::ui_font(12.5)).color(t.text_dim));
             let on = app.grid.autosave();
             let (r, resp) = ui.allocate_exact_size(vec2(30.0, 16.0), Sense::click());
             ui.painter().rect_filled(r, 8.0, if on { t.accent } else { Color32::TRANSPARENT });
             ui.painter().rect_stroke(r, 8.0, Stroke::new(1.0, if on { t.accent } else { t.text_dim }), StrokeKind::Inside);
             let knob = if on { pos2(r.right() - 8.0, r.center().y) } else { pos2(r.left() + 8.0, r.center().y) };
             ui.painter().circle_filled(knob, 5.0, if on { Color32::WHITE } else { t.text_dim });
-            if resp.on_hover_text("AutoSave: save after every change (workbooks saved to a file)").clicked() {
+            if resp.on_hover_text(app.ui.language.tr("AutoSave: save after every change (workbooks saved to a file)")).clicked() {
                 app.grid.toggle_autosave();
             }
             ui.add_space(6.0);
@@ -112,17 +112,8 @@ pub fn title_bar(app: &mut SheetApp, ui: &mut Ui) {
                     app.print_now(json!({}));
                 }
             });
-            // Centered title.
-            let title = app.session.active().map(|d| d.display_title()).unwrap_or_default();
-            let dirty = app.session.active().is_some_and(|d| d.is_dirty());
-            ui.painter().text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                format!("{title}{}", if dirty { " •" } else { "" }),
-                theme::ui_bold(13.0),
-                t.text,
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let left_end = ui.min_rect().right();
+            let right = ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(8.0);
                 let __k = icon_button(ui, Icon::Search, t.text_dim, "Search commands", vec2(28.0, ch));
                 control_keytip(app, ui, &__k, "commandSearch");
@@ -157,9 +148,56 @@ pub fn title_bar(app: &mut SheetApp, ui: &mut Ui) {
                     act(app, "view.darkMode", json!({}));
                 }
                 theme.context_menu(|ui| theme_choices(app, ui));
+                ui.min_rect().left()
             });
+            // Centred title, cut with "…" so it never runs under the controls on either side.
+            let title = app.session.active().map(|d| d.display_title()).unwrap_or_default();
+            let dirty = app.session.active().is_some_and(|d| d.is_dirty());
+            let max_w = title_max_width(rect.center().x, left_end, right.inner);
+            paint_title(ui, rect.center(), &title, dirty, max_w, t.text);
         });
     });
+}
+
+/// Lay out the title truncated to fit `max_w` together with the unsaved marker (when `dirty`).
+fn title_galleys(
+    painter: &egui::Painter,
+    title: &str,
+    dirty: bool,
+    max_w: f32,
+    color: Color32,
+) -> (std::sync::Arc<egui::Galley>, Option<std::sync::Arc<egui::Galley>>) {
+    let font = theme::ui_bold(13.0);
+    let dot = dirty.then(|| painter.layout_no_wrap(" •".to_string(), font.clone(), color));
+    let dot_w = dot.as_ref().map_or(0.0, |g| g.size().x);
+    let mut job = egui::text::LayoutJob::simple_singleline(title.to_string(), font, color);
+    job.wrap = egui::text::TextWrapping::truncate_at_width((max_w - dot_w).max(0.0));
+    (painter.layout_job(job), dot)
+}
+
+/// Gap kept between the title and the controls beside it.
+const TITLE_GAP: f32 = 12.0;
+
+/// The widest the centred title may be without reaching the controls that end at `left_end` or
+/// start at `right_start`.
+fn title_max_width(center_x: f32, left_end: f32, right_start: f32) -> f32 {
+    let half = (center_x - left_end).min(right_start - center_x) - TITLE_GAP;
+    (2.0 * half).max(0.0)
+}
+
+/// Paint the workbook title centred on `center`, truncated with "…" to `max_w`. The unsaved
+/// marker stays visible however short the title gets.
+fn paint_title(ui: &Ui, center: egui::Pos2, title: &str, dirty: bool, max_w: f32, color: Color32) {
+    let (galley, dot) = title_galleys(ui.painter(), title, dirty, max_w, color);
+    let dot_w = dot.as_ref().map_or(0.0, |g| g.size().x);
+    let w = galley.size().x + dot_w;
+    let left = center.x - w / 2.0;
+    let top = center.y - galley.size().y / 2.0;
+    let galley_w = galley.size().x;
+    ui.painter().galley(pos2(left, top), galley, color);
+    if let Some(dot) = dot {
+        ui.painter().galley(pos2(left + galley_w, top), dot, color);
+    }
 }
 
 pub fn show(app: &mut SheetApp, ui: &mut Ui) {
@@ -576,6 +614,7 @@ fn home(app: &mut SheetApp, ui: &mut Ui) {
         }
         let fp_on = app.session.format_painter.is_some();
         let fp = toggle_button(ui, Icon::Brush, fp_on, "Format Painter (double-click to keep it on)");
+        fp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), fp_on, "Format Painter"));
         control_keytip(app, ui, &fp, "edit.formatPainter");
         if fp.double_clicked() {
             act(app, "edit.formatPainter", json!({"sticky": true}));
@@ -934,6 +973,7 @@ fn home(app: &mut SheetApp, ui: &mut Ui) {
         if format_keys {
             format_popup = format_popup.open_memory(egui::SetOpenCommand::Bool(true));
         }
+        let protect_label = if app.active_sheet_protected() { "Unprotect Sheet…" } else { "Protect Sheet…" };
         format_popup.show(|ui| {
             menu_items(
                 app,
@@ -955,7 +995,7 @@ fn home(app: &mut SheetApp, ui: &mut Ui) {
                     ("Rename Sheet", "dialog:renameSheet", json!({})),
                     ("Move or Copy Sheet…", "dialog:moveSheet", json!({})),
                     ("-", "", json!(null)),
-                    ("Protect Sheet…", "dialog:protectSheet", json!({})),
+                    (protect_label, "dialog:protectSheet", json!({})),
                     ("Lock Cell", "home.lockCell", json!({})),
                     ("Format Cells…", "dialog:formatCells", json!({})),
                 ],
@@ -1760,6 +1800,8 @@ fn page_layout(app: &mut SheetApp, ui: &mut Ui) {
     }
 }
 
+/// The Formulas tab: Insert Function, AutoSum, the function-category menus (names in the formula
+/// language, descriptions in the interface language), defined names, auditing and calculation.
 fn formulas(app: &mut SheetApp, ui: &mut Ui) {
     let __k = big_button(ui, Icon::Function, "Insert\nFunction", "Insert Function (⇧F3)", false);
     control_keytip(app, ui, &__k, "dialog:insertFunction");
@@ -1793,7 +1835,7 @@ fn formulas(app: &mut SheetApp, ui: &mut Ui) {
                         let locale = app.ui.language.formula_locale();
                         let name =
                             app.session.active().map(|d| crate::formula_locale::completion_name(n, locale, &d.wb, d.wb.active_sheet)).unwrap_or(n);
-                        let desc = crate::formula_locale::description(n, locale).unwrap_or_default();
+                        let desc = crate::formula_locale::description(n, locale, app.ui.language).unwrap_or_default();
                         if ui.button(name).on_hover_text(desc).clicked() {
                             app.run_or_alert("formulas.insertFunction", json!({"name": n}));
                             ui.close();
@@ -2095,11 +2137,7 @@ fn review(app: &mut SheetApp, ui: &mut Ui) {
     let __k = big_button(ui, Icon::Lock, if protected { "Unprotect\nSheet" } else { "Protect\nSheet" }, "Protect Sheet", false);
     control_keytip(app, ui, &__k, "dialog:protectSheet");
     if __k.clicked() {
-        if protected {
-            app.open_dialog("unprotectSheet", json!({}));
-        } else {
-            app.open_dialog("protectSheet", json!({}));
-        }
+        app.open_dialog("protectSheet", json!({}));
     }
     let __k = big_button(ui, Icon::Book, "Protect\nWorkbook", "Protect Workbook structure", false);
     control_keytip(app, ui, &__k, "review.protectWorkbook");
@@ -2521,6 +2559,60 @@ mod title_bar_tests {
         let margin = (MAC_TITLE_BAR - MAC_LIGHT) / 2.0;
         let lights_end = MAC_LIGHTS_LEFT + 2.0 * MAC_LIGHT_PITCH + MAC_LIGHT;
         assert_eq!(MAC_CONTENT_LEFT - lights_end, margin);
+    }
+
+    #[test]
+    fn title_fits_between_the_controls() {
+        // Room limited by the nearer side, symmetric about the centre.
+        assert_eq!(title_max_width(500.0, 300.0, 900.0), 2.0 * (200.0 - TITLE_GAP));
+        assert_eq!(title_max_width(500.0, 100.0, 650.0), 2.0 * (150.0 - TITLE_GAP));
+        // Controls overlapping the centre leave no room rather than a negative width.
+        assert_eq!(title_max_width(500.0, 520.0, 900.0), 0.0);
+    }
+
+    /// Lay out a title in a real egui frame, returning (title text, title width, dot width).
+    fn layout_title(title: &str, dirty: bool, max_w: f32) -> (String, f32, f32) {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(theme::font_definitions());
+        let mut out = (String::new(), 0.0, 0.0);
+        let mut frame = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let (galley, dot) = title_galleys(ui.painter(), title, dirty, max_w, Color32::WHITE);
+            // The glyphs actually drawn: `galley.text()` is the untruncated source.
+            let shown = galley.rows.iter().flat_map(|r| r.glyphs.iter().map(|g| g.chr)).collect();
+            out = (shown, galley.size().x, dot.map_or(0.0, |d| d.size().x));
+        });
+        frame.textures_delta.clear(); // nothing consumes the atlas in a headless test
+        out
+    }
+
+    #[test]
+    fn long_title_is_truncated_with_an_ellipsis() {
+        let long = format!("upload-{}-cleaned (1).xlsx", "3FMyNTYg2gDaANiAAACq20AAAAQMBqug".repeat(4));
+        let (text, w, _) = layout_title(&long, false, 300.0);
+        assert!(text.ends_with('…'), "truncated title ends with an ellipsis: {text:?}");
+        assert!(text.chars().count() < long.chars().count());
+        assert!(w <= 300.0, "title stays within its room: {w}");
+    }
+
+    #[test]
+    fn short_title_is_left_whole() {
+        let (text, _, _) = layout_title("Book1.xlsx", false, 300.0);
+        assert_eq!(text, "Book1.xlsx");
+    }
+
+    #[test]
+    fn unsaved_dot_survives_truncation() {
+        let long = "a very long workbook name ".repeat(20);
+        let (text, w, dot_w) = layout_title(&long, true, 200.0);
+        assert!(dot_w > 0.0, "the unsaved marker is laid out");
+        assert!(text.ends_with('…'));
+        assert!(w + dot_w <= 200.0, "title and marker fit together: {}", w + dot_w);
+    }
+
+    #[test]
+    fn no_room_draws_nothing_but_does_not_crash() {
+        let (_, w, _) = layout_title("Book1.xlsx", true, 0.0);
+        assert!(w <= 20.0, "a zero-width slot leaves at most the ellipsis: {w}");
     }
 }
 

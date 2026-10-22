@@ -182,15 +182,19 @@ impl Dialog {
                 vec![
                     Password { key: "password", label: "Password (optional):" },
                     Note("Allow all users of this sheet to:".into()),
+                    Check { key: "selectLockedCells", label: "Select locked cells" },
+                    Check { key: "selectUnlockedCells", label: "Select unlocked cells" },
                     Check { key: "formatCells", label: "Format cells" },
                     Check { key: "formatColumns", label: "Format columns" },
                     Check { key: "formatRows", label: "Format rows" },
+                    Check { key: "insertColumns", label: "Insert columns" },
                     Check { key: "insertRows", label: "Insert rows" },
+                    Check { key: "deleteColumns", label: "Delete columns" },
                     Check { key: "deleteRows", label: "Delete rows" },
                     Check { key: "sort", label: "Sort" },
                     Check { key: "autofilter", label: "Use AutoFilter" },
                 ],
-                json!({}),
+                json!({"selectLockedCells": true, "selectUnlockedCells": true}),
             ),
             "allowEditRanges" => {
                 let list = app.session.run("review.allowEditRanges", json!({})).unwrap_or(Json::Null);
@@ -332,7 +336,7 @@ impl Dialog {
                     Number { key: "step", label: "Step value:" },
                     Text { key: "stop", label: "Stop value:" },
                 ],
-                json!({"direction": "columns", "type": "linear", "dateUnit": "day", "step": 1}),
+                json!({"direction": if p("direction") == "rows" { "rows" } else { "columns" }, "type": "linear", "dateUnit": "day", "step": 1}),
             ),
             "comment" => {
                 let threaded = p("threaded").as_bool().unwrap_or(true);
@@ -1753,31 +1757,33 @@ fn format_cells(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: 
     }
 }
 
+/// Insert Function: searches names (as the formula language spells them) and descriptions, shows
+/// each hit's category and description, and starts editing `=NAME(` (or appends to the formula).
 fn insert_function(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool) {
+    let language = app.ui.language;
     ui.horizontal(|ui| {
-        ui.label("Search:");
-        let r = ui.add(egui::TextEdit::singleline(&mut d.search).desired_width(300.0).hint_text("e.g. lookup, average, date"));
+        ui.label(language.tr("Search:"));
+        let r = ui.add(egui::TextEdit::singleline(&mut d.search).desired_width(300.0).hint_text(language.tr("e.g. lookup, average, date")));
         r.request_focus();
     });
-    let locale = app.ui.language.formula_locale();
+    let locale = language.formula_locale();
     let list = gridcraft_engine::cmd::formulas::function_list();
-    let q = d.search.to_ascii_lowercase();
+    // The names and descriptions searched are the ones shown, so in the interface language.
+    let q = d.search.to_lowercase();
     let hits: Vec<&Json> = list
         .iter()
         .filter(|f| {
             q.is_empty()
-                || f["name"].as_str().is_some_and(|n| locale.function_name(n).to_ascii_lowercase().contains(&q))
-                || f["description"].as_str().is_some_and(|n| n.to_ascii_lowercase().contains(&q))
+                || f["name"].as_str().is_some_and(|n| locale.function_name(n).to_lowercase().contains(&q))
+                || f["description"].as_str().is_some_and(|n| language.function_description(n).unwrap_or(n).to_lowercase().contains(&q))
         })
         .take(300)
         .collect();
     egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
         for (i, f) in hits.iter().enumerate() {
             let name = locale.function_name(f["name"].as_str().unwrap_or(""));
-            let r = ui.add(
-                egui::Button::selectable(i == d.list_index, format!("{name:<18} {}", f["category"].as_str().unwrap_or("")))
-                    .min_size(vec2(480.0, 20.0)),
-            );
+            let category = language.tr(function_category_label(f["category"].as_str().unwrap_or("")));
+            let r = ui.add(egui::Button::selectable(i == d.list_index, format!("{name:<18} {category}")).min_size(vec2(480.0, 20.0)));
             if r.clicked() {
                 d.list_index = i;
             }
@@ -1788,9 +1794,10 @@ fn insert_function(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confir
         }
     });
     if let Some(f) = hits.get(d.list_index) {
+        let name = f["name"].as_str().unwrap_or("");
         ui.separator();
-        ui.label(egui::RichText::new(crate::formula_locale::signature(f["name"].as_str().unwrap_or(""), locale).unwrap_or_default()).strong());
-        ui.label(crate::formula_locale::description(f["name"].as_str().unwrap_or(""), locale).unwrap_or_default());
+        ui.label(egui::RichText::new(crate::formula_locale::signature(name, locale, language).unwrap_or_default()).strong());
+        ui.label(crate::formula_locale::description(name, locale, language).unwrap_or_default());
     }
     let mut open = true;
     ok_cancel(ui, confirm, &mut open);
@@ -1805,6 +1812,18 @@ fn insert_function(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confir
     }
     if !open {
         *confirm = true;
+    }
+}
+
+/// Excel's name for a function category, given the catalog's id (`MathTrig`).
+fn function_category_label(id: &str) -> &str {
+    match id {
+        "DateTime" => "Date & Time",
+        "Lookup" => "Lookup & Reference",
+        "MathTrig" => "Math & Trig",
+        "AddIn" => "Add-in and Automation",
+        // Financial, Logical, Text, Statistical, Engineering, Database, Information, …
+        other => other,
     }
 }
 

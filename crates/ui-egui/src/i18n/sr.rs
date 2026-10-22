@@ -196,6 +196,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Allow Edit Ranges" => "Dozvoli uređivanje opsega",
         "Unprotect\nSheet" => "Ukloni zaštitu\nlista",
         "Protect Sheet…" => "Zaštiti list…",
+        "Unprotect Sheet…" => "Ukloni zaštitu lista…",
         "Comments" => "Komentari",
         "Notes" => "Beleške",
         "Page Break\nPreview" => "Pregled preloma\nstranica",
@@ -406,6 +407,23 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Bottom Margin" => "Donja margina",
         "Header Margin" => "Margina zaglavlja",
         "Footer Margin" => "Margina podnožja",
+        "Insert Sheet" => "Убаци лист",
+        "Rename" => "Преименуј",
+        "Move or Copy…" => "Премести или копирај…",
+        "Duplicate" => "Дупликат",
+        "Tab Color" => "Боја картице",
+        "No Color" => "Без боје",
+        "Hide" => "Сакриј",
+        "Unhide…" => "Прикажи…",
+        "Select All Sheets" => "Изабери све листове",
+        "AutoSave" => "Аутоматско чување",
+        "AutoSave: save after every change (workbooks saved to a file)" => {
+            "Аутоматско чување: сачувај после сваке измене (свеске сачуване у датотеку)"
+        }
+        "Previous sheet" => "Претходни лист",
+        "Next sheet" => "Следећи лист",
+        "All sheets" => "Сви листови",
+        "New sheet (⇧F11)" => "Нови лист (⇧F11)",
         _ => return None,
     })
 }

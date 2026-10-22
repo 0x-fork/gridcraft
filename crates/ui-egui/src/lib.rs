@@ -741,9 +741,29 @@ impl SheetApp {
         }
     }
 
+    /// Whether the active sheet of the active document is protected (drives the Protect/Unprotect
+    /// Sheet labels and actions).
+    pub fn active_sheet_protected(&self) -> bool {
+        self.session.active().and_then(|d| d.wb.active().map(|s| s.is_protected())).unwrap_or(false)
+    }
+
     pub fn open_dialog(&mut self, name: &str, params: Json) {
         if let Err(e) = self.commit_text_box_edit() {
             self.message = Some(("Text Box".into(), clean_error(&e)));
+            return;
+        }
+        // Every Protect Sheet entry point (ribbon menus, keytips, tab menu) becomes Unprotect Sheet
+        // on a protected sheet. A sheet without a password is unprotected straight away.
+        let name = if name == "protectSheet" && self.active_sheet_protected() { "unprotectSheet" } else { name };
+        if name == "unprotectSheet"
+            && self
+                .session
+                .active()
+                .and_then(|d| d.wb.active())
+                .and_then(|s| s.protection.as_ref())
+                .is_some_and(|p| p.password.is_none() && p.legacy_password_hash.is_none())
+        {
+            self.run_or_alert("review.unprotectSheet", json!({}));
             return;
         }
         match name {
@@ -899,6 +919,11 @@ impl SheetApp {
 
     /// Starts editing the active cell. `text` replaces the content (typing) or pre-fills it.
     pub fn begin_edit(&mut self, text: Option<String>, from_formula_bar: bool) {
+        // The source formula is display-only on spill children. Grid replacement keeps its
+        // existing behavior, but no formula-bar entry path may edit that displayed formula.
+        if from_formula_bar && formula_bar::active_spill_anchor(self).is_some() {
+            return;
+        }
         if let Err(e) = self.commit_text_box_edit() {
             self.message = Some(("Text Box".into(), clean_error(&e)));
             return;
@@ -1170,6 +1195,12 @@ impl SheetApp {
         if ctx.options(|o| o.zoom_with_keyboard) {
             ctx.options_mut(|o| o.zoom_with_keyboard = false);
         }
+        // egui closes the window on Ctrl+Q (and with Shift or Alt held too) without asking to save
+        // (#1443). Excel for Windows has no such key (Ctrl+Q is Quick Analysis); macOS keeps Cmd+Q,
+        // the app's Quit there.
+        if ctx.os() != egui::os::OperatingSystem::Mac && ctx.options(|o| !o.quit_shortcuts.is_empty()) {
+            ctx.options_mut(|o| o.quit_shortcuts.clear());
+        }
         let zoom = self.ui.zoom_factor();
         if (ctx.zoom_factor() - zoom).abs() > 0.001 {
             ctx.set_zoom_factor(zoom);
@@ -1303,6 +1334,7 @@ impl SheetApp {
             && !ctx.text_edit_focused()
             && self.grid.context_menu.is_none()
             && self.grid.header_menu.is_none()
+            && self.grid.fill_menu.is_none()
             && self.grid.filter_menu.is_none()
             && self.grid.list_picker.is_none()
             && self.grid.renaming_tab.is_none()
@@ -1354,7 +1386,7 @@ impl SheetApp {
             for n in &d.wb.names {
                 let target = n.formula.replace('$', "");
                 let (sheet, body) = match target.rsplit_once('!') {
-                    Some((s, b)) => (Some(s.trim_matches('\'').to_string()), b.to_string()),
+                    Some((s, b)) => (Some(gridcraft_engine::core::unquote_sheet(s)), b.to_string()),
                     None => (None, target.clone()),
                 };
                 if sheet.as_deref().is_none_or(|s| s.eq_ignore_ascii_case(&sh.name)) && RangeRef::parse(&body) == Some(cur) {

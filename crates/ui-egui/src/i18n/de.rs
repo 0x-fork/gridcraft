@@ -180,6 +180,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Protect\nWorkbook" => "Arbeitsmappe\nschützen",
         "Unprotect\nSheet" => "Blattschutz\naufheben",
         "Protect Sheet…" => "Blatt schützen…",
+        "Unprotect Sheet…" => "Blattschutz aufheben…",
         "Comments" => "Kommentare",
         "Notes" => "Notizen",
         "Page Break\nPreview" => "Seitenumbruch-\nvorschau",
@@ -419,6 +420,22 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Link…" => "Link…",
         "Hide" => "Ausblenden",
         "Unhide" => "Einblenden",
+        "Insert Sheet" => "Blatt einfügen",
+        "Rename" => "Umbenennen",
+        "Move or Copy…" => "Verschieben oder kopieren…",
+        "Duplicate" => "Duplizieren",
+        "Tab Color" => "Registerfarbe",
+        "No Color" => "Keine Farbe",
+        "Unhide…" => "Einblenden…",
+        "Select All Sheets" => "Alle Blätter auswählen",
+        "AutoSave" => "AutoSpeichern",
+        "AutoSave: save after every change (workbooks saved to a file)" => {
+            "AutoSpeichern: nach jeder Änderung speichern (Arbeitsmappen, die in einer Datei gespeichert sind)"
+        }
+        "Previous sheet" => "Vorheriges Blatt",
+        "Next sheet" => "Nächstes Blatt",
+        "All sheets" => "Alle Blätter",
+        "New sheet (⇧F11)" => "Neues Blatt (⇧F11)",
         _ => return None,
     })
 }

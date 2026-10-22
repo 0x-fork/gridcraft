@@ -180,6 +180,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Protect\nWorkbook" => "Zamknout\nsešit",
         "Unprotect\nSheet" => "Odemknout\nlist",
         "Protect Sheet…" => "Zamknout list…",
+        "Unprotect Sheet…" => "Odemknout list…",
         "Comments" => "Komentáře",
         "Notes" => "Poznámky",
         "Page Break\nPreview" => "Náhled\nkonců stránek",
@@ -526,6 +527,16 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Zoom Out" => "Oddálit",
         // widgets.rs (alphabetical keys).
         "Dismiss" => "Zavřít",
+        "Rename" => "Přejmenovat",
+        "Move or Copy…" => "Přesunout nebo kopírovat…",
+        "Duplicate" => "Duplikovat",
+        "Tab Color" => "Barva záložky",
+        "No Color" => "Bez barvy",
+        "Unhide…" => "Zobrazit…",
+        "Select All Sheets" => "Vybrat všechny listy",
+        "AutoSave" => "Automatické ukládání",
+        "AutoSave: save after every change (workbooks saved to a file)" => "Automatické ukládání: ukládat po každé změně (sešity uložené do souboru)",
+        "All sheets" => "Všechny listy",
         _ => return None,
     })
 }

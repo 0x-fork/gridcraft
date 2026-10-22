@@ -78,8 +78,10 @@ pub enum Drag {
         start: f32,
         orig: f32,
     },
+    /// Dragging the fill handle; `menu` when the right button drags it (the fill menu opens on release).
     Fill {
         target: Option<RangeRef>,
+        menu: bool,
     },
     /// Dragging a freeze handle: `cols` for the column bar, `to` the line count it would freeze.
     Freeze {
@@ -114,6 +116,10 @@ pub struct GridState {
     /// Column and row of the clicked header cell, and where to open the menu.
     pub filter_menu: Option<(u32, u32, Pos2)>,
     pub context_menu: Option<Pos2>,
+    /// The frame a right-click opened `context_menu` in: that click's own press doesn't close it.
+    pub context_menu_frame: u64,
+    /// After a right-drag of the fill handle: the source, the dragged range and where to open the menu.
+    pub fill_menu: Option<(RangeRef, RangeRef, Pos2)>,
     pub marching_phase: f32,
     /// The selection outline on its way to a new selection.
     pub glide: crate::selection_glide::SelectionGlide,
@@ -434,18 +440,7 @@ fn col32(c: Color, wb: &Workbook, default: Color32) -> Color32 {
 }
 
 fn numfmt_color(c: gridcraft_engine::numfmt::FormatColor) -> Color32 {
-    use gridcraft_engine::numfmt::FormatColor as F;
-    match c {
-        F::Black => Color32::BLACK,
-        F::Blue => Color32::from_rgb(0, 0, 255),
-        F::Cyan => Color32::from_rgb(0, 255, 255),
-        F::Green => Color32::from_rgb(0, 128, 0),
-        F::Magenta => Color32::from_rgb(255, 0, 255),
-        F::Red => Color32::from_rgb(255, 0, 0),
-        F::White => Color32::WHITE,
-        F::Yellow => Color32::from_rgb(255, 255, 0),
-        F::Indexed(_) => Color32::BLACK,
-    }
+    c.rgb().map(|[r, g, b]| Color32::from_rgb(r, g, b)).unwrap_or(Color32::BLACK)
 }
 
 /// Last column of a Center Across Selection run starting at `start`: it extends over following columns (up to `limit`) while `continues` holds.
@@ -756,7 +751,8 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     }
     // Headers.
     if sh.show_headings {
-        paint_headers(&painter, &geo, sh, &sel, &t, &quads);
+        let headings = table_headings(&geo, sh, sel.active);
+        paint_headers(&painter, &geo, sh, &sel, &t, &quads, &headings);
         paint_freeze_handles(&painter, &geo, sh, &app.grid.drag, &t);
     }
     crate::outline::paint(&painter, &geo, sh, &t);
@@ -768,7 +764,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
         crate::paper_view::paint_rulers(app, &painter, rect, &geo, &t);
     }
     // Interaction.
-    let previous_popups = (app.grid.filter_menu, app.grid.list_picker, app.grid.header_menu);
+    let previous_popups = (app.grid.filter_menu, app.grid.list_picker, app.grid.header_menu, app.grid.fill_menu);
     // A pan the grid never saw end (it was hidden mid-drag) must not swallow the next press.
     if app.grid.touch_pan && !resp.dragged() && !resp.drag_stopped() {
         app.grid.touch_pan = false;
@@ -791,6 +787,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     list_picker(app, ui, &geo, previous_popups.1 == app.grid.list_picker);
     header_menu(app, ui, previous_popups.2 == app.grid.header_menu);
     context_menu(app, ui);
+    fill_menu(app, ui, previous_popups.3 == app.grid.fill_menu);
     let track_x = if rtl { (available.left(), rect.left()) } else { (rect.right(), available.right()) };
     vertical_scrollbar(app, ui, sh, &geo, track_x, max_y, &t);
     if app.session.clipboard.is_some() {
@@ -1418,10 +1415,7 @@ pub(crate) fn paint_quadrant(
         if !range.contains(c) {
             continue;
         }
-        let r = filter_button_rect(geo, sh, c);
-        p.rect_filled(r, 2.0, Color32::from_gray(250));
-        p.rect_stroke(r, 2.0, Stroke::new(1.0, Color32::from_gray(170)), StrokeKind::Inside);
-        crate::icons::paint(p, r.shrink(1.5), if active { crate::icons::Icon::Filter } else { crate::icons::Icon::Chevron }, Color32::from_gray(70));
+        paint_filter_button(p, filter_button_rect(geo, sh, c), active);
     }
 }
 
@@ -1431,6 +1425,67 @@ pub fn filter_button_rect(geo: &Geo, sh: &Sheet, c: CellRef) -> Rect {
     let pad = 2.0 * geo.z;
     let s = (rect.height() - 4.0).clamp(10.0, 18.0).min((sh.filter_button_space(c) * geo.z - pad).max(0.0));
     Rect::from_min_size(pos2(rect.right() - s - pad, rect.bottom() - s - pad), vec2(s, s))
+}
+
+/// A Table column heading that shows the column's header name in place of its letters.
+#[derive(Clone, Debug)]
+pub struct TableHeading {
+    pub col: u32,
+    /// The table's header row, which the filter menu is keyed by.
+    pub header_row: u32,
+    pub name: String,
+    /// The heading slot over the column (logical coordinates).
+    pub rect: Rect,
+    /// The filter button, when the table shows filter buttons.
+    pub button: Option<Rect>,
+    /// The column is filtered (the button shows the funnel).
+    pub filtered: bool,
+}
+
+/// The Table whose header names replace the column letters: the one holding the active cell,
+/// with its header row scrolled out of view and some of its rows still in view (Excel, #1423).
+pub fn heading_table<'a>(geo: &Geo, sh: &'a Sheet, active: CellRef) -> Option<&'a gridcraft_engine::model::Table> {
+    // Page Layout view keeps the letters.
+    if geo.paper.is_some() || geo.header_h <= 0.0 {
+        return None;
+    }
+    let tb = sh.tables.iter().find(|t| t.header_row && t.range.contains(active))?;
+    let header = tb.range.start.row;
+    // A header row in the frozen rows is always on screen.
+    if header < geo.fr {
+        return None;
+    }
+    let top = geo.cells.top() + geo.frozen_h;
+    let bottom = |r: u32| geo.y(sh, r) + sh.row_height(r) * geo.z;
+    (bottom(header) <= top + 0.5 && bottom(tb.range.end.row) > top + 0.5).then_some(tb)
+}
+
+/// The headings of `heading_table`'s visible columns.
+pub fn table_headings(geo: &Geo, sh: &Sheet, active: CellRef) -> Vec<TableHeading> {
+    let Some(tb) = heading_table(geo, sh, active) else { return Vec::new() };
+    let af = sh.autofilter.as_ref().filter(|af| af.range == tb.range);
+    let mut out = Vec::new();
+    for col in tb.range.start.col..=tb.range.end.col {
+        let w = sh.col_width(col) * geo.z;
+        let off = col - tb.range.start.col;
+        let Some(column) = tb.columns.get(off as usize) else { continue };
+        if w <= 0.0 {
+            continue;
+        }
+        let rect = Rect::from_min_size(pos2(geo.x(sh, col), geo.head_top()), vec2(w, geo.header_h));
+        // Clear of the 4-point column resize edge, and never wider than the column.
+        let s = (rect.height() - 6.0).clamp(10.0, 16.0).min(w - 7.0);
+        let button = (tb.filter_button && s > 0.0).then(|| Rect::from_min_size(pos2(rect.right() - s - 5.0, rect.center().y - s / 2.0), vec2(s, s)));
+        let filtered = tb.filter.iter().any(|(o, _)| *o == off) || af.is_some_and(|af| af.criteria.iter().any(|(o, _)| *o == off));
+        out.push(TableHeading { col, header_row: tb.range.start.row, name: column.name.clone(), rect, button, filtered });
+    }
+    out
+}
+
+fn paint_filter_button(p: &Painter, r: Rect, filtered: bool) {
+    p.rect_filled(r, 2.0, Color32::from_gray(250));
+    p.rect_stroke(r, 2.0, Stroke::new(1.0, Color32::from_gray(170)), StrokeKind::Inside);
+    crate::icons::paint(p, r.shrink(1.5), if filtered { crate::icons::Icon::Filter } else { crate::icons::Icon::Chevron }, Color32::from_gray(70));
 }
 
 /// The outline segments of merged area `m` drawn at `rect`: the top and left edges come from the
@@ -1682,7 +1737,7 @@ pub(crate) fn paint_selection(
         p.rect_filled(h, 0.0, t.sel_border);
     }
     // Fill-handle drag preview.
-    if let crate::grid::Drag::Fill { target: Some(tr) } = &app.grid.drag
+    if let crate::grid::Drag::Fill { target: Some(tr), .. } = &app.grid.drag
         && range_in_pane(*tr, rows, cols)
     {
         let rr = geo.range_rect(sh, *tr);
@@ -1728,6 +1783,7 @@ pub(crate) fn paint_headers(
     sel: &gridcraft_engine::Selection,
     t: &Tokens,
     quads: &[((u32, u32), (u32, u32), Rect)],
+    headings: &[TableHeading],
 ) {
     let font = theme::ui_font((11.5 * (geo.z / DISPLAY_SCALE).max(0.75)).min(16.0));
     // The headers' own area: inside the outline bands.
@@ -1742,6 +1798,8 @@ pub(crate) fn paint_headers(
     let full_col = |c: u32| sel.ranges.iter().any(|x| x.is_full_cols() && c >= x.start.col && c <= x.end.col);
     let full_row = |rr: u32| sel.ranges.iter().any(|x| x.is_full_rows() && rr >= x.start.row && rr <= x.end.row);
     let _ = bounds;
+    // Hidden columns and rows leave a double divider where they sit, as in Excel.
+    let hidden_mark = Stroke::new(1.0, t.header_text.gamma_multiply(0.6));
     let mut done_cols = std::collections::HashSet::new();
     let mut done_rows = std::collections::HashSet::new();
     for (rows, cols, clip) in quads {
@@ -1762,8 +1820,28 @@ pub(crate) fn paint_headers(
                     pc.line_segment([pos2(cr.left(), cr.bottom() - 1.0), pos2(cr.right(), cr.bottom() - 1.0)], Stroke::new(2.0, t.accent));
                 }
                 pc.line_segment([pos2(cr.right() - 0.5, cr.top() + 3.0), pos2(cr.right() - 0.5, cr.bottom())], Stroke::new(1.0, t.header_line));
+                let (before, after) = hidden_around(c, |i| sh.col_width(i));
+                for x in [before.then_some(cr.left()), after.then_some(cr.right())].into_iter().flatten() {
+                    for dx in [-1.5, 1.5] {
+                        pc.line_segment([pos2(x + dx, cr.top() + 3.0), pos2(x + dx, cr.bottom())], hidden_mark);
+                    }
+                }
                 let color = if col_sel(c) { t.header_sel_text } else { t.header_text };
-                pc.text(cr.center(), Align2::CENTER_CENTER, col_to_letters(c), font.clone(), color);
+                match headings.iter().find(|h| h.col == c) {
+                    Some(h) => {
+                        // The name is cut off at the button, as a cell's text is at its neighbour.
+                        let end = h.button.map_or(cr.right(), |b| b.left()) - 2.0;
+                        let room = Rect::from_min_max(cr.min, pos2(end.max(cr.left()), cr.bottom())).intersect(pc.clip_rect());
+                        let pad = 4.0 * (geo.z / DISPLAY_SCALE).max(0.75);
+                        pc.with_clip_rect(room).text(pos2(cr.left() + pad, cr.center().y), Align2::LEFT_CENTER, &h.name, font.clone(), color);
+                        if let Some(b) = h.button {
+                            paint_filter_button(&pc, b, h.filtered);
+                        }
+                    }
+                    None => {
+                        pc.text(cr.center(), Align2::CENTER_CENTER, col_to_letters(c), font.clone(), color);
+                    }
+                }
             }
         }
         let pr = p.with_clip_rect(Rect::from_min_max(pos2(left.left(), clip.top()), pos2(left.right(), clip.bottom())));
@@ -1783,6 +1861,12 @@ pub(crate) fn paint_headers(
                     pr.line_segment([pos2(cr.right() - 1.0, cr.top()), pos2(cr.right() - 1.0, cr.bottom())], Stroke::new(2.0, t.accent));
                 }
                 pr.line_segment([pos2(cr.left() + 3.0, cr.bottom() - 0.5), pos2(cr.right(), cr.bottom() - 0.5)], Stroke::new(1.0, t.header_line));
+                let (before, after) = hidden_around(rr, |i| sh.row_height(i));
+                for y in [before.then_some(cr.top()), after.then_some(cr.bottom())].into_iter().flatten() {
+                    for dy in [-1.5, 1.5] {
+                        pr.line_segment([pos2(cr.left() + 3.0, y + dy), pos2(cr.right(), y + dy)], hidden_mark);
+                    }
+                }
                 let color = if row_sel(rr) { t.header_sel_text } else { t.header_text };
                 pr.text(cr.center(), Align2::CENTER_CENTER, (rr as u64 + 1).to_string(), font.clone(), color);
             }
@@ -1799,6 +1883,12 @@ pub(crate) fn paint_headers(
     p.add(egui::Shape::convex_polygon(tri, Color32::from_gray(190), Stroke::NONE));
     p.line_segment([pos2(r.left(), geo.cells.top() - 0.5), pos2(r.right(), geo.cells.top() - 0.5)], Stroke::new(1.0, t.header_line));
     p.line_segment([pos2(geo.cells.left() - 0.5, r.top()), pos2(geo.cells.left() - 0.5, r.bottom())], Stroke::new(1.0, t.header_line));
+}
+
+/// Whether the line before / after visible line `i` is hidden (zero size), so its header edges
+/// get the hidden marker. Line 0 has nothing before it.
+fn hidden_around(i: u32, size: impl Fn(u32) -> f32) -> (bool, bool) {
+    (i > 0 && size(i - 1) <= 0.0, i < u32::MAX && size(i + 1) <= 0.0)
 }
 
 // ------------------------------------------------------------------ interaction
@@ -1875,10 +1965,16 @@ fn update_cursor(app: &mut SheetApp, ui: &egui::Ui, resp: &egui::Response, geo: 
     let near_corner = selected_object.is_some_and(|(_, _, rect)| (p - rect.right_bottom()).length() < OBJECT_RESIZE_RADIUS);
     if app.grid.drag == Drag::None && near_corner {
         ctx.set_cursor_icon(CursorIcon::ResizeNwSe);
-    } else if in_col_header && col_edge(geo, sh, p.x).is_some() {
-        ctx.set_cursor_icon(CursorIcon::ResizeColumn);
-    } else if in_row_header && row_edge(geo, sh, p.y).is_some() {
-        ctx.set_cursor_icon(CursorIcon::ResizeRow);
+    } else if (in_col_header && col_edge(geo, sh, p.x).is_some()) || (in_row_header && row_edge(geo, sh, p.y).is_some()) {
+        let near_col_edge = in_col_header && col_edge(geo, sh, p.x).is_some();
+        // Just past a hidden column or row, Excel shows a split cursor: dragging or
+        // double-clicking there unhides it.
+        let hidden = app.grid.drag == Drag::None
+            && if near_col_edge { hidden_col_edge(geo, sh, p.x).is_some() } else { hidden_row_edge(geo, sh, p.y).is_some() };
+        match pointer.hover_pos() {
+            Some(at) if hidden => paint_split_cursor(ctx, at, near_col_edge),
+            _ => ctx.set_cursor_icon(if near_col_edge { CursorIcon::ResizeColumn } else { CursorIcon::ResizeRow }),
+        }
     } else if on_handle && app.editor.is_none() {
         ctx.set_cursor_icon(CursorIcon::Crosshair);
         if app.grid.drag == Drag::None && !pointer.any_down() {
@@ -2020,7 +2116,16 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
     if resp.double_clicked()
         && let Some(p) = pos
     {
-        let autofit = if in_col_header {
+        let unhide = if in_col_header {
+            hidden_col_edge(geo, sh, p.x).map(|col| ("home.unhideColumns", json!({"cols": RangeRef::cols(col, col).a1()})))
+        } else if in_row_header {
+            hidden_row_edge(geo, sh, p.y).map(|row| ("home.unhideRows", json!({"rows": RangeRef::rows(row, row).a1()})))
+        } else {
+            None
+        };
+        let autofit = if unhide.is_some() {
+            unhide
+        } else if in_col_header {
             col_edge(geo, sh, p.x).map(|(col, _)| {
                 let selected = sel.ranges.iter().any(|r| r.is_full_cols() && col >= r.start.col && col <= r.end.col);
                 ("home.autofitColumnWidth", if selected { json!({}) } else { json!({"cols": RangeRef::cols(col, col).a1()}) })
@@ -2089,11 +2194,18 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                 return;
             }
             let c = geo.col_at(sh, p.x);
-            if point_header(app, wb, sh, RangeRef::cols(c, c)) {
+            // A Table heading's filter button, while the header names stand in for the letters.
+            if let Some(h) = table_headings(geo, sh, sel.active).into_iter().find(|h| h.col == c && h.button.is_some_and(|b| b.contains(p))) {
+                app.grid.filter_menu = Some((c, h.header_row, geo.mirror_pos(p)));
                 return;
             }
+            if point_header(app, wb, sh, RangeRef::cols(c, c), mods.shift, mods.command) {
+                return;
+            }
+            // An armed Format Painter paints the columns dragged over instead of moving them.
             if resp.drag_started()
                 && !mods.any()
+                && app.session.format_painter.is_none()
                 && sel.ranges.len() == 1
                 && sel.current().is_full_cols()
                 && sel.current().contains(CellRef::new(0, c))
@@ -2112,7 +2224,7 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                 return;
             }
             let r = geo.row_at(sh, p.y);
-            if point_header(app, wb, sh, RangeRef::rows(r, r)) {
+            if point_header(app, wb, sh, RangeRef::rows(r, r), mods.shift, mods.command) {
                 return;
             }
             let range = if mods.shift { RangeRef::rows(sel.anchor.row.min(r), sel.anchor.row.max(r)) } else { RangeRef::rows(r, r) };
@@ -2173,7 +2285,7 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
             return;
         }
         if on_handle(p) {
-            app.grid.drag = Drag::Fill { target: None };
+            app.grid.drag = Drag::Fill { target: None, menu: resp.drag_started_by(egui::PointerButton::Secondary) };
             return;
         }
         if on_cur_border(p) && resp.drag_started() {
@@ -2308,10 +2420,10 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
             Drag::Freeze { cols, .. } => {
                 app.grid.drag = Drag::Freeze { cols, to: Some(freeze_boundary(geo, sh, p, cols)) };
             }
-            Drag::Fill { .. } => {
+            Drag::Fill { menu, .. } => {
                 let src = sel.current();
                 let target = fill_target(src, pc);
-                app.grid.drag = Drag::Fill { target: Some(target) };
+                app.grid.drag = Drag::Fill { target: Some(target), menu };
                 scroll_by(app, auto);
             }
             Drag::Move { grab, .. } => {
@@ -2343,12 +2455,27 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
     // Release.
     if resp.drag_stopped() || (!pointer.any_down() && app.grid.drag != Drag::None && !resp.dragged()) {
         match std::mem::take(&mut app.grid.drag) {
-            Drag::Select if resp.drag_stopped() => {
-                if let Some(p) = pos {
+            Drag::Select => {
+                if resp.drag_stopped()
+                    && let Some(p) = pos
+                {
                     select_to_pointer(app, geo, sh, wb, p);
                 }
+                format_painter_apply(app);
             }
-            Drag::Fill { target: Some(t) } => {
+            // Whole rows or columns clicked or dragged over by their headers.
+            Drag::Rows(_) | Drag::Cols(_) => format_painter_apply(app),
+            // Esc mid-drag lands here too (egui ends the drag on Esc): no menu, and the key is
+            // spent on the drag so the grid's Esc doesn't also drop the copy.
+            Drag::Fill { target: Some(t), menu: true } => {
+                if let Some(p) = pos
+                    && t != sel.current()
+                    && !ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+                {
+                    app.grid.fill_menu = Some((sel.current(), t, geo.mirror_pos(p)));
+                }
+            }
+            Drag::Fill { target: Some(t), menu: false } => {
                 let src = sel.current();
                 if t != src {
                     // Ctrl (Cmd on macOS) swaps copying and extending, as in Excel.
@@ -2406,6 +2533,7 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
             app.grid.header_menu = Some((geo.mirror_pos(p), rows));
         } else {
             app.grid.context_menu = Some(geo.mirror_pos(p));
+            app.grid.context_menu_frame = ui.ctx().cumulative_frame_nr();
         }
     }
 
@@ -2415,13 +2543,53 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
     keyboard(app, &ctx, resp, geo, sh);
 }
 
-/// Point mode on a header: inserts the whole-column or whole-row reference instead of selecting.
-fn point_header(app: &mut SheetApp, wb: &Workbook, sh: &Sheet, range: RangeRef) -> bool {
+/// An armed Format Painter pastes onto the cells just clicked or dragged over (not while
+/// pointing a formula reference, which also drags a Select).
+fn format_painter_apply(app: &mut SheetApp) {
+    if app.session.format_painter.is_some() && !app.editor.as_ref().is_some_and(|ed| ed.can_point()) {
+        let dest = app.session.active().map(|d| d.selection.current().a1());
+        if let Some(dest) = dest
+            && let Err(e) = app.run("edit.formatPainter", json!({"apply": dest}))
+        {
+            app.message = Some(("GridCraft".into(), crate::clean_error(&e)));
+        }
+    }
+}
+
+/// Point mode on a header: inserts a whole-row or whole-column reference instead of selecting.
+fn point_header(app: &mut SheetApp, wb: &Workbook, sh: &Sheet, range: RangeRef, extend: bool, add: bool) -> bool {
     let Some(ed) = app.editor.as_mut().filter(|ed| ed.can_point()) else { return false };
-    let r = range.a1();
-    let r = if ed.sheet != wb.active_sheet { format!("{}!{r}", gridcraft_engine::formula::quote_sheet(&sh.name)) } else { r };
-    ed.insert_ref(&r);
+    let edit_sheet = ed.sheet;
+    let active_sheet = wb.active_sheet;
+    let range = if extend {
+        ed.point
+            .and_then(|point| crate::editor::formula_refs(&ed.text).into_iter().find(|(start, end, ..)| (*start, *end) == point))
+            .and_then(|(_, _, previous, previous_sheet, _)| {
+                let previous_sheet = previous_sheet.as_deref().map(|name| wb.sheet_index(name)).unwrap_or(Some(edit_sheet));
+                if previous_sheet != Some(active_sheet) {
+                    return None;
+                }
+                if range.is_full_cols() && previous.is_full_cols() {
+                    Some(RangeRef::cols(previous.start.col.min(range.start.col), previous.end.col.max(range.end.col)))
+                } else if range.is_full_rows() && previous.is_full_rows() {
+                    Some(RangeRef::rows(previous.start.row.min(range.start.row), previous.end.row.max(range.end.row)))
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(range)
+    } else {
+        range
+    };
+    let reference = range.a1();
+    let reference = if ed.sheet != wb.active_sheet { format!("{}!{reference}", gridcraft_engine::formula::quote_sheet(&sh.name)) } else { reference };
+    if add {
+        ed.append_ref(&reference);
+    } else {
+        ed.insert_ref(&reference);
+    }
     ed.point_anchor = None;
+    ed.point_cell = Some(range.start);
     ed.request_focus = true;
     true
 }
@@ -2581,6 +2749,36 @@ fn row_edge(geo: &Geo, sh: &Sheet, y: f32) -> Option<(u32, f32)> {
     None
 }
 
+/// The hidden column whose (zero-width) edge is at `x`: only just right of the boundary, as the
+/// edge just left of it belongs to the visible column there.
+fn hidden_col_edge(geo: &Geo, sh: &Sheet, x: f32) -> Option<u32> {
+    col_edge(geo, sh, x).map(|(c, _)| c).filter(|&c| sh.col_width(c) <= 0.0)
+}
+
+fn hidden_row_edge(geo: &Geo, sh: &Sheet, y: f32) -> Option<u32> {
+    row_edge(geo, sh, y).map(|(r, _)| r).filter(|&r| sh.row_height(r) <= 0.0)
+}
+
+/// A split cursor (two bars with arrows either side) painted in place of the OS cursor, which
+/// has no such shape. Black on a white outline, like the system cursors.
+fn paint_split_cursor(ctx: &egui::Context, at: Pos2, cols: bool) {
+    ctx.set_cursor_icon(CursorIcon::None);
+    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("gridcraft.split_cursor")));
+    // Drawn for columns (bars vertical); rows swap the axes.
+    let pt = |x: f32, y: f32| if cols { pos2(at.x + x, at.y + y) } else { pos2(at.x + y, at.y + x) };
+    let arrow = |dir: f32| vec![pt(dir * 10.0, 0.0), pt(dir * 6.0, -4.0), pt(dir * 6.0, 4.0)];
+    for (width, color) in [(3.0, Color32::WHITE), (1.0, Color32::BLACK)] {
+        let stroke = Stroke::new(width, color);
+        for bx in [-1.5, 1.5] {
+            p.line_segment([pt(bx, -8.0), pt(bx, 8.0)], stroke);
+        }
+        p.line_segment([pt(-7.0, 0.0), pt(7.0, 0.0)], stroke);
+        for dir in [-1.0, 1.0] {
+            p.add(egui::Shape::convex_polygon(arrow(dir), color, Stroke::new(width - 1.0, color)));
+        }
+    }
+}
+
 fn is_filter_button(sh: &Sheet, geo: &Geo, p: Pos2) -> bool {
     let c = geo.cell_at(sh, p);
     sh.has_filter_button(c) && filter_button_rect(geo, sh, c).contains(p)
@@ -2661,7 +2859,16 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
     }
     let other_focus = ctx.memory(|m| m.focused()).is_some_and(|f| f != resp.id && (editing || !stale.contains(&f)));
     // An open filter menu owns the keyboard even when a click inside it left focus on nothing (#1516).
-    if editing || app.dialog.is_some() || other_focus || app.message.is_some() || app.grid.filter_menu.is_some() {
+    // So do the fill menu (its Esc closes it, not the copy) and the right-drag that opens it (an
+    // arrow key would move the selection the menu fills from).
+    if editing
+        || app.dialog.is_some()
+        || other_focus
+        || app.message.is_some()
+        || app.grid.filter_menu.is_some()
+        || app.grid.fill_menu.is_some()
+        || matches!(app.grid.drag, Drag::Fill { menu: true, .. })
+    {
         return;
     }
     if ctx.memory(|m| m.focused()).is_none() {
@@ -2812,6 +3019,9 @@ fn in_cell_editor(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet, 
     let id = egui::Id::new("gridcraft.cell_editor");
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(erect.shrink2(vec2(2.0, 1.0))));
     child.set_clip_rect(clip);
+    // The theme's caret is meant for the UI chrome and vanishes on some fills (and, in the dark
+    // theme, on the white paper): pick black or white against the fill, like Excel.
+    child.visuals_mut().text_cursor.stroke.color = ink_on(fill);
     crate::formula_bar::editor_widget(app, &mut child, id, font, false, erect.width() - 4.0);
 }
 
@@ -2819,6 +3029,12 @@ fn in_cell_editor(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet, 
 /// A trigger can sit outside its popup, so its opening click must be ignored.
 fn popup_dismissed(response: &egui::Response, was_open: bool) -> bool {
     response.ctx.input(|i| !i.focused || i.key_pressed(egui::Key::Escape)) || (was_open && response.clicked_elsewhere())
+}
+
+/// Black or white, whichever reads on `fill` (the threshold chart labels use).
+fn ink_on(fill: Color32) -> Color32 {
+    let l = 0.299 * fill.r() as f32 + 0.587 * fill.g() as f32 + 0.114 * fill.b() as f32;
+    if l < 150.0 { Color32::WHITE } else { Color32::BLACK }
 }
 
 /// The table whose header cell (`row`, `col`) was clicked, not just the first table in the column.
@@ -3015,14 +3231,58 @@ fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
             }
         });
     });
+    // A quick right-click presses and releases in one frame, and the menu's corner snaps to the
+    // nearest physical pixel, which can put the pointer just outside it: that press opened the
+    // menu, so it doesn't count as a click elsewhere.
+    let opened_now = app.grid.context_menu_frame == ui.ctx().cumulative_frame_nr();
     if close
         || ui.input(|i| i.key_pressed(egui::Key::Escape))
-        || (ui.input(|i| i.pointer.any_pressed())
+        || (!opened_now
+            && ui.input(|i| i.pointer.any_pressed())
             && !resp.response.contains_pointer()
             && !resp.response.hovered()
             && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| !resp.response.rect.contains(p)))
     {
         app.grid.context_menu = None;
+    }
+}
+
+/// The menu a right-drag of the fill handle opens on release, as in Excel.
+fn fill_menu(app: &mut SheetApp, ui: &mut egui::Ui, was_open: bool) {
+    let Some((src, target, at)) = app.grid.fill_menu else { return };
+    let mut close = false;
+    let response = egui::Area::new(egui::Id::new("fill_menu")).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
+        egui::Frame::popup(ui.style()).show(ui, |ui| {
+            ui.set_min_width(190.0);
+            let items = [
+                ("Copy Cells", "copy"),
+                ("Fill Series", "extend"),
+                ("Fill Formatting Only", "formats"),
+                ("Fill Without Formatting", "values"),
+                ("-", ""),
+                ("Series…", "ui:series"),
+            ];
+            let lang = crate::i18n::current(ui.ctx());
+            for (label, mode) in items {
+                if label == "-" {
+                    ui.separator();
+                    continue;
+                }
+                if ui.add(egui::Button::new(lang.tr(label)).frame(false).min_size(vec2(180.0, 20.0))).clicked() {
+                    close = true;
+                    if mode == "ui:series" {
+                        let _ = app.session.run("selection.set", json!({"range": target.union(&src).a1(), "active": src.start.a1()}));
+                        let direction = if target.width() != src.width() { "rows" } else { "columns" };
+                        app.open_dialog("series", json!({"direction": direction}));
+                    } else if let Err(e) = app.run("edit.autoFill", json!({"source": src.a1(), "target": target.a1(), "mode": mode})) {
+                        app.message = Some(("GridCraft".into(), crate::clean_error(&e)));
+                    }
+                }
+            }
+        });
+    });
+    if close || popup_dismissed(&response.response, was_open) {
+        app.grid.fill_menu = None;
     }
 }
 
@@ -3247,6 +3507,7 @@ fn header_menu(app: &mut SheetApp, ui: &mut egui::Ui, was_open: bool) {
                     ("Delete", "home.deleteRows"),
                     ("Clear Contents", "edit.clearContents"),
                     ("-", ""),
+                    ("Format Cells…", "ui:formatCells"),
                     ("Row Height…", "ui:rowHeight"),
                     ("AutoFit Row Height", "home.autofitRowHeight"),
                     ("Hide", "home.hideRows"),
@@ -3263,6 +3524,7 @@ fn header_menu(app: &mut SheetApp, ui: &mut egui::Ui, was_open: bool) {
                     ("Delete", "home.deleteColumns"),
                     ("Clear Contents", "edit.clearContents"),
                     ("-", ""),
+                    ("Format Cells…", "ui:formatCells"),
                     ("Column Width…", "ui:columnWidth"),
                     ("AutoFit Column Width", "home.autofitColumnWidth"),
                     ("Hide", "home.hideColumns"),
@@ -3285,6 +3547,7 @@ fn header_menu(app: &mut SheetApp, ui: &mut egui::Ui, was_open: bool) {
                     match id {
                         "ui:insertPaste" => app.open_dialog("insertPaste", json!({})),
                         "ui:rowHeight" => app.open_dialog("rowHeight", json!({})),
+                        "ui:formatCells" => app.open_dialog("formatCells", json!({})),
                         "ui:columnWidth" => app.open_dialog("columnWidth", json!({})),
                         "edit.copy" | "edit.cut" => {
                             app.copy_to_clipboard(ui.ctx(), id);
@@ -3482,6 +3745,19 @@ mod tests {
         assert_eq!(list_picker_height(8, 18.0, 3.0), 8.0 * 18.0 + 7.0 * 3.0);
         assert_eq!(list_picker_height(30, 18.0, 3.0), list_picker_height(8, 18.0, 3.0));
         assert_eq!(list_picker_height(0, 18.0, 3.0), 18.0);
+    }
+
+    #[test]
+    fn number_format_colors_resolve_named_and_indexed_rgb() {
+        use gridcraft_engine::numfmt::FormatColor as F;
+        assert_eq!(numfmt_color(F::Green), Color32::from_rgb(0, 255, 0));
+        assert_eq!(numfmt_color(F::Indexed(1)), Color32::BLACK);
+        assert_eq!(numfmt_color(F::Indexed(10)), Color32::from_rgb(0, 128, 0));
+        assert_eq!(numfmt_color(F::Indexed(46)), Color32::from_rgb(255, 102, 0));
+        assert_eq!(numfmt_color(F::Indexed(56)), Color32::from_rgb(51, 51, 51));
+        for index in [0, 57, 255] {
+            assert_eq!(numfmt_color(F::Indexed(index)), Color32::BLACK);
+        }
     }
 
     #[test]
@@ -3760,6 +4036,38 @@ mod pane_tests {
         sh.freeze = Some((2, 2));
         let scroll = vec2(3.0 * sh.default_col_width + 8.0, 0.0);
         Geo::new(sh, Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0)), scroll)
+    }
+
+    #[test]
+    fn the_edge_just_past_a_hidden_line_unhides_it() {
+        let mut sh = Sheet::new("S");
+        sh.cols.entry(11).or_default().hidden = true; // L
+        sh.rows.entry(26).or_default().hidden = true; // 27
+        let geo = Geo::new(&sh, Rect::from_min_size(pos2(0.0, 0.0), vec2(2000.0, 1200.0)), vec2(0.0, 0.0));
+        let x = geo.x(&sh, 12); // between K and M
+        assert_eq!(hidden_col_edge(&geo, &sh, x + 2.0), Some(11));
+        assert_eq!(hidden_col_edge(&geo, &sh, x - 2.0), None); // K's own edge
+        assert_eq!(hidden_col_edge(&geo, &sh, geo.x(&sh, 5)), None);
+        let y = geo.y(&sh, 27); // between 26 and 28
+        assert_eq!(hidden_row_edge(&geo, &sh, y + 2.0), Some(26));
+        assert_eq!(hidden_row_edge(&geo, &sh, y - 2.0), None);
+    }
+
+    #[test]
+    fn headers_mark_the_edges_next_to_hidden_lines() {
+        let mut sh = Sheet::new("S");
+        sh.cols.entry(0).or_default().hidden = true; // A
+        sh.cols.entry(11).or_default().hidden = true; // L
+        sh.rows.entry(26).or_default().hidden = true; // 27
+        let col = |c| hidden_around(c, |i| sh.col_width(i));
+        assert_eq!(col(1), (true, false)); // B, after hidden A
+        assert_eq!(col(10), (false, true)); // K
+        assert_eq!(col(12), (true, false)); // M
+        assert_eq!(col(5), (false, false));
+        let row = |r| hidden_around(r, |i| sh.row_height(i));
+        assert_eq!(row(25), (false, true));
+        assert_eq!(row(27), (true, false));
+        assert_eq!(row(0), (false, false));
     }
 
     #[test]

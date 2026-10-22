@@ -79,7 +79,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "AutoFill",
             [],
             None,
-            "{source: \"A1:A2\", target: \"A1:A10\", mode?: series|alternate|copy|formats|values}: the fill-handle drag (alternate = Ctrl+drag: a lone number counts up, any other series copies)",
+            "{source: \"A1:A2\", target: \"A1:A10\", mode?: series|alternate|copy|formats|values|extend}: the fill-handle drag (alternate = Ctrl+drag: a lone number counts up, any other series copies; values = Fill Without Formatting: the series, targets keep their formats; extend = Fill Series: the series, and a lone number counts up)",
             has_doc,
             auto_fill
         ),
@@ -377,6 +377,12 @@ fn range_fill(s: &mut Session, p: &Json) -> Result<Json> {
 
 // ---------------------------------------------------------------- selection
 
+/// Whether the cell may be selected: a protected sheet can forbid selecting locked and/or unlocked cells.
+fn cell_selectable(wb: &gridcraft_model::Workbook, sheet: &gridcraft_model::Sheet, c: CellRef) -> bool {
+    let Some(p) = sheet.protection.as_ref() else { return true };
+    if wb.styles.get(sheet.style_id(c)).protection.locked { p.select_locked } else { p.select_unlocked }
+}
+
 fn selection_set(s: &mut Session, p: &Json) -> Result<Json> {
     if p.get("sheet").is_some() {
         let i = target_sheet(s, p)?;
@@ -394,6 +400,9 @@ fn selection_set(s: &mut Session, p: &Json) -> Result<Json> {
     let mut sel = crate::Selection { active, anchor: ranges.last().map(|r| r.start).unwrap_or(active), ranges };
     if let Some(sh) = d.wb.active() {
         sel.expand_merges(sh);
+        if !cell_selectable(&d.wb, sh, sel.active) {
+            return Err(EngineError::Other("The cell you are trying to change is on a protected sheet that does not allow selecting it.".into()));
+        }
     }
     d.selection = sel;
     Ok(json!({"selection": d.selection.a1(), "active": d.selection.active.a1()}))
@@ -462,6 +471,29 @@ fn selection_move(s: &mut Session, p: &Json) -> Result<Json> {
     {
         to = m.start;
     }
+    if !extend && !cell_selectable(&d.wb, sheet, to) {
+        // Step on to the next selectable cell in the same direction; stay put if there is none.
+        let (sr, sc) = (dr.signum(), dc.signum());
+        let mut t = to;
+        let mut found = false;
+        if !jmp && (sr, sc) != (0, 0) {
+            for _ in 0..10_000 {
+                let n = t.offset_clamped(sr, sc);
+                if n == t {
+                    break;
+                }
+                t = n;
+                if !sheet.is_row_hidden(t.row) && !sheet.is_col_hidden(t.col) && cell_selectable(&d.wb, sheet, t) {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if !found {
+            return Ok(json!({"selection": sel.a1(), "active": sel.active.a1()}));
+        }
+        to = t;
+    }
     if extend {
         sel.extend_to(to);
         sel.expand_merges(sheet);
@@ -529,7 +561,7 @@ pub(super) fn go_to(s: &mut Session, p: &Json) -> Result<Json> {
         } else if let Some((si, ti)) = d.wb.table(reference) {
             // As in Excel, a table's name stands for its data, without the header and totals rows.
             let t = d.wb.sheet(si).and_then(|sh| sh.tables.get(ti)).map(|t| t.data_range().unwrap_or(t.range).a1()).unwrap_or_default();
-            format!("'{}'!{}", d.wb.sheet(si).map(|s| s.name.clone()).unwrap_or_default(), t)
+            format!("{}!{}", gridcraft_core::quote_sheet(&d.wb.sheet(si).map(|s| s.name.clone()).unwrap_or_default()), t)
         } else {
             return Err(EngineError::Other("Reference isn't valid.".into()));
         }
@@ -1015,11 +1047,12 @@ fn paste_special(s: &mut Session, p: &Json) -> Result<Json> {
                                 // The array range moves with its formula.
                                 let (dr, dc) = (dest.row as i64 - sc.row as i64, dest.col as i64 - sc.col as i64);
                                 moved.array = f.array.and_then(|a| Some(RangeRef::new(a.start.offset(dr, dc)?, a.end.offset(dr, dc)?)));
+                                moved.dynamic = f.dynamic;
                                 return Some(std::sync::Arc::new(moved));
                             }
                             let moved =
                                 gridcraft_formula::adjust::shift_relative(e, dest.row as i64 - sc.row as i64, dest.col as i64 - sc.col as i64);
-                            Some(std::sync::Arc::new(Formula::from_expr(moved)))
+                            Some(std::sync::Arc::new(Formula { dynamic: f.dynamic, ..Formula::from_expr(moved) }))
                         };
                         if link {
                             let sheet_prefix = if dest_sheet == clip.sheet && same_doc {
@@ -1221,6 +1254,7 @@ pub(crate) fn rewrite_all_formulas(wb: &mut gridcraft_model::Workbook, target: &
             {
                 let mut nf = Formula::from_expr(new);
                 nf.array = array;
+                nf.dynamic = f.dynamic;
                 cell.formula = Some(std::sync::Arc::new(nf));
             }
         }
@@ -1373,6 +1407,7 @@ fn auto_fill(s: &mut Session, p: &Json) -> Result<Json> {
         "alternate" => crate::fill::FillMode::Alternate,
         "formats" => crate::fill::FillMode::Formats,
         "values" => crate::fill::FillMode::ValuesOnly,
+        "extend" => crate::fill::FillMode::Extend,
         _ => crate::fill::FillMode::Series,
     };
     if target.count() > 5_000_000 || src.count() > 5_000_000 {
@@ -1590,6 +1625,63 @@ fn format_painter(s: &mut Session, p: &Json) -> Result<Json> {
             let Some(src_sheet) = wb.sheet(sheet) else { return Ok(()) };
             let (h, w) = (src.height(), src.width());
             let dest = if dest.is_single() { RangeRef::new(dest.start, dest.start.offset_clamped(h as i64 - 1, w as i64 - 1)) } else { dest };
+            // Whole rows or columns take a line format, as the ribbon's formatting commands give
+            // them, instead of a style on each of their cells (a column alone has a million). The
+            // line format comes from the first cell of the source pattern across the line; cells
+            // already stored follow the pattern. Row heights and column widths stay as they are.
+            let rows = dest.is_full_rows() && !dest.is_full_cols();
+            let cols = dest.is_full_cols() && !dest.is_full_rows();
+            let src_full = (rows && src.is_full_rows()) || (cols && src.is_full_cols());
+            if rows || cols {
+                let (first, src_first, n) = if rows { (dest.start.row, src.start.row, h) } else { (dest.start.col, src.start.col, w) };
+                let lines = if rows { dest.start.row..=dest.end.row } else { dest.start.col..=dest.end.col };
+                for line in lines {
+                    let sl = src_first + (line - first) % n;
+                    // The source cell for position `k` along the line.
+                    let at = |k: u32| if rows { CellRef::new(sl, src.start.col + k % w) } else { CellRef::new(src.start.row + k % h, sl) };
+                    let line_style = if src_full {
+                        if rows { src_sheet.rows.get(&sl) } else { src_sheet.cols.get(&sl) }.and_then(|i| i.style)
+                    } else {
+                        Some(src_sheet.style_id(at(0)))
+                    };
+                    let line_style = line_style.map(|st| if same { st } else { cx.wb.styles.intern(wb.styles.get(st).clone()) });
+                    let (dest_line, src_line) = if rows {
+                        (RangeRef::rows(line, line), RangeRef::rows(sl, sl))
+                    } else {
+                        (RangeRef::cols(line, line), RangeRef::cols(sl, sl))
+                    };
+                    let mut cells: Vec<CellRef> =
+                        cx.wb.sheet(dest_sheet).map(|sh| sh.cells.iter_range(dest_line).map(|(c, _)| c).collect()).unwrap_or_default();
+                    if src_full {
+                        cells.extend(
+                            src_sheet
+                                .cells
+                                .iter_range(src_line)
+                                .map(|(c, _)| if rows { CellRef::new(line, c.col) } else { CellRef::new(c.row, line) }),
+                        );
+                    }
+                    if cols {
+                        // A row format outranks a column format: the column's cells in formatted
+                        // rows need a style of their own.
+                        cells.extend(
+                            cx.wb
+                                .sheet(dest_sheet)
+                                .into_iter()
+                                .flat_map(|sh| sh.rows.iter().filter(|(_, i)| i.style.is_some()).map(|(r, _)| CellRef::new(*r, line))),
+                        );
+                    }
+                    let sh = cx.sheet_mut(dest_sheet)?;
+                    (if rows { &mut sh.rows } else { &mut sh.cols }).entry(line).or_default().style = line_style;
+                    for c in cells {
+                        let st = src_sheet.style_id(at(if rows { c.col } else { c.row }));
+                        let st = if same { st } else { cx.wb.styles.intern(wb.styles.get(st).clone()) };
+                        cx.sheet_mut(dest_sheet)?.set_style(c, st);
+                        cx.touch(dest_sheet, c);
+                    }
+                }
+                *cx.sel = crate::Selection::range(dest);
+                return Ok(());
+            }
             for c in dest.iter().take(2_000_000) {
                 let sc = CellRef::new(src.start.row + (c.row - dest.start.row) % h, src.start.col + (c.col - dest.start.col) % w);
                 let st = src_sheet.style_id(sc);

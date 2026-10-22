@@ -201,6 +201,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Allow Edit Ranges" => "Разрешить изменение диапазонов",
         "Unprotect\nSheet" => "Снять защиту\nлиста",
         "Protect Sheet…" => "Защитить лист…",
+        "Unprotect Sheet…" => "Снять защиту листа…",
         "Comments" => "Комментарии",
         "Notes" => "Заметки",
         "Page Break\nPreview" => "Предварительный просмотр\nразрывов страниц",
@@ -408,6 +409,23 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Workbook calculation" => "Вычисления в книге",
         "Enable iterative calculation" => "Включить итеративные вычисления",
         "Calculation settings are saved with the workbook." => "Параметры вычислений сохраняются вместе с книгой.",
+        "Insert Sheet" => "Вставить лист",
+        "Rename" => "Переименовать",
+        "Move or Copy…" => "Переместить или скопировать…",
+        "Duplicate" => "Дублировать",
+        "Tab Color" => "Цвет вкладки",
+        "No Color" => "Без цвета",
+        "Hide" => "Скрыть",
+        "Unhide…" => "Показать…",
+        "Select All Sheets" => "Выделить все листы",
+        "AutoSave" => "Автосохранение",
+        "AutoSave: save after every change (workbooks saved to a file)" => {
+            "Автосохранение: сохранять после каждого изменения (книги, сохранённые в файл)"
+        }
+        "Previous sheet" => "Предыдущий лист",
+        "Next sheet" => "Следующий лист",
+        "All sheets" => "Все листы",
+        "New sheet (⇧F11)" => "Новый лист (⇧F11)",
         _ => return None,
     })
 }
