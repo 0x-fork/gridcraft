@@ -227,6 +227,27 @@ pub fn set_current(ctx: &egui::Context, language: Language) {
     ctx.data_mut(|d| d.insert_temp(lang_key(), language));
 }
 
+/// `name` lowercased with the Latin accents that occur in language names folded away, so a
+/// byte-wise sort reads alphabetically. Other scripts are left as they are.
+fn name_sort_key(name: &str) -> String {
+    name.chars()
+        .flat_map(char::to_lowercase)
+        .map(|c| match c {
+            'à'..='å' | 'ā' | 'ă' | 'ą' => 'a',
+            'ç' | 'ć' | 'č' => 'c',
+            'è'..='ë' | 'ē' | 'ě' | 'ę' | 'ế' | 'ệ' => 'e',
+            'ì'..='ï' | 'ī' => 'i',
+            'ñ' | 'ń' | 'ň' => 'n',
+            'ò'..='ö' | 'ø' | 'ő' => 'o',
+            'ś' | 'š' => 's',
+            'ù'..='ü' | 'ū' | 'ů' | 'ű' => 'u',
+            'ý' | 'ÿ' => 'y',
+            'ź' | 'ż' | 'ž' => 'z',
+            c => c,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -494,32 +515,6 @@ mod tests {
             assert_eq!(Language::parse(l.code()), Some(l));
         }
     }
-}
-
-/// `name` lowercased with the Latin accents that occur in language names folded away, so a
-/// byte-wise sort reads alphabetically. Other scripts are left as they are.
-fn name_sort_key(name: &str) -> String {
-    name.chars()
-        .flat_map(char::to_lowercase)
-        .map(|c| match c {
-            'à'..='å' | 'ā' | 'ă' | 'ą' => 'a',
-            'ç' | 'ć' | 'č' => 'c',
-            'è'..='ë' | 'ē' | 'ě' | 'ę' | 'ế' | 'ệ' => 'e',
-            'ì'..='ï' | 'ī' => 'i',
-            'ñ' | 'ń' | 'ň' => 'n',
-            'ò'..='ö' | 'ø' | 'ő' => 'o',
-            'ś' | 'š' => 's',
-            'ù'..='ü' | 'ū' | 'ů' | 'ű' => 'u',
-            'ý' | 'ÿ' => 'y',
-            'ź' | 'ż' | 'ž' => 'z',
-            c => c,
-        })
-        .collect()
-}
-
-#[cfg(test)]
-mod picker_order_tests {
-    use super::*;
 
     #[test]
     fn picker_lists_english_first_then_names_alphabetically() {
