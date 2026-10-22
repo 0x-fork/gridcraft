@@ -107,6 +107,23 @@ impl EditState {
         self.sync_caret = true;
     }
 
+    /// Adds a reference to the current point-mode union, keeping earlier references intact.
+    pub fn insert_ref_union(&mut self, r: &str, separator: char) {
+        let caret_b = self.byte_caret();
+        if !self.point.is_some_and(|(_, end)| end == caret_b) {
+            self.insert_ref(r);
+            return;
+        }
+        let (Some(before), Some(after)) = (self.text.get(..caret_b), self.text.get(caret_b..)) else { return };
+        let start = caret_b + separator.len_utf8();
+        let end = start + r.len();
+        self.text = format!("{before}{separator}{r}{after}");
+        self.point = Some((start, end));
+        self.caret = self.text.get(..end).map(|s| s.chars().count()).unwrap_or(0);
+        self.caret_to_end = false;
+        self.sync_caret = true;
+    }
+
     /// Updates function autocomplete for the word before the caret.
     pub fn update_autocomplete(&mut self, names: &[String]) {
         self.autocomplete.clear();
@@ -208,20 +225,29 @@ pub fn formula_refs(text: &str) -> Vec<(usize, usize, RangeRef, Option<String>, 
             Tok::Sheet(a, _) => (Some(a.clone()), toks[i].start, i + 1),
             _ => (None, toks[i].start, i),
         };
-        if let Some(Tok::Word(w)) = toks.get(j).map(|t| &t.tok)
-            && let Some(c) = CellRef::parse(w)
-        {
-            let mut end = toks[j].end;
-            let mut range = RangeRef::cell(c);
-            if let (Some(Tok::Colon | Tok::Trim(_)), Some(Tok::Word(w2))) = (toks.get(j + 1).map(|t| &t.tok), toks.get(j + 2).map(|t| &t.tok))
-                && let Some(c2) = CellRef::parse(w2)
-            {
-                range = RangeRef::new(c, c2);
-                end = toks[j + 2].end;
-                i = j + 3;
+        if let Some(Tok::Word(w)) = toks.get(j).map(|t| &t.tok) {
+            let range_end = if matches!(toks.get(j + 1).map(|t| &t.tok), Some(Tok::Colon | Tok::Trim(_))) {
+                toks.get(j + 2).and_then(|token| {
+                    let end = match &token.tok {
+                        Tok::Word(w) => Some(w.clone()),
+                        Tok::Number(n) if n.fract() == 0.0 && *n >= 1.0 => Some(format!("{n}")),
+                        _ => None,
+                    }?;
+                    RangeRef::parse(&format!("{w}:{end}")).map(|range| (range, token.end))
+                })
             } else {
+                None
+            };
+            let (range, end) = if let Some(range_end) = range_end {
+                i = j + 3;
+                range_end
+            } else if let Some(c) = CellRef::parse(w) {
                 i = j + 1;
-            }
+                (RangeRef::cell(c), toks[j].end)
+            } else {
+                i += 1;
+                continue;
+            };
             let key = body.get(start..end).unwrap_or("").replace('$', "").to_ascii_uppercase();
             let idx = match seen.iter().position(|k| *k == key) {
                 Some(k) => k,
@@ -345,5 +371,27 @@ mod tests {
         assert!(ref_is_on_sheet(Some("Sheet2"), "Sheet1", "Sheet2"));
         assert!(!ref_is_on_sheet(Some("Sheet2"), "Sheet1", "Sheet1"));
         assert!(ref_is_on_sheet(Some("sheet2"), "Sheet1", "Sheet2"), "sheet names compare ignoring case");
+    }
+
+    #[test]
+    fn whole_row_and_column_ref_spans() {
+        let refs = formula_refs("=SUM(C:C,4:6,$D:$E,Sheet2!7:8)");
+        assert_eq!(refs.len(), 4);
+        assert_eq!(refs[0].2.a1(), "C:C");
+        assert_eq!(refs[1].2.a1(), "4:6");
+        assert_eq!(refs[2].2.a1(), "D:E");
+        assert_eq!(refs[3].2.a1(), "7:8");
+        assert_eq!(refs[3].3.as_deref(), Some("Sheet2"));
+    }
+
+    #[test]
+    fn inserting_a_union_keeps_each_reference_separately_pointed() {
+        let mut edit = EditState::new(0, CellRef::new(0, 0), "=SUM(".into(), true, false);
+        edit.insert_ref("C:C");
+        edit.insert_ref_union("E:E", ',');
+        assert_eq!(edit.text, "=SUM(C:C,E:E");
+        assert_eq!(formula_refs(&edit.text).iter().map(|r| r.2.a1()).collect::<Vec<_>>(), ["C:C", "E:E"]);
+        assert_eq!(edit.point, Some((9, 12)));
+        assert!(edit.can_point());
     }
 }

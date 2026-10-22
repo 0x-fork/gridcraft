@@ -2156,7 +2156,7 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                 app.grid.filter_menu = Some((c, h.header_row, geo.mirror_pos(p)));
                 return;
             }
-            if point_header(app, wb, sh, RangeRef::cols(c, c)) {
+            if point_header(app, wb, sh, RangeRef::cols(c, c), mods.shift, mods.command) {
                 return;
             }
             // An armed Format Painter paints the columns dragged over instead of moving them.
@@ -2181,7 +2181,7 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                 return;
             }
             let r = geo.row_at(sh, p.y);
-            if point_header(app, wb, sh, RangeRef::rows(r, r)) {
+            if point_header(app, wb, sh, RangeRef::rows(r, r), mods.shift, mods.command) {
                 return;
             }
             let range = if mods.shift { RangeRef::rows(sel.anchor.row.min(r), sel.anchor.row.max(r)) } else { RangeRef::rows(r, r) };
@@ -2501,12 +2501,39 @@ fn format_painter_apply(app: &mut SheetApp) {
     }
 }
 
-/// Point mode on a header: inserts the whole-column or whole-row reference instead of selecting.
-fn point_header(app: &mut SheetApp, wb: &Workbook, sh: &Sheet, range: RangeRef) -> bool {
+/// Point mode on a header: inserts a whole-row or whole-column reference instead of selecting.
+fn point_header(app: &mut SheetApp, wb: &Workbook, sh: &Sheet, range: RangeRef, extend: bool, add: bool) -> bool {
     let Some(ed) = app.editor.as_mut().filter(|ed| ed.can_point()) else { return false };
-    let r = range.a1();
-    let r = if ed.sheet != wb.active_sheet { format!("{}!{r}", gridcraft_engine::formula::quote_sheet(&sh.name)) } else { r };
-    ed.insert_ref(&r);
+    let edit_sheet = ed.sheet;
+    let active_sheet = wb.active_sheet;
+    let range = if extend {
+        ed.point
+            .and_then(|point| crate::editor::formula_refs(&ed.text).into_iter().find(|(start, end, ..)| (*start, *end) == point))
+            .and_then(|(_, _, previous, previous_sheet, _)| {
+                let previous_sheet = previous_sheet.as_deref().map(|name| wb.sheet_index(name)).unwrap_or(Some(edit_sheet));
+                if previous_sheet != Some(active_sheet) {
+                    return None;
+                }
+                if range.is_full_cols() && previous.is_full_cols() {
+                    Some(RangeRef::cols(previous.start.col.min(range.start.col), previous.end.col.max(range.end.col)))
+                } else if range.is_full_rows() && previous.is_full_rows() {
+                    Some(RangeRef::rows(previous.start.row.min(range.start.row), previous.end.row.max(range.end.row)))
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(range)
+    } else {
+        range
+    };
+    let reference = range.a1();
+    let reference = if ed.sheet != wb.active_sheet { format!("{}!{reference}", gridcraft_engine::formula::quote_sheet(&sh.name)) } else { reference };
+    if add {
+        ed.insert_ref_union(&reference, ed.locale.list_separator());
+    } else {
+        ed.insert_ref(&reference);
+    }
+    ed.point_cell = Some(range.start);
     ed.request_focus = true;
     true
 }
