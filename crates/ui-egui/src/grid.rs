@@ -2745,7 +2745,9 @@ fn in_cell_editor(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet, 
         (rect.width(), (wrapped.size().y.max(size * 1.3 * lines) + 4.0).max(rect.height()))
     } else {
         let text_w = ui.painter().layout_no_wrap(ed.text.clone(), font.clone(), Color32::BLACK).size().x;
-        ((text_w + 14.0).max(rect.width()).min(geo.cells.right() - rect.left()), (size * 1.3 * lines + 4.0).max(rect.height()))
+        // Excel keeps the cell's height for one line and only grows for extra lines.
+        let h = if lines > 1.0 { (size * 1.3 * lines + 4.0).max(rect.height()) } else { rect.height() };
+        ((text_w + 14.0).max(rect.width()).min(geo.cells.right() - rect.left()), h)
     };
     // Grows to the left on a right-to-left sheet.
     let erect = geo.mirror_rect(Rect::from_min_size(rect.min, vec2(w, h)));
