@@ -71,3 +71,6 @@ sync_github_name = true
 real_name = "Ufuk Efe"
 display_name = "Ufuk Efe"
 sync_github_name = true
+
+[people.pourie-he]
+sync_github_name = true
