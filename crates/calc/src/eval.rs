@@ -90,6 +90,8 @@ struct FnCtx<'a, 'h> {
     ev: &'a mut Evaluator<'h>,
     /// The criteria argument of a database function, when it is a reference.
     criteria: Option<Area>,
+    /// The LAMBDA given as the function argument of GROUPBY/PIVOTBY.
+    lambda: Option<Arc<Lambda>>,
 }
 
 impl Ctx for FnCtx<'_, '_> {
@@ -123,6 +125,19 @@ impl Ctx for FnCtx<'_, '_> {
             .collect();
         let mut ev = Evaluator { host: &mut *self.ev.host, sheet: area.sheet, at, env, depth: self.ev.depth };
         Some(matches!(ev.value(&shifted).scalar().to_bool(), Ok(true)))
+    }
+    fn has_lambda(&self) -> bool {
+        self.lambda.is_some()
+    }
+    /// A LAMBDA must give one value per group; an array result is #CALC!.
+    fn call_lambda(&mut self, arg: Value) -> Option<Value> {
+        let l = self.lambda.clone()?;
+        let [p] = l.params.as_slice() else { return Some(Value::Error(CellError::Value)) };
+        let r = self.ev.call_lambda_values(&l, vec![(p.clone(), Ev::V(arg))]);
+        Some(match self.ev.deref(r) {
+            Value::Array(a) if a.data.len() != 1 => Value::Error(CellError::Calc),
+            v => v.scalar(),
+        })
     }
 }
 
@@ -618,7 +633,7 @@ impl<'h> Evaluator<'h> {
                         let value = self.value(a);
                         evaluated.push(Arg { value, from_ref: false });
                     }
-                    let mut ctx = FnCtx { ev: self, criteria: None };
+                    let mut ctx = FnCtx { ev: self, criteria: None, lambda: None };
                     return gridcraft_functions::call(spec, &evaluated, &mut ctx).pipe(Ev::V);
                 }
                 let i = match index.to_number() {
@@ -817,8 +832,21 @@ impl<'h> Evaluator<'h> {
         let mut criteria_shape = None;
         // Database functions: the criteria range (argument 2), whose formulas are computed criteria.
         let mut criteria = None;
+        // GROUPBY/PIVOTBY: the LAMBDA given as their function.
+        let mut lambda = None;
+        let lambda_at = match name {
+            "GROUPBY" => Some(2),
+            "PIVOTBY" => Some(3),
+            _ => None,
+        };
         for (i, a) in args.iter().enumerate() {
             let mut ev = self.eval(a);
+            if lambda_at == Some(i)
+                && let Ev::L(l) = &ev
+            {
+                lambda = Some(l.clone());
+                ev = Ev::V(Value::Empty);
+            }
             if spec.category == gridcraft_functions::Category::Database
                 && i == 2
                 && let Ev::R(areas) = &ev
@@ -853,7 +881,7 @@ impl<'h> Evaluator<'h> {
             };
             evaluated.push(Arg { value, from_ref });
         }
-        let mut ctx = FnCtx { ev: self, criteria };
+        let mut ctx = FnCtx { ev: self, criteria, lambda };
         gridcraft_functions::call(spec, &evaluated, &mut ctx).pipe(Ev::V)
     }
 
@@ -907,13 +935,13 @@ impl<'h> Evaluator<'h> {
         };
         let args = [Arg { value, from_ref }];
         if kind != Agg::Count {
-            match gridcraft_functions::call(sum, &args, &mut FnCtx { ev: self, criteria: None }) {
+            match gridcraft_functions::call(sum, &args, &mut FnCtx { ev: self, criteria: None, lambda: None }) {
                 Value::Number(n) => acc.sum += n,
                 other => return Err(Ev::V(other)),
             }
         }
         if kind != Agg::Sum {
-            match gridcraft_functions::call(count, &args, &mut FnCtx { ev: self, criteria: None }) {
+            match gridcraft_functions::call(count, &args, &mut FnCtx { ev: self, criteria: None, lambda: None }) {
                 Value::Number(n) => acc.count = acc.count.saturating_add(n as u64),
                 other => return Err(Ev::V(other)),
             }
@@ -1012,15 +1040,18 @@ impl<'h> Evaluator<'h> {
                 let arrays: Vec<Arc<Array>> = args[..args.len() - 1].iter().map(|a| as_array(self.value(a))).collect();
                 let rows = arrays.iter().map(|a| a.rows).max().unwrap_or(1);
                 let cols = arrays.iter().map(|a| a.cols).max().unwrap_or(1);
-                if (rows * cols) as u64 > MAX_CELLS {
-                    return err(CellError::Num);
+                let Some(n) = broadcast_len(rows, cols) else { return err(CellError::Num) };
+                // The LAMBDA takes one parameter per array.
+                if l.params.len() != arrays.len() {
+                    return err(CellError::Value);
                 }
-                let mut out = Vec::with_capacity(rows * cols);
+                let mut out = Vec::with_capacity(n);
                 for r in 0..rows {
                     for c in 0..cols {
                         let bound = l.params.iter().zip(arrays.iter()).map(|(p, a)| (p.clone(), Ev::V(a.get_broadcast(r, c)))).collect();
                         let v = self.call_lambda_values(&l, bound);
-                        out.push(self.deref(v).scalar());
+                        let Some(one) = single(self.deref(v)) else { return err(CellError::Calc) };
+                        out.push(one);
                     }
                 }
                 Ev::V(Array::new(rows, cols, out).map(Value::from).unwrap_or(Value::Error(CellError::Calc)))
@@ -1041,7 +1072,8 @@ impl<'h> Evaluator<'h> {
                     let r = self.call_lambda_values(&l, bound);
                     acc = self.deref(r);
                     if name == "SCAN" {
-                        scan.push(acc.scalar());
+                        let Some(one) = single(acc.clone()) else { return err(CellError::Calc) };
+                        scan.push(one);
                     }
                 }
                 if name == "SCAN" {
@@ -1057,6 +1089,9 @@ impl<'h> Evaluator<'h> {
                 let arr = as_array(self.value(&args[0]));
                 let Some(l) = self.lambda_arg(args.get(1), 1) else { return err(CellError::Value) };
                 let Some(p) = l.params.first().cloned() else { return err(CellError::Value) };
+                if l.params.len() != 1 {
+                    return err(CellError::Value);
+                }
                 let by_row = name == "BYROW";
                 let n = if by_row { arr.rows } else { arr.cols };
                 let mut out = Vec::with_capacity(n);
@@ -1068,7 +1103,8 @@ impl<'h> Evaluator<'h> {
                     };
                     let a = if by_row { Array::row(slice) } else { Array::column(slice) };
                     let r = self.call_lambda_values(&l, vec![(p.clone(), Ev::V(a.into()))]);
-                    out.push(self.deref(r).scalar());
+                    let Some(one) = single(self.deref(r)) else { return err(CellError::Calc) };
+                    out.push(one);
                 }
                 let a = if by_row { Array::column(out) } else { Array::row(out) };
                 Ev::V(a.into())
@@ -1097,7 +1133,8 @@ impl<'h> Evaluator<'h> {
                             (l.params[1].clone(), Ev::V(Value::number(c as f64 + 1.0))),
                         ];
                         let v = self.call_lambda_values(&l, bound);
-                        out.push(self.deref(v).scalar());
+                        let Some(one) = single(self.deref(v)) else { return err(CellError::Calc) };
+                        out.push(one);
                     }
                 }
                 Ev::V(Array::new(rows, cols, out).map(Value::from).unwrap_or(Value::Error(CellError::Calc)))
@@ -1318,7 +1355,7 @@ impl<'h> Evaluator<'h> {
                         }
                     }
                 }
-                let mut ctx = FnCtx { ev: self, criteria: None };
+                let mut ctx = FnCtx { ev: self, criteria: None, lambda: None };
                 return match gridcraft_functions::call(spec, &xargs, &mut ctx) {
                     Value::Number(p) if p >= 1.0 => {
                         let k = p as u32 - 1;
@@ -1431,43 +1468,74 @@ impl<'h> Evaluator<'h> {
         if name == "AGGREGATE" && func >= 14 {
             k = rest.get(1).map(|e| self.value(e));
         }
+        // Every cell visited (even one skipped as hidden, nested or an error) and every value
+        // counts against one budget for the whole call. All arguments are evaluated (references
+        // stay lazy) and charged before any cell is read: a value stored in XFD1048576 makes
+        // `A:XFD` trim to the whole sheet, ~17 billion cells (#2175).
+        enum Input {
+            Cells(usize, RangeRef),
+            Values(Value),
+        }
+        let mut inputs = Vec::new();
+        let mut budget = MAX_CELLS;
         for e in refs {
             match self.eval(e) {
                 Ev::R(areas) => {
                     for a in areas {
                         let range = self.trim(&a);
-                        for c in range.iter() {
-                            let (hidden, nested) = {
-                                let wb = self.host.workbook();
-                                let s = wb.sheet(a.sheet);
-                                let hidden =
-                                    s.is_some_and(|s| if skip_hidden { s.is_row_hidden(c.row) } else { skip_filtered && s.is_row_filtered(c.row) });
-                                let nested = skip_nested
-                                    && s.and_then(|s| s.cell(c)).and_then(|cell| cell.formula.as_ref()).is_some_and(|f| {
-                                        let u = f.text.to_ascii_uppercase();
-                                        u.contains("SUBTOTAL(") || u.contains("AGGREGATE(")
-                                    });
-                                (hidden, nested)
-                            };
-                            if hidden || nested {
-                                continue;
-                            }
-                            let v = self.host.cell_value(a.sheet, c);
-                            if skip_errors && v.is_error() {
-                                continue;
-                            }
-                            values.push(v);
-                        }
+                        budget = match budget.checked_sub(range.count()) {
+                            Some(left) => left,
+                            None => return err(CellError::Num),
+                        };
+                        inputs.push(Input::Cells(a.sheet, range));
                     }
                 }
-                Ev::V(Value::Array(a)) => values.extend(a.data.iter().filter(|v| !(skip_errors && v.is_error())).cloned()),
-                Ev::V(v) => values.push(v),
+                Ev::V(v) => {
+                    let n = match &v {
+                        Value::Array(a) => u64::try_from(a.data.len()).unwrap_or(u64::MAX),
+                        _ => 1,
+                    };
+                    budget = match budget.checked_sub(n) {
+                        Some(left) => left,
+                        None => return err(CellError::Num),
+                    };
+                    inputs.push(Input::Values(v));
+                }
                 Ev::L(_) => return err(CellError::Value),
             }
         }
+        for input in inputs {
+            match input {
+                Input::Cells(sheet, range) => {
+                    for c in range.iter() {
+                        let (hidden, nested) = {
+                            let wb = self.host.workbook();
+                            let s = wb.sheet(sheet);
+                            let hidden =
+                                s.is_some_and(|s| if skip_hidden { s.is_row_hidden(c.row) } else { skip_filtered && s.is_row_filtered(c.row) });
+                            let nested = skip_nested
+                                && s.and_then(|s| s.cell(c)).and_then(|cell| cell.formula.as_ref()).is_some_and(|f| {
+                                    let u = f.text.to_ascii_uppercase();
+                                    u.contains("SUBTOTAL(") || u.contains("AGGREGATE(")
+                                });
+                            (hidden, nested)
+                        };
+                        if hidden || nested {
+                            continue;
+                        }
+                        let v = self.host.cell_value(sheet, c);
+                        if skip_errors && v.is_error() {
+                            continue;
+                        }
+                        values.push(v);
+                    }
+                }
+                Input::Values(Value::Array(a)) => values.extend(a.data.iter().filter(|v| !(skip_errors && v.is_error())).cloned()),
+                Input::Values(v) => values.push(v),
+            }
+        }
         if let Some(k) = k {
-            values.push(Value::Empty);
-            return Ev::V(gridcraft_functions::aggregate_values_k(func, &values[..values.len() - 1], &k));
+            return Ev::V(gridcraft_functions::aggregate_values_k(func, &values, &k));
         }
         Ev::V(gridcraft_functions::aggregate_values(func, &values))
     }
@@ -1624,7 +1692,8 @@ pub fn zip2(a: &Value, b: &Value, f: impl Fn(&Value, &Value) -> Value) -> Value 
         (Value::Array(x), Value::Array(y)) => {
             let rows = broadcast_dim(x.rows, y.rows);
             let cols = broadcast_dim(x.cols, y.cols);
-            let mut data = Vec::with_capacity(rows * cols);
+            let Some(n) = broadcast_len(rows, cols) else { return Value::Error(CellError::Num) };
+            let mut data = Vec::with_capacity(n);
             for r in 0..rows {
                 for c in 0..cols {
                     data.push(f(&x.get_broadcast(r, c), &y.get_broadcast(r, c)));
@@ -1636,6 +1705,13 @@ pub fn zip2(a: &Value, b: &Value, f: impl Fn(&Value, &Value) -> Value) -> Value 
         (s, Value::Array(y)) => Value::from(Array { rows: y.rows, cols: y.cols, data: y.data.iter().map(|v| f(s, v)).collect() }),
         (x, y) => f(x, y),
     }
+}
+
+/// Cell count of a `rows`×`cols` broadcast result, or `None` when it would exceed [`MAX_CELLS`].
+/// Each operand passes its own size cap, but their broadcast product can be far larger
+/// (`SEQUENCE(1048576)*SEQUENCE(1,16384)` is 17 billion cells), so it is checked before allocating.
+fn broadcast_len(rows: usize, cols: usize) -> Option<usize> {
+    rows.checked_mul(cols).filter(|&n| n as u64 <= MAX_CELLS)
 }
 
 fn broadcast_dim(a: usize, b: usize) -> usize {
@@ -1654,14 +1730,24 @@ fn zip3(c: &Array, t: &Value, f: &Value, g: impl Fn(&Value, &Value, &Value) -> V
     let (fr, fc) = dims(f);
     let rows = broadcast_dim(broadcast_dim(c.rows, tr), fr);
     let cols = broadcast_dim(broadcast_dim(c.cols, tc), fc);
+    let Some(n) = broadcast_len(rows, cols) else { return Value::Error(CellError::Num) };
     let get = |v: &Value, r: usize, col: usize| if let Value::Array(a) = v { a.get_broadcast(r, col) } else { v.clone() };
-    let mut data = Vec::with_capacity(rows * cols);
+    let mut data = Vec::with_capacity(n);
     for r in 0..rows {
         for col in 0..cols {
             data.push(g(&c.get_broadcast(r, col), &get(t, r, col), &get(f, r, col)));
         }
     }
     Value::from(Array { rows, cols, data })
+}
+
+/// One cell of a LAMBDA helper's result, or `None` for an array of more than one value: arrays
+/// can't nest, so the whole helper gives `#CALC!`, as in Excel.
+fn single(v: Value) -> Option<Value> {
+    match v {
+        Value::Array(a) if a.rows * a.cols > 1 => None,
+        v => Some(v.scalar()),
+    }
 }
 
 pub fn binary_values(op: BinOp, x: &Value, y: &Value, sys: gridcraft_core::DateSystem) -> Value {

@@ -311,6 +311,29 @@ fn date_text_coerces_in_the_workbook_date_system() {
 }
 
 #[test]
+fn lambda_helpers_check_shapes_and_parameters() {
+    let mut t = T::new();
+    let calc = Value::Error(CellError::Calc);
+    // A LAMBDA returning several values can't fill one cell: the whole result is #CALC!.
+    t.set("A1", "=MAP({1,2},LAMBDA(x,{1,2}))");
+    assert_eq!((t.get("A1"), t.get("B1")), (calc.clone(), Value::Empty));
+    t.set("A2", "=BYROW({1,2;3,4},LAMBDA(r,r))");
+    assert_eq!((t.get("A2"), t.get("A3")), (calc.clone(), Value::Empty));
+    t.set("A4", "=MAKEARRAY(1,2,LAMBDA(r,c,{1,2}))");
+    assert_eq!(t.get("A4"), calc.clone());
+    t.set("D1", "=SCAN(0,{1,2},LAMBDA(a,b,{1,2}))");
+    assert_eq!((t.get("D1"), t.get("E1")), (calc, Value::Empty));
+    // One parameter per array (MAP) or exactly one (BYROW/BYCOL).
+    t.set("A5", "=MAP({1,2},LAMBDA(x,y,x))");
+    assert_eq!(t.get("A5"), Value::Error(CellError::Value));
+    t.set("A6", "=BYCOL({1,2},LAMBDA(c,d,SUM(c)))");
+    assert_eq!(t.get("A6"), Value::Error(CellError::Value));
+    // A single value in an array is fine.
+    t.set("A7", "=MAP({1,2},LAMBDA(x,SEQUENCE(1)*x))");
+    assert_eq!(t.num("B7"), 2.0);
+}
+
+#[test]
 fn operators() {
     let mut t = T::new();
     t.set("A1", "=\"a\"&1&TRUE");
@@ -633,6 +656,36 @@ fn functions_given_by_name() {
 }
 
 #[test]
+fn groupby_and_pivotby_take_a_lambda() {
+    let mut t = T::new();
+    for (i, (k, c, v)) in [("a", "x", 1), ("b", "x", 2), ("a", "y", 3)].iter().enumerate() {
+        t.set(&format!("A{}", i + 1), k);
+        t.set(&format!("B{}", i + 1), c);
+        t.set(&format!("C{}", i + 1), &v.to_string());
+    }
+    t.set("E1", "=GROUPBY(A1:A3,C1:C3,LAMBDA(x,SUM(x)))");
+    assert_eq!(t.get("E1"), Value::from("a"));
+    assert_eq!(t.num("F1"), 4.0);
+    assert_eq!(t.get("E2"), Value::from("b"));
+    assert_eq!(t.num("F2"), 2.0);
+    assert_eq!(t.get("E3"), Value::from("Total"));
+    assert_eq!(t.num("F3"), 6.0);
+    // A LET-bound lambda, called once per group with that group's values.
+    t.set("H1", "=LET(f,LAMBDA(v,ROWS(v)*10),GROUPBY(A1:A3,C1:C3,f))");
+    assert_eq!(t.num("I1"), 20.0);
+    assert_eq!(t.num("I3"), 30.0);
+    // PIVOTBY: rows a, b, Total; columns x, y, Total.
+    t.set("K1", "=PIVOTBY(A1:A3,B1:B3,C1:C3,LAMBDA(x,SUM(x)))");
+    assert_eq!(t.get("L1"), Value::from("x"));
+    assert_eq!(t.num("L2"), 1.0);
+    assert_eq!(t.num("M2"), 3.0);
+    assert_eq!(t.num("N4"), 6.0);
+    // Neither a function nor a lambda.
+    t.set("P1", "=GROUPBY(A1:A3,C1:C3,TRUE)");
+    assert_eq!(t.get("P1"), Value::Error(CellError::Value));
+}
+
+#[test]
 fn lambda_argument_count() {
     let mut t = T::new();
     t.wb.names.push(gridcraft_model::DefinedName {
@@ -724,6 +777,34 @@ fn legacy_array_formulas_fill_their_range() {
 }
 
 #[test]
+fn array_broadcast_result_is_capped() {
+    // A full column against a full row broadcasts to 1048576 x 16384 (17 billion cells, about
+    // 400 GB): each operand is within its own cap, so only the product check stops the abort.
+    let mut t = T::new();
+    let col = "SEQUENCE(1048576)";
+    let row = "SEQUENCE(1,16384)";
+    for (at, formula) in [
+        ("A1", format!("=ROWS({col}*{row})")),
+        ("A2", format!("=ROWS({col}&{row})")),
+        ("A3", format!("=ROWS({col}>{row})")),
+        ("A4", format!("=ROWS(IF({col},{row}))")),
+        ("A5", format!("=ROWS(IF({col}>0,1,{row}))")),
+        ("A6", format!("=ROWS(TEXT({col},{row}))")),
+        ("A7", format!("=ROWS(MAP({col},{row},LAMBDA(a,b,a)))")),
+    ] {
+        t.set(at, &formula);
+        assert_eq!(t.get(at), Value::Error(CellError::Num), "{formula}");
+    }
+    // Broadcasts within the cap are unchanged.
+    t.set("C1", "=SUM(SEQUENCE(3)*SEQUENCE(1,4))");
+    assert_eq!(t.num("C1"), 60.0);
+    t.set("C2", "=SUM(IF(SEQUENCE(2)>1,SEQUENCE(1,3),0))");
+    assert_eq!(t.num("C2"), 6.0);
+    t.set("C3", "=COLUMNS(TEXT(SEQUENCE(2),SEQUENCE(1,5)))");
+    assert_eq!(t.num("C3"), 5.0);
+}
+
+#[test]
 fn text_function() {
     let mut t = T::new();
     t.set("A1", "=TEXT(1234.5,\"#,##0.00\")");
@@ -810,6 +891,40 @@ fn subtotal_109_skips_nested_subtotal() {
     t.set("B2", "=SUBTOTAL(9,A1:A3)");
     assert_eq!(t.num("B1"), 1.0);
     assert_eq!(t.num("B2"), 3.0);
+}
+
+/// One value stored in the sheet's last cell makes `A:XFD` trim to ~17 billion cells. SUBTOTAL
+/// and AGGREGATE used to read every one of them into a vector (an abort on open, #2175); now
+/// every argument is charged against `MAX_CELLS` before any cell is read, and `#NUM!` comes back.
+#[test]
+fn subtotal_and_aggregate_cap_cells_visited() {
+    let mut t = T::new();
+    t.set("XFD1048576", "1");
+    let formulas = [
+        "=SUBTOTAL(9,A:XFD)",
+        "=SUBTOTAL(109,1:1048576)",
+        "=AGGREGATE(9,6,A:XFD)",
+        "=AGGREGATE(14,7,A:XFD,1)",
+        // A:J and K:T are about 10.5 million cells each: under the limit alone, over it together,
+        // so the second area is refused before the first is read.
+        "=SUBTOTAL(9,A:J,K:T)",
+        "=AGGREGATE(9,4,(A:J,K:T))",
+    ];
+    for (i, f) in formulas.iter().enumerate() {
+        let at = format!("B{}", i + 1);
+        t.set(&at, f);
+        assert_eq!(t.get(&at), Value::Error(CellError::Num), "{f}");
+    }
+
+    // Whole columns and rows still clip to the used range when it is small.
+    let mut t = T::new();
+    t.set("A1", "1");
+    t.set("B2", "2");
+    t.set("C2", "#N/A");
+    t.set("E5", "=SUBTOTAL(9,A:B)");
+    t.set("E6", "=AGGREGATE(9,6,1:2)");
+    t.set("E7", "=AGGREGATE(14,6,A:C,1)");
+    assert_eq!((t.num("E5"), t.num("E6"), t.num("E7")), (3.0, 3.0, 2.0));
 }
 
 /// SUBTOTAL leaves out rows a filter hides for every function number, while 1-11 keep rows
@@ -1404,4 +1519,21 @@ fn cell_filename_names_the_workbook_file() {
     t.calc = Calc::new();
     t.set("B7", "=CELL(\"filename\",A1)");
     assert_eq!(t.get("B7"), Value::from("[Book.xlsx]Info"));
+}
+
+#[test]
+fn n_lifts_over_a_computed_array_but_reads_the_first_cell_of_a_range() {
+    let mut t = T::new();
+    t.set("B1", "0");
+    t.set("B2", "23850");
+    t.set("D2", "10%");
+    t.set("D3", "12%");
+    t.set("F1", "50000");
+    t.set("H1", "=SUMPRODUCT(D2:D3-D1:D2,F1-B1:B2,N(F1>B1:B2))");
+    assert!((t.num("H1") - 5523.0).abs() < 1e-9, "{:?}", t.get("H1"));
+    t.set("H2", "=SUMPRODUCT(N(B1:B2>0))");
+    assert_eq!(t.num("H2"), 1.0);
+    // A spill of N(D2:D3) would also show 10% in H3; summing it tells the two apart.
+    t.set("H3", "=SUM(N(D2:D3))");
+    assert!((t.num("H3") - 0.1).abs() < 1e-12, "{:?}", t.get("H3"));
 }
