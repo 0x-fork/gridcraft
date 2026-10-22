@@ -959,7 +959,7 @@ fn line_targets(s: &Session, p: &Json, rows: bool) -> Result<(usize, Vec<(u32, u
         let lines = body
             .split(',')
             .map(|part| {
-                let r = RangeRef::parse(part).ok_or_else(|| bad(key, format!("not a range: {part}")))?;
+                let r = parse_lines(part).ok_or_else(|| bad(key, format!("not a range: {part}")))?;
                 Ok(if rows { (r.start.row, r.end.row) } else { (r.start.col, r.end.col) })
             })
             .collect::<Result<Vec<_>>>()?;
