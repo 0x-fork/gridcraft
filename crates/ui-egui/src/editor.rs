@@ -45,11 +45,15 @@ pub struct EditState {
     pub completion: Option<String>,
     /// Move the caret to the end on the next frame.
     pub caret_to_end: bool,
+    /// The cell's text when an F2-style edit began. Committing it unchanged leaves the cell alone
+    /// (no undo step, the workbook stays clean). `None` for an edit started by typing.
+    pub original: Option<String>,
 }
 
 impl EditState {
     pub fn new(doc: u64, sheet: usize, cell: CellRef, text: String, enter_mode: bool, from_formula_bar: bool) -> EditState {
         let caret = text.chars().count();
+        let original = (!enter_mode).then(|| text.clone());
         EditState {
             doc,
             sheet,
@@ -68,6 +72,7 @@ impl EditState {
             sync_caret: true,
             caret_to_end: true,
             completion: None,
+            original,
         }
     }
 

@@ -351,19 +351,49 @@ fn new_workbook_keeps_the_typed_cell_in_the_first_and_switch_windows_brings_it_b
 }
 
 #[test]
-fn a_draft_its_workbook_refuses_is_dropped_when_switching_away() {
+fn a_draft_its_workbook_refuses_stops_the_switch_and_stays_open() {
     let mut h = harness(Services::default());
     let book1 = typing_in_book1_then_new(&mut h);
+    let book2 = h.state().session.doc().unwrap().uid;
     h.state_mut().session.execute("data.validation", serde_json::json!({"range": "A1", "type": "list", "formula1": "\"Red,Green\""})).unwrap();
     h.input_mut().events.push(egui::Event::Text("Purple".into()));
     h.run_steps(2);
-    assert!(h.state().editor.is_some());
     h.state_mut().run_or_alert("view.switchWindows", serde_json::json!({"doc": book1}));
     h.run_steps(2);
-    assert!(h.state().editor.is_none());
-    assert_eq!(h.state().session.doc().unwrap().uid, book1, "the switch still happens");
+    assert_eq!(h.state().session.doc().unwrap().uid, book2, "the switch doesn't happen");
+    assert_eq!(h.state().editor.as_ref().map(|ed| ed.text.as_str()), Some("Purple"), "the draft stays open to fix");
     assert_eq!(a1(&h, 1), Value::Empty, "Book2 is unchanged");
     assert!(h.state().message.is_some(), "the refusal is reported");
+
+    // Esc drops the draft; then the switch goes through.
+    h.state_mut().message = None;
+    h.state_mut().cancel_edit();
+    h.state_mut().run_or_alert("view.switchWindows", serde_json::json!({"doc": book1}));
+    h.run_steps(2);
+    assert_eq!(h.state().session.doc().unwrap().uid, book1);
+    assert!(h.state().message.is_none());
+}
+
+#[test]
+fn an_untouched_f2_draft_leaves_the_workbook_clean_on_a_file_command() {
+    let dir = std::env::temp_dir().join(format!("gridcraft-f2-draft-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Book.xlsx").to_string_lossy().into_owned();
+    let mut h = harness(Services::default());
+    h.state_mut().run("cell.set", serde_json::json!({"cell": "A1", "input": "=1+2"})).unwrap();
+    h.state_mut().run("file.save", serde_json::json!({"path": &path})).unwrap();
+    h.run_steps(2);
+    let undo = h.state().session.doc().unwrap().undo.len();
+    h.key_press(egui::Key::F2);
+    h.run_steps(2);
+    assert_eq!(h.state().editor.as_ref().map(|ed| ed.text.as_str()), Some("=1+2"));
+    h.state_mut().run_or_alert("file.new", serde_json::json!({}));
+    h.run_steps(2);
+    assert!(h.state().editor.is_none());
+    let book1 = &h.state().session.documents()[0];
+    assert!(!book1.is_dirty(), "nothing was typed, so nothing changed");
+    assert_eq!(book1.undo.len(), undo, "and no undo step was added");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 fn pdf_picker_harness(dir: &std::path::Path) -> (Arc<Mutex<Vec<String>>>, egui_kittest::Harness<'static, SheetApp>) {

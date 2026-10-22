@@ -283,27 +283,32 @@ impl NativeMenu {
     /// step with the session.
     fn sync_windows(&mut self, app: &SheetApp) {
         let windows = app.open_windows();
-        if windows == self.windows {
-            return;
+        if windows != self.windows
+            && let Some(menu) = &self.window_menu
+        {
+            let same_docs = windows.len() == self.windows.len() && windows.iter().zip(&self.windows).all(|(a, b)| a.doc == b.doc);
+            if same_docs {
+                for (item, w) in self.window_items.iter().zip(&windows) {
+                    item.set_text(w.label());
+                }
+            } else {
+                for item in self.window_items.drain(..) {
+                    let _ = menu.remove(&item);
+                }
+                for w in &windows {
+                    let item = CheckMenuItem::with_id(format!("{WINDOW_ITEM}{}", w.doc), w.label(), true, w.active, None);
+                    let _ = menu.append(&item);
+                    self.window_items.push(item);
+                }
+            }
+            self.windows = windows;
         }
-        let Some(menu) = &self.window_menu else { return };
-        let same_docs = windows.len() == self.windows.len() && windows.iter().zip(&self.windows).all(|(a, b)| a.doc == b.doc);
-        if same_docs {
-            for (item, w) in self.window_items.iter().zip(&windows) {
-                item.set_text(w.label());
+        // AppKit flips a check item when it is chosen, so the active check is put back every poll.
+        for (item, w) in self.window_items.iter().zip(&self.windows) {
+            if item.is_checked() != w.active {
                 item.set_checked(w.active);
             }
-        } else {
-            for item in self.window_items.drain(..) {
-                let _ = menu.remove(&item);
-            }
-            for w in &windows {
-                let item = CheckMenuItem::with_id(format!("{WINDOW_ITEM}{}", w.doc), w.label(), true, w.active, None);
-                let _ = menu.append(&item);
-                self.window_items.push(item);
-            }
         }
-        self.windows = windows;
     }
 
     pub fn poll(&mut self, app: &mut SheetApp, ctx: &egui::Context) {

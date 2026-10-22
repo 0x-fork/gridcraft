@@ -412,7 +412,7 @@ impl SheetApp {
             || matches!(id, "view.newWindow" | "view.hideWindow" | "view.unhideWindow")
             || (id == "view.switchWindows" && params.get("doc").is_some_and(|d| !d.is_null()));
         if id.starts_with("file.") || switches_window {
-            self.settle_drafts();
+            self.settle_drafts()?;
         }
         if matches!(id, "file.save" | "file.saveAs" | "file.saveBytes") {
             self.store_view_state();
@@ -575,8 +575,11 @@ impl SheetApp {
             self.open_switch_windows = true;
             return;
         }
-        if let Err(e) = self.run(id, params) {
-            self.alert(e);
+        match self.run(id, params) {
+            // A refused cell draft already shows its own message (with the rule's title).
+            Err(e) if self.message.as_ref().is_some_and(|(_, m)| *m == e) => {}
+            Err(e) => self.alert(e),
+            Ok(_) => {}
         }
     }
 
@@ -1013,8 +1016,8 @@ impl SheetApp {
     /// Commits the edit; `then` moves the selection (dr, dc) afterwards.
     ///
     /// The draft goes into the workbook it was typed in. If another workbook is showing, that
-    /// workbook stays active afterwards, and a draft its own workbook refuses (validation, a bad
-    /// formula) is dropped rather than left open over the wrong grid.
+    /// workbook stays active afterwards; a draft its own workbook refuses (validation, a bad
+    /// formula) brings that workbook back to the front with the draft still open.
     pub fn commit_edit(&mut self, dr: i64, dc: i64, array: bool, fill_selection: bool) -> bool {
         let Some(doc) = self.editor.as_ref().map(|ed| ed.doc) else { return true };
         let shown = self.session.active().map(|d| d.uid);
@@ -1028,25 +1031,21 @@ impl SheetApp {
         let back = self.session.active_index();
         self.session.set_active(owner);
         if !self.commit_edit_here(dr, dc, array, fill_selection) {
-            self.cancel_edit();
+            // Refused: its workbook stays in front with the draft open and the reason shown.
+            return false;
         }
         self.session.set_active(back);
         true
     }
 
-    /// Settles the cell and text-box drafts before a command that can show another workbook or
-    /// write this one to a file: each is committed as Enter would, or dropped when it can't be
-    /// (the refusal is still reported), so a draft never lands in another workbook.
-    fn settle_drafts(&mut self) {
+    /// Commits the cell and text-box drafts, as Enter would, before a command that can show
+    /// another workbook or write this one to a file, so a draft never lands in another workbook.
+    /// A draft its workbook refuses stays open with the reason shown, and the command doesn't run.
+    fn settle_drafts(&mut self) -> Result<(), String> {
         if !self.commit_edit(0, 0, false, false) {
-            self.cancel_edit();
+            return Err(self.message.as_ref().map(|(_, m)| m.clone()).unwrap_or_else(|| "The cell being edited can't be entered.".into()));
         }
-        if let Err(e) = self.commit_text_box_edit() {
-            self.cancel_text_box_edit();
-            if self.message.is_none() {
-                self.message = Some(("Text Box".into(), clean_error(&e)));
-            }
-        }
+        self.commit_text_box_edit()
     }
 
     fn commit_edit_here(&mut self, dr: i64, dc: i64, array: bool, fill_selection: bool) -> bool {
@@ -1056,6 +1055,13 @@ impl SheetApp {
             Some(full) if full.to_lowercase().starts_with(&ed.text.to_lowercase()) => full.clone(),
             _ => ed.text.clone(),
         };
+        // F2 then Enter (or a file command) on an untouched draft: nothing to write.
+        if !fill_selection && !array && ed.original.as_ref() == Some(&text) {
+            if dr != 0 || dc != 0 {
+                self.move_after_enter(dr, dc);
+            }
+            return true;
+        }
         let text = match self.session.active().map(|d| formula_locale::canonical(&text, ed.locale, &d.wb, ed.sheet, ed.cell)) {
             Some(Ok(text)) => text,
             Some(Err(error)) => {
@@ -1355,7 +1361,8 @@ impl SheetApp {
         let t0 = now_ms();
         text_box::before_ui(self, &ctx);
         // Another workbook came forward without going through a command (which settles drafts
-        // first): the draft goes into its own workbook instead of floating over this one.
+        // first): the draft goes into its own workbook instead of floating over this one. If that
+        // workbook refuses it, it comes back to the front with the draft open.
         if self.editor.as_ref().is_some_and(|ed| self.session.active().map(|d| d.uid) != Some(ed.doc)) {
             self.commit_edit(0, 0, false, false);
         }
