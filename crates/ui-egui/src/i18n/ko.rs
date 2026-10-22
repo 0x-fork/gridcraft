@@ -419,7 +419,6 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "No Color" => "색 없음",
         "Hide" => "숨기기",
         "Unhide…" => "숨기기 취소…",
-        "Unprotect Sheet…" => "시트 보호 해제…",
         "Select All Sheets" => "모든 시트 선택",
         "AutoSave" => "자동 저장",
         "AutoSave: save after every change (workbooks saved to a file)" => "자동 저장: 변경할 때마다 저장 (파일로 저장된 통합 문서)",

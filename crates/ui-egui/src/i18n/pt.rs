@@ -963,7 +963,6 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Tab Color" => "Cor da guia",
         "No Color" => "Sem cor",
         "Unhide…" => "Reexibir…",
-        "Unprotect Sheet…" => "Desproteger planilha…",
         "Select All Sheets" => "Selecionar todas as planilhas",
         "AutoSave: save after every change (workbooks saved to a file)" => "Salvamento automático: salvar após cada alteração (pastas de trabalho salvas em um arquivo)",
         "All sheets" => "Todas as planilhas",

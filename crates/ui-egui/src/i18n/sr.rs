@@ -417,7 +417,6 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "No Color" => "Без боје",
         "Hide" => "Сакриј",
         "Unhide…" => "Прикажи…",
-        "Unprotect Sheet…" => "Уклони заштиту листа…",
         "Select All Sheets" => "Изабери све листове",
         "AutoSave" => "Аутоматско чување",
         "AutoSave: save after every change (workbooks saved to a file)" => "Аутоматско чување: сачувај после сваке измене (свеске сачуване у датотеку)",

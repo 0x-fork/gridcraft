@@ -419,7 +419,6 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "No Color" => "Без цвета",
         "Hide" => "Скрыть",
         "Unhide…" => "Показать…",
-        "Unprotect Sheet…" => "Снять защиту листа…",
         "Select All Sheets" => "Выделить все листы",
         "AutoSave" => "Автосохранение",
         "AutoSave: save after every change (workbooks saved to a file)" => "Автосохранение: сохранять после каждого изменения (книги, сохранённые в файл)",

@@ -411,7 +411,6 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "No Color" => "无颜色",
         "Hide" => "隐藏",
         "Unhide…" => "取消隐藏…",
-        "Unprotect Sheet…" => "取消工作表保护…",
         "Select All Sheets" => "选择所有工作表",
         "AutoSave" => "自动保存",
         "AutoSave: save after every change (workbooks saved to a file)" => "自动保存：每次更改后保存（已保存到文件的工作簿）",

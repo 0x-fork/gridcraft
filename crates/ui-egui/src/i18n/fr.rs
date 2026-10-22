@@ -419,7 +419,6 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "No Color" => "Sans couleur",
         "Hide" => "Masquer",
         "Unhide…" => "Afficher…",
-        "Unprotect Sheet…" => "Ôter la protection de la feuille…",
         "Select All Sheets" => "Sélectionner toutes les feuilles",
         "AutoSave" => "Enregistrement automatique",
         "AutoSave: save after every change (workbooks saved to a file)" => "Enregistrement automatique : enregistrer après chaque modification (classeurs enregistrés dans un fichier)",
