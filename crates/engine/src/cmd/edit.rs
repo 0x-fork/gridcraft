@@ -138,18 +138,7 @@ pub(crate) fn input_to_cell(input: &str, sheet: usize, at: CellRef, wb: &mut gri
             && input.chars().nth(1).is_some_and(|c| c.is_ascii_alphabetic() || c == '('));
     if is_formula {
         let body = input.strip_prefix('=').unwrap_or(input);
-        // Excel closes missing parentheses for you.
-        let mut text = body.to_string();
-        let mut parsed = gridcraft_formula::parse(&text);
-        for _ in 0..8 {
-            if parsed.is_ok() {
-                break;
-            }
-            text.push(')');
-            parsed = gridcraft_formula::parse(&text);
-        }
-        let expr = parsed.map_err(|e| EngineError::Other(format!("There's a problem with this formula: {e}")))?;
-        let expr = wb.name_call_case(expr);
+        let expr = wb.name_call_case(parse_typed_formula(body)?);
         check_arg_counts(&expr)?;
         let mut cell = Cell::formula(Formula::from_expr(expr));
         cell.style = style;
@@ -191,11 +180,26 @@ pub(crate) fn input_to_cell(input: &str, sheet: usize, at: CellRef, wb: &mut gri
     Ok(Some(Cell { value: parsed.value, formula: None, style }))
 }
 
+/// Parses a formula as it is typed (without the `=`). Excel closes missing parentheses for you,
+/// and refuses a formula that still doesn't parse.
+pub(crate) fn parse_typed_formula(body: &str) -> Result<gridcraft_formula::Expr> {
+    let mut text = body.to_string();
+    let mut parsed = gridcraft_formula::parse(&text);
+    for _ in 0..8 {
+        if parsed.is_ok() {
+            break;
+        }
+        text.push(')');
+        parsed = gridcraft_formula::parse(&text);
+    }
+    parsed.map_err(|e| EngineError::Other(format!("There's a problem with this formula: {e}")))
+}
+
 /// Like Excel, a formula that calls a built-in function with too few or too many arguments is
 /// refused when it's entered, rather than stored to show `#VALUE!`. Functions the registry doesn't
 /// hold (special forms like LET, LAMBDA, OFFSET, INDIRECT, SUBTOTAL), defined LAMBDA names and
 /// unknown functions are skipped.
-fn check_arg_counts(expr: &gridcraft_formula::Expr) -> Result<()> {
+pub(crate) fn check_arg_counts(expr: &gridcraft_formula::Expr) -> Result<()> {
     let mut bad = None;
     expr.walk(&mut |e| {
         if bad.is_none()
@@ -1222,7 +1226,7 @@ pub(crate) fn rewrite_all_formulas(wb: &mut gridcraft_model::Workbook, target: &
         }
     }
     for n in wb.names.iter_mut() {
-        if let Ok(expr) = gridcraft_formula::parse(&n.formula) {
+        if let Ok(expr) = gridcraft_formula::parse_name(&n.formula) {
             // Names are workbook-level: unqualified refs don't occur; qualified ones adjust.
             let new = gridcraft_formula::adjust::adjust(expr, "\u{0}", target, e);
             n.formula = gridcraft_formula::print(&new);

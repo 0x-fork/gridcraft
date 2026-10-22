@@ -2,12 +2,14 @@
 
 mod array_export;
 mod chart_bool_default;
+mod chart_ref_offsets;
 mod csv_tests;
 mod encrypted_tests;
 mod fixtures;
 mod ink_roundtrip;
 mod literal_category_roundtrip;
 mod malformed;
+mod multilevel_category_roundtrip;
 mod ods_tests;
 mod passthrough_tests;
 mod pivot_tests;

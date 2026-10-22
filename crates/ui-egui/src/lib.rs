@@ -284,7 +284,13 @@ pub struct SheetApp {
     /// text noted for an unpublished cut); `None` after a copy, or once the clipboard is seen
     /// holding other text. Once the cut has been pasted, Paste leaves this text alone.
     cut_text: Option<String>,
+    /// A run of Tabs: (doc uid, sheet, column it started in, cell the last Tab landed on).
+    /// Enter on that cell goes to the next row in the starting column, as in Excel (#911).
+    tab_run: Option<(u64, usize, u32, CellRef)>,
     pub started: f64,
+    /// Every unsaved workbook has been answered for quitting (or `app.quit` asked): the next
+    /// window close goes through.
+    pub allow_close: bool,
 }
 
 impl SheetApp {
@@ -328,7 +334,9 @@ impl SheetApp {
             selected_chart: None,
             clipboard_text_at_copy: None,
             cut_text: None,
+            tab_run: None,
             started: now_ms(),
+            allow_close: false,
         }
     }
 
@@ -654,7 +662,9 @@ impl SheetApp {
                         self.ui.language = l;
                         Ok(json!({"language": l}))
                     }
-                    None => Err(format!("unknown language {code:?} (use \"en\", \"es\", \"zh\", \"ja\", \"ko\", \"ru\", \"pt\" or \"cs\")")),
+                    None => Err(format!(
+                        "unknown language {code:?} (use \"en\", \"es\", \"zh\", \"ja\", \"ko\", \"ru\", \"pt\", \"de\", \"cs\", \"fr\" or \"tr\")"
+                    )),
                 }
             }
             "app.language.english" => {
@@ -955,6 +965,15 @@ impl SheetApp {
             }
             self.toast = Some((msg, now_ms()));
         }
+        // Point mode can leave another sheet active; the edit belongs to the sheet it started on.
+        if self.session.active().is_some_and(|d| d.wb.active_sheet != ed.sheet)
+            && let Err(e) = self.session.run("sheet.activate", json!({"sheet": ed.sheet}))
+        {
+            self.message = Some(("GridCraft".into(), clean_error(&e)));
+            self.editor = Some(ed);
+            self.session.mode = gridcraft_engine::Mode::Edit;
+            return false;
+        }
         // Committing nothing into an empty cell changes nothing: no undo step (#1855, Backspace has
         // already cleared the cell as its own step).
         let unchanged = !fill_selection
@@ -989,6 +1008,15 @@ impl SheetApp {
         }
     }
 
+    /// Commits the edit with an arrow key. The arrow is an ordinary move, so it ends a run of Tabs
+    /// instead of continuing it (Right) or going back to its column like Enter (Down), as in Excel.
+    pub fn commit_edit_arrow(&mut self, dr: i64, dc: i64) -> bool {
+        let run = self.tab_run.take();
+        let ok = self.commit_edit(dr, dc, false, false);
+        self.tab_run = if ok { None } else { run };
+        ok
+    }
+
     pub fn cancel_edit(&mut self) {
         self.editor = None;
         self.session.mode = gridcraft_engine::Mode::Ready;
@@ -997,11 +1025,26 @@ impl SheetApp {
     /// Enter/Tab move inside a multi-cell selection, otherwise to the next cell.
     pub fn move_after_enter(&mut self, dr: i64, dc: i64) {
         let multi = self.session.active().is_some_and(|d| !d.selection.is_single_cell());
+        // Any other move (arrows, clicks, another sheet) leaves the selection off the cell the
+        // last Tab landed on, which ends the run.
+        let here = self.session.active().map(|d| (d.uid, d.wb.active_sheet, d.selection.active));
+        let run = self.tab_run.take().filter(|&(uid, sheet, _, at)| here == Some((uid, sheet, at)));
         if multi {
             let fwd = dr > 0 || dc > 0;
             let _ = self.session.run("selection.next", json!({"forward": fwd, "byRow": dc != 0}));
+        } else if let (Some((_, _, col, at)), 1, 0) = (run, dr, dc) {
+            let back = i64::from(col) - i64::from(at.col);
+            let _ = self.session.run("selection.move", json!({"dr": 1, "dc": back}));
         } else {
             let _ = self.session.run("selection.move", json!({"dr": dr, "dc": dc}));
+            if dr == 0 && dc != 0 {
+                let start = run.map(|r| r.2);
+                self.tab_run = self.session.active().and_then(|d| {
+                    let (uid, sheet) = (d.uid, d.wb.active_sheet);
+                    let col = start.or(here.map(|h| h.2.col))?;
+                    Some((uid, sheet, col, d.selection.active))
+                });
+            }
         }
         self.grid.ensure_visible = true;
     }
@@ -1023,6 +1066,45 @@ impl SheetApp {
             self.toast = Some((text, now_ms()));
         } else {
             self.alert(text);
+        }
+    }
+
+    /// Holds back a window close (the close button, Alt+F4, the OS quitting the app) while a
+    /// workbook has unsaved changes, and asks about them first.
+    fn guard_window_close(&mut self, ctx: &egui::Context) {
+        if self.allow_close || !ctx.input(|i| i.viewport().close_requested()) {
+            return;
+        }
+        // A cell still being edited is part of the workbook, as for File › Close.
+        if !self.commit_edit(0, 0, false, false) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            return;
+        }
+        if !self.session.documents().iter().any(|d| d.is_dirty()) {
+            return;
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        match self.dialog.as_mut() {
+            // Already asking about a workbook (File › Close): answering it now goes on to quit.
+            Some(d) if d.name() == "saveChanges" => {
+                d.values.insert("quit".into(), json!(true));
+            }
+            _ => self.continue_quit(ctx),
+        }
+    }
+
+    /// Asks about the next unsaved workbook before quitting, or closes the window once none is left.
+    pub(crate) fn continue_quit(&mut self, ctx: &egui::Context) {
+        match self.session.documents().iter().position(|d| d.is_dirty()) {
+            Some(i) => {
+                self.session.set_active(i);
+                let title = self.session.active().map(|d| d.display_title()).unwrap_or_default();
+                self.open_dialog("saveChanges", json!({"title": title, "quit": true}));
+            }
+            None => {
+                self.allow_close = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
         }
     }
 
@@ -1094,6 +1176,7 @@ impl SheetApp {
             ctx.request_repaint();
         }
         control::poll(self, ctx);
+        self.guard_window_close(ctx);
         // Files read asynchronously (web file picker, dropped files).
         let arrived: Vec<(String, Vec<u8>)> = self
             .services
@@ -1145,7 +1228,8 @@ impl SheetApp {
         if !self.chrome.file_tab {
             self.backstage = None;
         }
-        if self.backstage.is_none() {
+        // Keytips opened the File view (Alt, F): its letters keep working there.
+        if self.backstage.is_none() || self.keytips.prefix().is_some() {
             self.ribbon_keys(&ctx);
         }
         if self.chrome.title_bar {
@@ -1224,12 +1308,18 @@ impl SheetApp {
             && self.grid.renaming_tab.is_none()
             && (before.is_some() || !egui::Popup::is_any_open(ctx));
         let actions = self.keytips.process(ctx, enabled);
+        // Backing out of F to the tab letters, or finishing an F sequence, closes the File view
+        // that Alt, F opened: the command runs on the sheet, as it did without the view.
+        if self.backstage.is_some() && before.is_some() && (self.keytips.prefix() == Some("") || !actions.is_empty()) {
+            self.backstage = None;
+        }
         if before.is_some() && before.as_deref() != self.keytips.prefix() && !ctx.input(|i| i.pointer.any_pressed()) {
             // Leave pointer cancellation to the popup so clicking a menu item still works.
             egui::Popup::close_all(ctx);
         }
         for action in actions {
             match action {
+                keytips::Action::Tab("File") => self.open_backstage(backstage::Page::Home),
                 keytips::Action::Tab(tab) => {
                     self.run_or_alert("ui.ribbonTab", json!({"tab": tab}));
                     self.ui.ribbon_collapsed = false;
