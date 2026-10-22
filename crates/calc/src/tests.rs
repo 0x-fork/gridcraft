@@ -738,6 +738,40 @@ fn subtotal_109_skips_nested_subtotal() {
     assert_eq!(t.num("B2"), 3.0);
 }
 
+/// One value stored in the sheet's last cell makes `A:XFD` trim to ~17 billion cells. SUBTOTAL
+/// and AGGREGATE used to read every one of them into a vector (an abort on open, #2175); now
+/// every argument is charged against `MAX_CELLS` before any cell is read, and `#NUM!` comes back.
+#[test]
+fn subtotal_and_aggregate_cap_cells_visited() {
+    let mut t = T::new();
+    t.set("XFD1048576", "1");
+    let formulas = [
+        "=SUBTOTAL(9,A:XFD)",
+        "=SUBTOTAL(109,1:1048576)",
+        "=AGGREGATE(9,6,A:XFD)",
+        "=AGGREGATE(14,7,A:XFD,1)",
+        // A:J and K:T are about 10.5 million cells each: under the limit alone, over it together,
+        // so the second area is refused before the first is read.
+        "=SUBTOTAL(9,A:J,K:T)",
+        "=AGGREGATE(9,4,(A:J,K:T))",
+    ];
+    for (i, f) in formulas.iter().enumerate() {
+        let at = format!("B{}", i + 1);
+        t.set(&at, f);
+        assert_eq!(t.get(&at), Value::Error(CellError::Num), "{f}");
+    }
+
+    // Whole columns and rows still clip to the used range when it is small.
+    let mut t = T::new();
+    t.set("A1", "1");
+    t.set("B2", "2");
+    t.set("C2", "#N/A");
+    t.set("E5", "=SUBTOTAL(9,A:B)");
+    t.set("E6", "=AGGREGATE(9,6,1:2)");
+    t.set("E7", "=AGGREGATE(14,6,A:C,1)");
+    assert_eq!((t.num("E5"), t.num("E6"), t.num("E7")), (3.0, 3.0, 2.0));
+}
+
 /// SUBTOTAL leaves out rows a filter hides for every function number, while 1-11 keep rows
 /// hidden by hand (as in ConditionalFormattingSamples.xlsx, where `SUBTOTAL(9,Table69[Sales])`
 /// under a filtered table adds only the visible rows).
