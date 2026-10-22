@@ -658,7 +658,7 @@ impl SheetApp {
                         self.ui.language = l;
                         Ok(json!({"language": l}))
                     }
-                    None => Err(format!("unknown language {code:?} (use \"en\", \"es\", \"zh\", \"ja\", \"ko\", \"ru\", \"pt\" or \"cs\")")),
+                    None => Err(format!("unknown language {code:?} (use one of {})", i18n::Language::code_list(", "))),
                 }
             }
             "app.language.english" => {

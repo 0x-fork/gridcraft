@@ -175,6 +175,7 @@ pub fn handle(app: &mut SheetApp, ctx: &egui::Context, method: &str, p: &Json) -
         }
         "engine.commands" => {
             let mut v: Vec<Json> = app.session.commands().into_iter().map(|c| serde_json::to_value(c).unwrap_or_default()).collect();
+            let language_params = format!("{{language: {}}} (alias: code)", crate::i18n::Language::code_list("|"));
             for (id, label, params) in [
                 ("ui.ribbonTab", "Ribbon Tab", ""),
                 ("view.collapseRibbon", "Collapse Ribbon", ""),
@@ -195,7 +196,7 @@ pub fn handle(app: &mut SheetApp, ctx: &egui::Context, method: &str, p: &Json) -
                     "Submit Print Job",
                     "existing file.print sheet/pagination params → {printing,bytes,pending}; submits without opening a dialog",
                 ),
-                ("app.language.set", "Interface Language", "{language: \"en\"|\"zh\"|\"ja\"|\"ko\"|\"ru\"|\"pt\"|\"de\"|\"cs\"} (alias: code)"),
+                ("app.language.set", "Interface Language", language_params.as_str()),
                 ("app.language.english", "Interface Language: English", ""),
                 ("app.language.japanese", "Interface Language: Japanese", ""),
             ] {
@@ -529,5 +530,20 @@ mod tests {
         }
         assert!(!app.printing.busy(), "discovery must not submit a job");
         assert!(app.backstage.is_none(), "discovery must not open settings");
+    }
+
+    #[test]
+    fn language_command_docs_list_every_language() {
+        let mut session = gridcraft_engine::Session::new();
+        session.new_workbook();
+        let mut app = SheetApp::new(session, crate::Services::default());
+        let Outcome::Done(reply) = handle(&mut app, &egui::Context::default(), "engine.commands", &json!({"search":"language"})) else {
+            panic!("command discovery must return immediately");
+        };
+        let commands = reply["result"].as_array().unwrap();
+        let docs = commands.iter().find(|c| c["id"] == "app.language.set").unwrap()["params"].as_str().unwrap();
+        for l in crate::i18n::Language::ALL {
+            assert!(docs.contains(&format!("\"{}\"", l.code())), "app.language.set docs miss {:?}: {docs}", l.code());
+        }
     }
 }
