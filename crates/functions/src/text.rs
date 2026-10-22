@@ -763,24 +763,87 @@ fn convert_replacement(r: &str) -> String {
     out
 }
 
+/// A piece of a replacement: literal text or a capture group (by number or name).
+enum Piece {
+    Text(String),
+    Index(usize),
+    Name(String),
+}
+
+/// A replacement split into pieces as `regex::Captures::expand` reads it: `$$` is `$`, `$name` takes
+/// the longest run of `[_0-9A-Za-z]`, `${name}` ends at `}` (`${}` is empty), a name of digits is a
+/// group number, and a `$` that starts no reference is itself.
+fn template(rep: &str) -> Vec<Piece> {
+    let mut out = Vec::new();
+    let mut lit = String::new();
+    let mut rest = rep;
+    while let Some(i) = rest.find('$') {
+        lit.push_str(&rest[..i]);
+        rest = &rest[i + 1..];
+        if let Some(r) = rest.strip_prefix('$') {
+            lit.push('$');
+            rest = r;
+            continue;
+        }
+        // A braced name is a reference even when empty (it expands to nothing).
+        let braced = rest.strip_prefix('{').and_then(|b| b.find('}').map(|j| (&b[..j], &b[j + 1..])));
+        let (name, after) = braced.unwrap_or_else(|| {
+            let j = rest.find(|c: char| !(c == '_' || c.is_ascii_alphanumeric())).unwrap_or(rest.len());
+            (&rest[..j], &rest[j..])
+        });
+        if braced.is_none() && name.is_empty() {
+            lit.push('$');
+            continue;
+        }
+        if !lit.is_empty() {
+            out.push(Piece::Text(std::mem::take(&mut lit)));
+        }
+        out.push(match name.parse::<usize>() {
+            Ok(n) => Piece::Index(n),
+            Err(_) => Piece::Name(name.to_string()),
+        });
+        rest = after;
+    }
+    lit.push_str(rest);
+    if !lit.is_empty() {
+        out.push(Piece::Text(lit));
+    }
+    out
+}
+
+/// Append a match's replacement to `out`, piece by piece; `None` once `out` would pass `limit`
+/// bytes, before anything that long is built (#2162).
+fn expand_capped(cap: &regex::Captures, pieces: &[Piece], out: &mut String, limit: usize) -> Option<()> {
+    for p in pieces {
+        let s = match p {
+            Piece::Text(t) => t.as_str(),
+            Piece::Index(i) => cap.get(*i).map_or("", |m| m.as_str()),
+            Piece::Name(n) => cap.name(n).map_or("", |m| m.as_str()),
+        };
+        if out.len().saturating_add(s.len()) > limit {
+            return None;
+        }
+        out.push_str(s);
+    }
+    Some(())
+}
+
 fn regexreplace(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     let s = text(a, 0)?;
-    let rep = convert_replacement(&text(a, 2)?);
+    let rep = template(&convert_replacement(&text(a, 2)?));
     let occ = opt_int(a, 3, 0)?;
     let re = build_regex(&text(a, 1)?, case_arg(a, 4)?)?;
+    // Built match by match within a bound past which the text can only be too long (a character
+    // is at most four bytes), instead of building every replacement first (#2162).
+    let limit = MAX_TEXT * 4;
+    let mut out = String::new();
     if occ == 0 {
-        // Match by match, giving up once the text can only be too long (a character is at most
-        // four bytes) rather than building every replacement first (#2162).
-        let mut out = String::new();
         let mut last = 0;
         for cap in re.captures_iter(&s) {
             let Some(m) = cap.get(0) else { continue };
             out.push_str(s.get(last..m.start()).unwrap_or_default());
-            cap.expand(&rep, &mut out);
+            expand_capped(&cap, &rep, &mut out, limit).ok_or(CellError::Value)?;
             last = m.end();
-            if out.len() > MAX_TEXT * 4 {
-                return Err(CellError::Value);
-            }
         }
         out.push_str(s.get(last..).unwrap_or_default());
         return check_len(out);
@@ -790,10 +853,9 @@ fn regexreplace(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     let idx = if occ > 0 { k.checked_sub(1) } else { caps.len().checked_sub(k) };
     let Some(cap) = idx.and_then(|i| caps.get(i)) else { return text_val(s) };
     let Some(m) = cap.get(0) else { return text_val(s) };
-    let mut out = String::new();
-    out.push_str(&s[..m.start()]);
-    cap.expand(&rep, &mut out);
-    out.push_str(&s[m.end()..]);
+    out.push_str(s.get(..m.start()).unwrap_or_default());
+    expand_capped(cap, &rep, &mut out, limit).ok_or(CellError::Value)?;
+    out.push_str(s.get(m.end()..).unwrap_or_default());
     check_len(out)
 }
 
@@ -970,6 +1032,20 @@ pub(crate) fn specs() -> Vec<FnSpec> {
 #[cfg(test)]
 mod tests {
     use gridcraft_core::{CellError, Value};
+
+    /// The pieces expand exactly as `regex::Captures::expand` does.
+    #[test]
+    fn template_expands_like_regex() {
+        let re = regex::Regex::new(r"(?<y>\d+)-(\d+)").unwrap();
+        let cap = re.captures("x 2026-10 y").unwrap();
+        for rep in ["$1", "${1}", "$1a", "${1}a", "$y", "${y}!", "$$", "$$1", "a$", "$}", "${", "${}", "${y", "$0|$2|$9", "$-1", "€$1€", ""] {
+            let mut want = String::new();
+            cap.expand(rep, &mut want);
+            let mut got = String::new();
+            assert!(super::expand_capped(&cap, &super::template(rep), &mut got, usize::MAX).is_some());
+            assert_eq!(got, want, "{rep:?}");
+        }
+    }
 
     use crate::util::testutil::*;
 
