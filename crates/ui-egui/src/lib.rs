@@ -965,6 +965,15 @@ impl SheetApp {
             }
             self.toast = Some((msg, now_ms()));
         }
+        // Point mode can leave another sheet active; the edit belongs to the sheet it started on.
+        if self.session.active().is_some_and(|d| d.wb.active_sheet != ed.sheet)
+            && let Err(e) = self.session.run("sheet.activate", json!({"sheet": ed.sheet}))
+        {
+            self.message = Some(("GridCraft".into(), clean_error(&e)));
+            self.editor = Some(ed);
+            self.session.mode = gridcraft_engine::Mode::Edit;
+            return false;
+        }
         // Committing nothing into an empty cell changes nothing: no undo step (#1855, Backspace has
         // already cleared the cell as its own step).
         let unchanged = !fill_selection
