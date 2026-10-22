@@ -13,6 +13,8 @@ pub mod chartview;
 pub mod control;
 pub mod credits;
 pub mod dialogs;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod doc_windows;
 pub mod editor;
 mod floating_pictures;
 pub mod fonts;
@@ -34,6 +36,9 @@ pub mod tabs;
 pub mod text_box;
 pub mod theme;
 pub mod widgets;
+mod window_ui;
+
+pub use window_ui::WindowUi;
 
 use std::collections::HashMap;
 
@@ -166,6 +171,14 @@ pub struct Notice {
     pub action: Option<(String, String)>,
 }
 
+/// An answer to the Save Changes question.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SaveAnswer {
+    Save,
+    DontSave,
+    Cancel,
+}
+
 /// One open window, as View › Switch Windows and the macOS Window menu list it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpenWindow {
@@ -282,8 +295,8 @@ pub struct SheetApp {
     fonts_set: bool,
     /// Workbook fonts bound into the current font set; a change rebinds (installed fonts only).
     fonts_bound: Vec<String>,
-    /// The (doc uid, revision) `fonts_bound` was computed for, so the style table is walked only
-    /// when the workbook changes.
+    /// The open workbooks' (uid, revision), folded, that `fonts_bound` was computed for, so the
+    /// style tables are walked only when a workbook changes.
     fonts_seen: (u64, u64),
     /// Set while a font-set change is pending activation: skip this frame's paint, like the
     /// startup `fonts_ready` gate (egui applies new definitions at the next pass).
@@ -320,6 +333,17 @@ pub struct SheetApp {
     /// View › Switch Windows opens its list on the next frame the View tab draws (asked for by a
     /// key tip, the command search or a menu, possibly while another tab was showing).
     pub(crate) open_switch_windows: bool,
+    /// The window whose interface state the per-window fields above hold (see [`WindowUi`]).
+    ui_window: Option<u64>,
+    /// The other windows' interface state, by window id.
+    parked: HashMap<u64, WindowUi>,
+    /// Each window is a native window of its own ([`doc_windows`] on the desktop): a window's
+    /// close button closes that window, and quitting is asked for separately. Without it (web,
+    /// tests, embedding hosts) one window shows the active workbook window, and its close button
+    /// quits.
+    pub native_windows: bool,
+    /// The native window that has focus, which menu commands and screenshots go to.
+    pub(crate) focus_window: Option<u64>,
 }
 
 impl SheetApp {
@@ -367,6 +391,10 @@ impl SheetApp {
             started: now_ms(),
             allow_close: false,
             open_switch_windows: false,
+            ui_window: None,
+            parked: HashMap::new(),
+            native_windows: false,
+            focus_window: None,
         }
     }
 
@@ -385,11 +413,12 @@ impl SheetApp {
         theme::apply(ctx, dark);
     }
 
-    /// The font names the active workbook uses: every style's font plus the theme's heading/body
-    /// fonts. These are the families [`fonts`] binds an installed file for.
+    /// The font names the open workbooks use: every style's font plus the theme's heading/body
+    /// fonts. These are the families [`fonts`] binds an installed file for. Every workbook's, as
+    /// each may be showing in a window of its own.
     pub fn used_fonts(&self) -> Vec<String> {
         let mut names: Vec<String> = Vec::new();
-        if let Some(d) = self.session.active() {
+        for d in self.session.documents() {
             names.extend(d.wb.styles.iter().map(|(_, s)| s.font.name.clone()));
             names.push(d.wb.theme.major_font.clone());
             names.push(d.wb.theme.minor_font.clone());
@@ -441,7 +470,14 @@ impl SheetApp {
         if let Some(r) = self.run_ui_command(id, &params) {
             return r;
         }
+        let before = self.session.active_window();
         let r = self.session.run(id, params);
+        if id.starts_with("file.") && self.session.active_window() != before {
+            // File › New or Open from the Backstage view: the window it was in goes back to its sheet.
+            self.backstage = None;
+        }
+        // Requests the command made (a dialog, a draft) belong to the window it left active.
+        self.follow_active_window();
         self.after_engine();
         // The new chart is selected, as after inserting any object, so Delete removes it, not its data.
         if id == "insert.chart"
@@ -1065,7 +1101,7 @@ impl SheetApp {
     /// Commits the cell and text-box drafts, as Enter would, before a command that can show
     /// another workbook or write this one to a file, so a draft never lands in another workbook.
     /// A draft its workbook refuses stays open with the reason shown, and the command doesn't run.
-    fn settle_drafts(&mut self) -> Result<(), String> {
+    pub(crate) fn settle_drafts(&mut self) -> Result<(), String> {
         if !self.commit_edit(0, 0, false, false) {
             return Err(self.message.as_ref().map(|(_, m)| m.clone()).unwrap_or_else(|| "The cell being edited can't be entered.".into()));
         }
@@ -1216,7 +1252,7 @@ impl SheetApp {
     /// Holds back a window close (the close button, Alt+F4, the OS quitting the app) while a
     /// workbook has unsaved changes, and asks about them first.
     fn guard_window_close(&mut self, ctx: &egui::Context) {
-        if self.allow_close || !ctx.input(|i| i.viewport().close_requested()) {
+        if self.native_windows || self.allow_close || !ctx.input(|i| i.viewport().close_requested()) {
             return;
         }
         // A cell still being edited is part of the workbook, as for File › Close.
@@ -1237,19 +1273,73 @@ impl SheetApp {
         }
     }
 
-    /// Asks about the next unsaved workbook before quitting, or closes the window once none is left.
+    /// Asks about the next unsaved workbook before quitting, in its window, or closes the app
+    /// once none is left.
     pub(crate) fn continue_quit(&mut self, ctx: &egui::Context) {
-        match self.session.documents().iter().position(|d| d.is_dirty()) {
-            Some(i) => {
-                self.session.set_active(i);
+        let dirty = self.session.documents().iter().find(|d| d.is_dirty()).map(|d| d.uid);
+        match dirty.and_then(|uid| self.session.doc_window(uid)) {
+            Some(window) => {
+                // Its window comes forward (the native window too: see `doc_windows`).
+                self.enter_window(window);
                 let title = self.session.active().map(|d| d.display_title()).unwrap_or_default();
                 self.open_dialog("saveChanges", json!({"title": title, "quit": true}));
             }
             None => {
                 self.allow_close = true;
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close);
             }
         }
+    }
+
+    /// Answers the Save Changes question about the active workbook (its buttons). While quitting,
+    /// the next unsaved workbook is asked about once this one is answered; Cancel stops the quit.
+    /// Returns whether the question is settled: Save keeps it open when the cell being edited
+    /// can't be entered.
+    pub fn answer_save_changes(&mut self, answer: SaveAnswer, quitting: bool, ctx: &egui::Context) -> bool {
+        match answer {
+            SaveAnswer::Cancel => {}
+            SaveAnswer::DontSave => {
+                self.run_or_alert("file.close", json!({"force": true, "document": true}));
+                if quitting {
+                    self.continue_quit(ctx);
+                }
+            }
+            SaveAnswer::Save => {
+                // File operations include the cell still being edited, as File › Save does.
+                if !self.commit_edit(0, 0, false, false) {
+                    return false;
+                }
+                self.run_or_alert("file.save", json!({}));
+                if self.session.active().is_some_and(|x| !x.is_dirty()) {
+                    self.run_or_alert("file.close", json!({"force": true, "document": true}));
+                    if quitting {
+                        self.continue_quit(ctx);
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    /// Quit (the macOS app menu, ⌘Q): commits every window's cell draft as Enter would, then asks
+    /// about each unsaved workbook in its window; Cancel on any of them stops the quit. A draft its
+    /// workbook refuses stops the quit too, with its window in front and the reason shown.
+    pub fn request_quit(&mut self, ctx: &egui::Context) {
+        while let Some(window) = self.parked_window_with_draft() {
+            self.enter_window(window);
+            if self.settle_drafts().is_err() {
+                return;
+            }
+        }
+        if self.settle_drafts().is_err() {
+            return;
+        }
+        if let Some(d) = self.dialog.as_mut().filter(|d| d.name() == "saveChanges") {
+            // Already asking about a workbook (File › Close): answering it goes on to quit.
+            d.values.insert("quit".into(), json!(true));
+            return;
+        }
+        self.continue_quit(ctx);
     }
 
     /// Per-frame logic (control channel, screenshots). Call before `ui`.
@@ -1288,7 +1378,11 @@ impl SheetApp {
             // Bind the workbook's installed fonts once the background scan has finished. Adding
             // fonts re-applies the font set, which egui activates at the next pass, so skip this
             // frame's paint (same one-frame cost as startup). Only when the workbook changed.
-            let seen = self.session.active().map(|d| (d.uid, d.revision)).unwrap_or((0, 0));
+            let seen = self
+                .session
+                .documents()
+                .iter()
+                .fold((0u64, 0u64), |(uid, rev), d| (uid.wrapping_mul(31).wrapping_add(d.uid), rev.wrapping_mul(31).wrapping_add(d.revision)));
             if seen != self.fonts_seen {
                 let used = self.used_fonts();
                 self.fonts_seen = seen;
@@ -1322,9 +1416,10 @@ impl SheetApp {
             ctx.options_mut(|o| o.zoom_with_keyboard = false);
         }
         // egui closes the window on Ctrl+Q (and with Shift or Alt held too) without asking to save
-        // (#1443). Excel for Windows has no such key (Ctrl+Q is Quick Analysis); macOS keeps Cmd+Q,
-        // the app's Quit there.
-        if ctx.os() != egui::os::OperatingSystem::Mac && ctx.options(|o| !o.quit_shortcuts.is_empty()) {
+        // (#1443). Excel for Windows has no such key (Ctrl+Q is Quick Analysis). With a native
+        // window per workbook egui's Cmd+Q would close only the window it was typed in: the menu
+        // bar's Quit item has the key instead (it asks about unsaved workbooks first).
+        if (ctx.os() != egui::os::OperatingSystem::Mac || self.native_windows) && ctx.options(|o| !o.quit_shortcuts.is_empty()) {
             ctx.options_mut(|o| o.quit_shortcuts.clear());
         }
         let zoom = self.ui.zoom_factor();
@@ -1357,9 +1452,12 @@ impl SheetApp {
             }
             self.after_engine();
         }
-        if self.session.active().is_none() {
+        // One window always shows a workbook, unless each workbook has a native window of its own
+        // (`doc_windows` decides what having none left means).
+        if self.session.active().is_none() && !self.native_windows {
             self.session.new_workbook();
         }
+        self.follow_active_window();
     }
 
     pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
@@ -1383,6 +1481,10 @@ impl SheetApp {
             return;
         }
         let t0 = now_ms();
+        // A script may have switched windows since the last frame.
+        self.follow_active_window();
+        // Native windows: menu commands and screenshots go to the focused one.
+        let focused = !self.native_windows || self.focus_window == self.ui_window;
         text_box::before_ui(self, &ctx);
         // Another window came forward without going through a command (which settles drafts
         // first): the draft goes into its own window instead of floating over this one. If its
@@ -1428,8 +1530,10 @@ impl SheetApp {
         dialogs::show(self, &ctx);
         widgets::message_box(self, &ctx);
         widgets::toast(self, &ctx);
-        control::issue_screenshots(self, &ctx);
-        control::collect_screenshots(self, &ctx);
+        if focused {
+            control::issue_screenshots(self, &ctx);
+            control::collect_screenshots(self, &ctx);
+        }
         if !ctx.input(|i| i.focused) {
             // Nothing else to do.
         }
@@ -1453,8 +1557,10 @@ impl SheetApp {
             self.store_view_state();
             let _ = self.session.run("file.save", json!({}));
         }
-        // Window title.
-        if let Some(d) = self.session.active() {
+        // Window title (native windows get theirs from `doc_windows`).
+        if !self.native_windows
+            && let Some(d) = self.session.active()
+        {
             let title = format!("{}{}", d.display_title(), if d.is_dirty() { " — Edited" } else { "" });
             if self.grid.last_title.as_deref() != Some(title.as_str()) {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));

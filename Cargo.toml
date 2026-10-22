@@ -54,6 +54,10 @@ sys-locale = "0.3"
 skrifa = { version = "0.44", default-features = false, features = ["std"] }
 # Real font bytes for tests (Ubuntu Light, compiled into epaint).
 epaint_default_fonts = "0.36"
+# One native window per workbook: the window list, Window menu titles and the immediate-viewport
+# driver (craft-libs). Pinned to the aiongg fork's `window-list` branch; repins to
+# storytold/craft-libs once that branch merges there.
+craft-window = { version = "0.1.0", git = "https://github.com/aiongg/craft-libs", rev = "4fbdea5fcf86ba893d9bc03685d4531cfdd4efc2", default-features = false, features = ["egui"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -759,6 +759,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-window"
+version = "0.1.0"
+source = "git+https://github.com/aiongg/craft-libs?rev=4fbdea5fcf86ba893d9bc03685d4531cfdd4efc2#4fbdea5fcf86ba893d9bc03685d4531cfdd4efc2"
+dependencies = [
+ "egui",
+ "wayland-client",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1636,6 +1645,7 @@ name = "gridcraft-ui-egui"
 version = "0.10.0"
 dependencies = [
  "craft-ui",
+ "craft-window",
  "egui",
  "egui_kittest",
  "epaint_default_fonts",

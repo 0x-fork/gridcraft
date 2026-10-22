@@ -166,6 +166,16 @@ impl Session {
 
     /// Makes a window active, swapping its view into its workbook. Unknown ids are ignored.
     pub fn activate_window(&mut self, id: u64) {
+        self.enter_window(id, true);
+    }
+
+    /// Makes a window the one commands act on while the interface draws it, without counting as
+    /// an activation: the most recently active window of each workbook stays the same.
+    pub fn show_window(&mut self, id: u64) {
+        self.enter_window(id, false);
+    }
+
+    fn enter_window(&mut self, id: u64, recent: bool) {
         let Some(wi) = self.windows.iter().position(|w| w.id == id) else { return };
         let Some(w) = self.windows.get(wi) else { return };
         let doc = w.doc_uid;
@@ -185,10 +195,12 @@ impl Session {
                 }
             }
         }
-        self.activation = self.activation.saturating_add(1);
-        let stamp = self.activation;
-        if let Some(w) = self.windows.get_mut(wi) {
-            w.last_active = stamp;
+        if recent {
+            self.activation = self.activation.saturating_add(1);
+            let stamp = self.activation;
+            if let Some(w) = self.windows.get_mut(wi) {
+                w.last_active = stamp;
+            }
         }
         self.active_window = Some(id);
         if let Some(di) = self.document_index(doc) {
