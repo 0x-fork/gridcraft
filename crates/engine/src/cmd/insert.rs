@@ -2,9 +2,11 @@
 //! conditional formatting (Home › Styles) and symbols.
 
 use gridcraft_core::{CellRef, MAX_ROWS, RangeRef};
+use gridcraft_formula::adjust::{Axis, Edit};
 use gridcraft_model::*;
 use serde_json::{Value as Json, json};
 
+use super::sheet::{rewrite, shift_cell_features};
 use super::*;
 use crate::selection::current_region;
 
@@ -276,13 +278,13 @@ fn insert_table(s: &mut Session, p: &Json) -> Result<Json> {
                 return Err(EngineError::Other("To prevent possible loss of data, cells can't be pushed off the end of the worksheet.".into()));
             }
             sh.cells.shift_rows_in_cols(r.start.col, r.end.col, r.start.row, 1);
-            sh.cell_pictures = std::mem::take(&mut sh.cell_pictures)
-                .into_iter()
-                .filter_map(|(c, v)| {
-                    let dest = if c.col >= r.start.col && c.col <= r.end.col && c.row >= r.start.row { c.offset(1, 0) } else { Some(c) };
-                    dest.map(|c| (c, v))
-                })
-                .collect();
+            // Like Insert Cells > Shift down: move merges, conditional formats, notes, links and pictures, and re-point every formula
+            // reference (on any sheet) at the cells that moved.
+            let e = Edit::InsertCells { axis: Axis::Rows, range: RangeRef::new(r.start, CellRef::new(r.start.row, r.end.col)) };
+            shift_cell_features(sh, &e);
+            let name = sh.name.clone();
+            rewrite(&mut cx.wb, &name, &e);
+            let sh = cx.sheet_mut(sheet)?;
             for (i, c) in (r.start.col..=r.end.col).enumerate() {
                 sh.set_value(CellRef::new(r.start.row, c), gridcraft_core::Value::text(format!("Column{}", i + 1)));
             }
@@ -472,6 +474,7 @@ fn valid_table_name(name: &str) -> bool {
     name.chars().count() <= 255
         && name.starts_with(|c: char| c.is_alphabetic() || c == '_' || c == '\\')
         && CellRef::parse(name).is_none()
+        && !super::formulas::is_r1c1(name)
         && name.chars().enumerate().all(|(i, c)| c.is_alphanumeric() || c == '_' || c == '.' || (i == 0 && c == '\\'))
 }
 
@@ -481,7 +484,8 @@ fn table_rename(s: &mut Session, p: &Json) -> Result<Json> {
     if !valid_table_name(&name) {
         return Err(EngineError::Other("The name that you entered is not valid.".into()));
     }
-    if s.doc()?.wb.table(&name).is_some_and(|x| x != (si, ti)) {
+    let wb = &s.doc()?.wb;
+    if wb.table(&name).is_some_and(|x| x != (si, ti)) || wb.names.iter().any(|n| n.name.eq_ignore_ascii_case(&name)) {
         return Err(EngineError::Other("The name entered already exists. Enter a unique name.".into()));
     }
     edit(s, |cx| {
@@ -1553,5 +1557,51 @@ mod tests {
         s.execute("home.manageRules", json!({"delete": 0, "moveDown": 0})).unwrap();
         let rules = s.execute("home.manageRules", json!({})).unwrap();
         assert_eq!(rules["rules"].as_array().map(Vec::len), Some(0));
+    }
+
+    #[test]
+    fn table_without_header_keeps_outside_references() {
+        // #1030: the data moved down for the new header row, but formulas outside kept the old addresses.
+        let mut s = Session::new();
+        s.new_workbook();
+        s.execute("home.insertSheet", json!({"name": "Two"})).unwrap();
+        s.execute("sheet.activate", json!({"sheet": 0})).unwrap();
+        s.execute("cell.set", json!({"cell": "A1", "input": "10"})).unwrap();
+        s.execute("cell.set", json!({"cell": "A2", "input": "20"})).unwrap();
+        s.execute("cell.set", json!({"cell": "B1", "input": "=SUM(A1:A2)"})).unwrap();
+        s.execute("cell.set", json!({"cell": "C1", "input": "=A2"})).unwrap();
+        s.execute("cell.set", json!({"sheet": "Two", "cell": "A1", "input": "=Sheet1!A2"})).unwrap();
+        s.execute("insert.table", json!({"range": "A1:A2", "header": false})).unwrap();
+        let get = |s: &mut Session, a: &str| s.execute("cell.get", json!({"cell": a})).unwrap();
+        assert_eq!(get(&mut s, "A1")["value"], "Column1");
+        assert_eq!(get(&mut s, "A2")["value"], json!(10.0));
+        assert_eq!(get(&mut s, "B1")["formula"], "=SUM(A2:A3)");
+        assert_eq!(get(&mut s, "B1")["value"], json!(30.0));
+        assert_eq!(get(&mut s, "C1")["formula"], "=A3");
+        assert_eq!(get(&mut s, "C1")["value"], json!(20.0));
+        let other = s.execute("cell.get", json!({"sheet": "Two", "cell": "A1"})).unwrap();
+        assert_eq!(other["formula"], "=Sheet1!A3");
+        assert_eq!(other["value"], json!(20.0));
+    }
+
+    #[test]
+    fn table_names_refuse_defined_names_and_r1c1() {
+        let mut s = Session::new();
+        s.new_workbook();
+        s.execute("range.setValues", json!({"range": "A1:A2", "values": [["h"], ["1"]]})).unwrap();
+        s.execute("formulas.defineName", json!({"name": "Rate", "refersTo": "=0.2"})).unwrap();
+        s.execute("insert.table", json!({"range": "A1:A2"})).unwrap();
+        let e = s.execute("table.rename", json!({"table": "Table1", "name": "Rate"})).unwrap_err();
+        assert!(e.to_string().contains("already exists"), "{e}");
+        let e = s.execute("table.rename", json!({"table": "Table1", "name": "rate"})).unwrap_err();
+        assert!(e.to_string().contains("already exists"), "{e}");
+        for n in ["R2C3", "c", "r", "RC", "C5"] {
+            let e = s.execute("table.rename", json!({"table": "Table1", "name": n})).unwrap_err();
+            assert!(e.to_string().contains("not valid"), "{n}: {e}");
+            let e = s.execute("insert.table", json!({"range": "C1:C2", "name": n})).unwrap_err();
+            assert!(e.to_string().contains("not valid"), "{n}: {e}");
+        }
+        s.execute("table.rename", json!({"table": "Table1", "name": "Table1"})).unwrap();
+        s.execute("table.rename", json!({"table": "Table1", "name": "Rates"})).unwrap();
     }
 }

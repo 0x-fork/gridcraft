@@ -1439,6 +1439,35 @@ fn table_names_are_limited_to_255_characters() {
 }
 
 #[test]
+fn slicer_finds_a_named_table_on_another_sheet() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Region", "Qty"], ["East", 2], ["West", 5]]})).unwrap();
+    s.execute("insert.table", json!({"range": "A1:B3", "name": "Sales"})).unwrap();
+    s.execute("home.insertSheet", json!({"name": "Report"})).unwrap();
+    let report = s.doc().unwrap().wb.sheet_index("Report").unwrap();
+    assert_eq!(s.doc().unwrap().wb.active_sheet, report);
+
+    // With another sheet active, `table` still names the table, and the slicer goes on the table's sheet.
+    let r = s.execute("insert.slicer", json!({"table": "Sales", "column": "Region", "at": "D2"})).unwrap();
+    let id = r["slicer"].as_u64().unwrap();
+    let home = s.doc().unwrap().wb.sheet_index("Sheet1").unwrap();
+    assert_eq!(s.doc().unwrap().wb.sheet(home).unwrap().slicers.len(), 1);
+    assert!(s.doc().unwrap().wb.sheet(report).unwrap().slicers.is_empty());
+    // It filters the table: "East" leaves the East row.
+    s.execute("selection.set", json!({"range": "Sheet1!A1"})).unwrap();
+    s.execute("slicer.toggle", json!({"slicer": id, "value": "East"})).unwrap();
+    let sh = s.doc().unwrap().wb.sheet(home).unwrap();
+    assert!(!sh.is_row_hidden(1) && sh.is_row_hidden(2));
+
+    // `at` may name the table's sheet, and a table that isn't there is named in the error.
+    s.execute("home.insertSheet", json!({"name": "Notes"})).unwrap();
+    s.execute("table.insertSlicer", json!({"table": "sales", "column": "Qty", "at": "Sheet1!G2"})).unwrap();
+    assert_eq!(s.doc().unwrap().wb.sheet(home).unwrap().slicers.len(), 2);
+    let e = s.execute("insert.slicer", json!({"table": "Missing", "column": "Region"})).unwrap_err();
+    assert!(e.to_string().contains("Missing"), "{e}");
+}
+
+#[test]
 fn slicer_filters_table() {
     let mut s = s();
     s.execute("range.setValues", json!({"range": "A1", "values": [["Region", "Qty"], ["East", 2], ["West", 5], ["East", 3], ["North", 1]]})).unwrap();
@@ -1539,6 +1568,24 @@ fn a_whole_column_table_without_headers_stays_on_the_sheet() {
     s.execute("cell.set", json!({"cell": "F1048576", "input": "x"})).unwrap();
     let e = s.execute("insert.table", json!({"range": "F:F", "header": false})).unwrap_err();
     assert!(e.to_string().contains("pushed off the end"), "{e}");
+}
+
+#[test]
+fn inserting_cells_refuses_to_push_values_off_the_sheet() {
+    for (shift, edge, last_fit, last_ok) in [("right", "XFD1", "XFC1", "XFD1"), ("down", "A1048576", "A1048575", "A1048576")] {
+        let mut sess = s();
+        sess.execute("cell.set", json!({"cell": "A1", "input": "1"})).unwrap();
+        sess.execute("cell.set", json!({"cell": edge, "input": "2"})).unwrap();
+        let e = sess.execute("home.insertCells", json!({"range": "A1", "shift": shift})).unwrap_err();
+        assert!(e.to_string().contains("loss of data"), "{e}");
+        assert_eq!(v(&sess, "A1"), Value::Number(1.0));
+        assert_eq!(v(&sess, edge), Value::Number(2.0));
+        // A value that still fits moves to the last valid cell.
+        let mut sess = s();
+        sess.execute("cell.set", json!({"cell": last_fit, "input": "2"})).unwrap();
+        sess.execute("home.insertCells", json!({"range": "A1", "shift": shift})).unwrap();
+        assert_eq!(v(&sess, last_ok), Value::Number(2.0));
+    }
 }
 
 #[test]

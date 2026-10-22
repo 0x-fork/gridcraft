@@ -85,6 +85,8 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 - **Estimate:** 20–30 h for beta (25–40 h full).
 
 ### 9. Keyboard-first users: key tips, shortcuts, context menus (U)
+- Next/previous sheet navigation now skips Hidden and VeryHidden worksheets without activating a
+  hidden sheet at the workbook boundary. Other keyboard gaps below remain.
 - **Evidence:** #33, #49 (key tips: initial Home-tab support landed in #43 on 10-10, the rest of the ribbon not yet), #110, #28 (selection),
   59 command shortcuts vs Excel's 200+.
 - **Estimate:** 12–20 h. [ui-parity.md](ui-parity.md)
@@ -172,6 +174,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 |---|---|---|
 | 2026-10-20 | minor | §11: the Japanese catalog covers the dialogs, messages and menus — 943 keys (~43%), matching the pt-BR coverage; a test keeps the two catalogs in step |
 | 2026-10-13 | trivial | §4: multi-level category axes landed |
+| 2026-10-12 | minor | §9: next/previous sheet commands retain the current visible sheet and selection when there is no visible destination |
 | 2026-10-12 | minor | rows auto-fit oversized fonts on open and whole-row/column formatting (#833) |
 | 2026-10-12 | minor | Page Layout view: dragging margins on the rulers (#792) removed from the §14 remainder |
 | 2026-10-12 | minor | §13: Forecast Sheet Forecast Start (hindcast) landed (#785) |
