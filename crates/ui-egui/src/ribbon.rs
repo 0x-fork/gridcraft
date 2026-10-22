@@ -1751,6 +1751,8 @@ fn page_layout(app: &mut SheetApp, ui: &mut Ui) {
     }
 }
 
+/// The Formulas tab: Insert Function, AutoSum, the function-category menus (names in the formula
+/// language, descriptions in the interface language), defined names, auditing and calculation.
 fn formulas(app: &mut SheetApp, ui: &mut Ui) {
     let __k = big_button(ui, Icon::Function, "Insert\nFunction", "Insert Function (⇧F3)", false);
     control_keytip(app, ui, &__k, "dialog:insertFunction");
@@ -1784,7 +1786,7 @@ fn formulas(app: &mut SheetApp, ui: &mut Ui) {
                         let locale = app.ui.language.formula_locale();
                         let name =
                             app.session.active().map(|d| crate::formula_locale::completion_name(n, locale, &d.wb, d.wb.active_sheet)).unwrap_or(n);
-                        let desc = crate::formula_locale::description(n, locale).unwrap_or_default();
+                        let desc = crate::formula_locale::description(n, locale, app.ui.language).unwrap_or_default();
                         if ui.button(name).on_hover_text(desc).clicked() {
                             app.run_or_alert("formulas.insertFunction", json!({"name": n}));
                             ui.close();
