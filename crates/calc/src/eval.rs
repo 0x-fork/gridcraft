@@ -1461,43 +1461,74 @@ impl<'h> Evaluator<'h> {
         if name == "AGGREGATE" && func >= 14 {
             k = rest.get(1).map(|e| self.value(e));
         }
+        // Every cell visited (even one skipped as hidden, nested or an error) and every value
+        // counts against one budget for the whole call. All arguments are evaluated (references
+        // stay lazy) and charged before any cell is read: a value stored in XFD1048576 makes
+        // `A:XFD` trim to the whole sheet, ~17 billion cells (#2175).
+        enum Input {
+            Cells(usize, RangeRef),
+            Values(Value),
+        }
+        let mut inputs = Vec::new();
+        let mut budget = MAX_CELLS;
         for e in refs {
             match self.eval(e) {
                 Ev::R(areas) => {
                     for a in areas {
                         let range = self.trim(&a);
-                        for c in range.iter() {
-                            let (hidden, nested) = {
-                                let wb = self.host.workbook();
-                                let s = wb.sheet(a.sheet);
-                                let hidden =
-                                    s.is_some_and(|s| if skip_hidden { s.is_row_hidden(c.row) } else { skip_filtered && s.is_row_filtered(c.row) });
-                                let nested = skip_nested
-                                    && s.and_then(|s| s.cell(c)).and_then(|cell| cell.formula.as_ref()).is_some_and(|f| {
-                                        let u = f.text.to_ascii_uppercase();
-                                        u.contains("SUBTOTAL(") || u.contains("AGGREGATE(")
-                                    });
-                                (hidden, nested)
-                            };
-                            if hidden || nested {
-                                continue;
-                            }
-                            let v = self.host.cell_value(a.sheet, c);
-                            if skip_errors && v.is_error() {
-                                continue;
-                            }
-                            values.push(v);
-                        }
+                        budget = match budget.checked_sub(range.count()) {
+                            Some(left) => left,
+                            None => return err(CellError::Num),
+                        };
+                        inputs.push(Input::Cells(a.sheet, range));
                     }
                 }
-                Ev::V(Value::Array(a)) => values.extend(a.data.iter().filter(|v| !(skip_errors && v.is_error())).cloned()),
-                Ev::V(v) => values.push(v),
+                Ev::V(v) => {
+                    let n = match &v {
+                        Value::Array(a) => u64::try_from(a.data.len()).unwrap_or(u64::MAX),
+                        _ => 1,
+                    };
+                    budget = match budget.checked_sub(n) {
+                        Some(left) => left,
+                        None => return err(CellError::Num),
+                    };
+                    inputs.push(Input::Values(v));
+                }
                 Ev::L(_) => return err(CellError::Value),
             }
         }
+        for input in inputs {
+            match input {
+                Input::Cells(sheet, range) => {
+                    for c in range.iter() {
+                        let (hidden, nested) = {
+                            let wb = self.host.workbook();
+                            let s = wb.sheet(sheet);
+                            let hidden =
+                                s.is_some_and(|s| if skip_hidden { s.is_row_hidden(c.row) } else { skip_filtered && s.is_row_filtered(c.row) });
+                            let nested = skip_nested
+                                && s.and_then(|s| s.cell(c)).and_then(|cell| cell.formula.as_ref()).is_some_and(|f| {
+                                    let u = f.text.to_ascii_uppercase();
+                                    u.contains("SUBTOTAL(") || u.contains("AGGREGATE(")
+                                });
+                            (hidden, nested)
+                        };
+                        if hidden || nested {
+                            continue;
+                        }
+                        let v = self.host.cell_value(sheet, c);
+                        if skip_errors && v.is_error() {
+                            continue;
+                        }
+                        values.push(v);
+                    }
+                }
+                Input::Values(Value::Array(a)) => values.extend(a.data.iter().filter(|v| !(skip_errors && v.is_error())).cloned()),
+                Input::Values(v) => values.push(v),
+            }
+        }
         if let Some(k) = k {
-            values.push(Value::Empty);
-            return Ev::V(gridcraft_functions::aggregate_values_k(func, &values[..values.len() - 1], &k));
+            return Ev::V(gridcraft_functions::aggregate_values_k(func, &values, &k));
         }
         Ev::V(gridcraft_functions::aggregate_values(func, &values))
     }
