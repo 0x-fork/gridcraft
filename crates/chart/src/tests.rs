@@ -228,6 +228,7 @@ fn resolve_from_workbook() {
             color: None,
             secondary: false,
             kind: None,
+            quartiles: Default::default(),
             smooth: false,
             trendlines: Vec::new(),
         },
@@ -239,6 +240,7 @@ fn resolve_from_workbook() {
             color: Some(Color::rgb(1, 2, 3)),
             secondary: true,
             kind: None,
+            quartiles: Default::default(),
             smooth: false,
             trendlines: Vec::new(),
         },
@@ -250,6 +252,7 @@ fn resolve_from_workbook() {
             color: None,
             secondary: false,
             kind: None,
+            quartiles: Default::default(),
             smooth: false,
             trendlines: Vec::new(),
         },
@@ -288,6 +291,7 @@ fn resolve_from_workbook() {
             color: None,
             secondary: false,
             kind: None,
+            quartiles: Default::default(),
             smooth: false,
             trendlines: Vec::new(),
         },
@@ -299,6 +303,7 @@ fn resolve_from_workbook() {
             color: None,
             secondary: true,
             kind: None,
+            quartiles: Default::default(),
             smooth: false,
             trendlines: Vec::new(),
         },
@@ -315,6 +320,7 @@ fn resolve_from_workbook() {
         color: None,
         secondary: false,
         kind: None,
+        quartiles: Default::default(),
         smooth: false,
         trendlines: Vec::new(),
     }];
@@ -332,6 +338,7 @@ fn resolve_from_workbook() {
         color: None,
         secondary: false,
         kind: None,
+        quartiles: Default::default(),
         smooth: false,
         trendlines: Vec::new(),
     }];
@@ -1032,6 +1039,7 @@ fn pie_points_follow_workbook_theme() {
         color: None,
         secondary: false,
         kind: None,
+        quartiles: Default::default(),
         smooth: false,
         trendlines: Vec::new(),
     }];
@@ -1182,4 +1190,28 @@ fn a_huge_trendline_forecast_does_not_collapse_the_columns() {
     let trend = lines_of(&prims, tc);
     assert_eq!(trend.len(), 1);
     assert!(trend[0].len() >= 20, "the trendline is sampled over the plot, not the forecast: {}", trend[0].len());
+}
+
+#[test]
+fn box_whisker_draws_each_series_quartile_method() {
+    use gridcraft_model::QuartileMethod;
+    let mut c = chart(ChartKind::BoxWhisker);
+    c.legend = LegendPos::None;
+    c.series = vec![Series::default(), Series { quartiles: QuartileMethod::Inclusive, ..Default::default() }];
+    let color = [12, 34, 56, 255];
+    let d = ChartData {
+        series: vec![series("A", &[1., 2., 3., 4., 5., 6.], color, c.kind), series("B", &[1., 2., 3., 4., 5., 6.], color, c.kind)],
+        ..Default::default()
+    };
+    let prims = render(&c, &d, 640., 400., &ApproxMeasure);
+    let heights: Vec<f32> = prims
+        .iter()
+        .filter_map(|p| match p {
+            Prim::Rect { h, fill, .. } if *fill == Some(color) => Some(*h),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(heights.len(), 2);
+    // The boxes span 3.5 and 2.5 data units on the same value axis.
+    assert!((heights[0] / heights[1] - 1.4).abs() < 0.001);
 }

@@ -140,6 +140,31 @@ fn chart_recommendations_follow_the_data_shape() {
 }
 
 #[test]
+fn chart_uses_text_first_area_as_categories_for_later_areas() {
+    let mut s = s();
+    s.execute(
+        "range.setValues",
+        json!({"range": "A1", "values": [["Mes", "x", "y", "z", "Ventas"], ["Ene", 1, 1, 1, 10], ["Feb", 1, 1, 1, 20], ["Mar", 1, 1, 1, 30], ["Abr", 1, 1, 1, 40]]}),
+    )
+    .unwrap();
+
+    s.execute("insert.chart", json!({"range": "A1:A5,E1:E5", "type": "pie", "at": "G2"})).unwrap();
+    let multi = s.doc().unwrap().wb.active().unwrap().charts.last().unwrap().clone();
+    assert_eq!(multi.series.len(), 1);
+    assert_eq!(multi.series[0].name.as_deref(), Some("Sheet1!$E$1"));
+    assert_eq!(multi.series[0].categories.as_deref(), Some("Sheet1!$A$2:$A$5"));
+    assert_eq!(multi.series[0].values, "Sheet1!$E$2:$E$5");
+
+    s.execute("insert.chart", json!({"range": "D1:E5", "type": "pie", "at": "G20"})).unwrap();
+    let contiguous = s.doc().unwrap().wb.active().unwrap().charts.last().unwrap().clone();
+    assert_eq!(contiguous.series.len(), 2);
+    assert_eq!(contiguous.series[0].name.as_deref(), Some("Sheet1!$D$1"));
+    assert_eq!(contiguous.series[0].values, "Sheet1!$D$2:$D$5");
+    assert_eq!(contiguous.series[1].name.as_deref(), Some("Sheet1!$E$1"));
+    assert_eq!(contiguous.series[1].values, "Sheet1!$E$2:$E$5");
+}
+
+#[test]
 fn chart_category_axis_from_blank_corner_and_select_data() {
     // #287: numeric X values must be the category axis, not a series of their own.
     let mut s = s();
@@ -2623,6 +2648,21 @@ fn whole_sheet_selection_stays_within_the_data() {
 }
 
 #[test]
+fn whole_columns_and_rows_ignore_merges_but_cell_ranges_take_them_whole() {
+    // As in Excel: a merged A2:C2 doesn't widen a click on column B's header to A:C, nor a
+    // merged B2:B4 a click on row 3's header to rows 2:4; a cell range still takes them whole.
+    let mut s = s();
+    s.execute("home.mergeCenter", json!({"range": "A2:C2"})).unwrap();
+    s.execute("home.mergeCenter", json!({"range": "E2:E4"})).unwrap();
+    let sel = |s: &mut Session, range: &str| s.execute("selection.set", json!({"range": range})).unwrap()["selection"].clone();
+    assert_eq!(sel(&mut s, "B:B"), "B:B");
+    assert_eq!(sel(&mut s, "A:B"), "A:B");
+    assert_eq!(sel(&mut s, "3:3"), "3:3");
+    assert_eq!(sel(&mut s, "B1:B3"), "A1:C3");
+    assert_eq!(sel(&mut s, "E3"), "E2:E4");
+}
+
+#[test]
 fn parity_counts() {
     let (done, total) = crate::catalog::parity();
     assert!(total > 250);
@@ -2723,6 +2763,28 @@ fn switch_row_column_with_whole_column_refs_is_bounded() {
     whole(&mut s);
     assert!(s.execute("chart.switchRowColumn", json!({})).is_err());
     assert_eq!(s.doc().unwrap().wb.active().unwrap().charts[0].series.len(), 2);
+}
+
+#[test]
+fn switch_row_column_follows_inserted_and_deleted_lines() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["", "Q1", "Q2"], ["North", 1, 2], ["South", 3, 4]]})).unwrap();
+    s.execute("insert.chart", json!({"range": "A1:C3", "type": "column", "at": "F1"})).unwrap();
+    s.execute("home.insertRows", json!({"rows": "1:1"})).unwrap();
+    assert_eq!(s.doc().unwrap().wb.active().unwrap().charts[0].source.as_deref(), Some("Sheet1!A2:C4"));
+    s.execute("chart.switchRowColumn", json!({})).unwrap();
+    let c = s.doc().unwrap().wb.active().unwrap().charts[0].clone();
+    let values: Vec<&str> = c.series.iter().map(|x| x.values.as_str()).collect();
+    assert_eq!(values, ["Sheet1!$B$3:$C$3", "Sheet1!$B$4:$C$4"]);
+    let names: Vec<Option<&str>> = c.series.iter().map(|x| x.name.as_deref()).collect();
+    assert_eq!(names, [Some("Sheet1!$A$3"), Some("Sheet1!$A$4")]);
+    assert_eq!(c.series[0].categories.as_deref(), Some("Sheet1!$B$2:$C$2"));
+    // Columns shift the source too.
+    s.execute("home.insertColumns", json!({"cols": "A:A"})).unwrap();
+    assert_eq!(s.doc().unwrap().wb.active().unwrap().charts[0].source.as_deref(), Some("Sheet1!B2:D4"));
+    // Deleting the whole block leaves no stale source behind.
+    s.execute("home.deleteRows", json!({"rows": "2:4"})).unwrap();
+    assert_eq!(s.doc().unwrap().wb.active().unwrap().charts[0].source, None);
 }
 
 #[test]
@@ -4153,4 +4215,31 @@ fn rotate_rejects_flip_param_instead_of_swapping_size() {
     }
     s.execute("arrange.rotate", json!({"kind": "shape", "id": id})).unwrap();
     assert_eq!(size(&s), (h, w));
+}
+
+#[test]
+fn box_whisker_quartile_methods_survive_xlsx() {
+    use gridcraft_model::QuartileMethod;
+    let mut s = s();
+    chart_data(&mut s);
+    s.execute("insert.chart", json!({"range": "A1:C5", "type": "boxWhisker"})).unwrap();
+    assert_eq!(s.doc().unwrap().wb.active().unwrap().charts[0].series[0].quartiles, QuartileMethod::Exclusive);
+    s.execute("chart.set", json!({"quartiles": "inclusive"})).unwrap();
+    assert!(s.doc().unwrap().wb.active().unwrap().charts[0].series.iter().all(|s| s.quartiles == QuartileMethod::Inclusive));
+    for invalid in [json!("median"), json!(null), json!(1)] {
+        assert!(s.execute("chart.set", json!({"quartiles": invalid, "title": "Changed"})).is_err());
+    }
+    assert_ne!(s.doc().unwrap().wb.active().unwrap().charts[0].title.as_deref(), Some("Changed"));
+    // Imported series can differ; changing a chart's setting applies to all its series.
+    let mut wb = (*s.doc().unwrap().wb).clone();
+    let sh = wb.sheet_mut(0).unwrap();
+    assert!(sh.charts[0].series.len() > 1);
+    sh.charts[0].series[1].quartiles = QuartileMethod::Exclusive;
+    let bytes = gridcraft_xlsx::write_xlsx(&wb).unwrap();
+    let (back, _) = gridcraft_xlsx::read_xlsx(&bytes).unwrap();
+    let series = &back.active().unwrap().charts[0].series;
+    assert_eq!(series[0].quartiles, QuartileMethod::Inclusive);
+    assert_eq!(series[1].quartiles, QuartileMethod::Exclusive);
+    s.execute("chart.set", json!({"quartiles": "exclusive"})).unwrap();
+    assert!(s.doc().unwrap().wb.active().unwrap().charts[0].series.iter().all(|s| s.quartiles == QuartileMethod::Exclusive));
 }
