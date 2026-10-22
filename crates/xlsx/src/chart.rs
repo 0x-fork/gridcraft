@@ -297,9 +297,14 @@ fn ref_target(wb: &Workbook, sheet_idx: usize, f: &str) -> Option<(usize, RangeR
 pub(crate) fn ref_values(wb: &Workbook, sheet_idx: usize, f: &str) -> Option<Vec<Value>> {
     let (si, mut range) = ref_target(wb, sheet_idx, f)?;
     let sheet = wb.sheet(si)?;
-    // Whole columns/rows: limit to the used range.
+    // Whole columns/rows: cut the far end at the used range. The start stays put, so point indices keep matching the reference.
     if let Some(u) = sheet.used_range() {
-        range = range.intersection(&u)?;
+        if range.is_full_cols() {
+            range.end.row = range.end.row.min(u.end.row.max(range.start.row));
+        }
+        if range.is_full_rows() {
+            range.end.col = range.end.col.min(u.end.col.max(range.start.col));
+        }
     }
     if range.count() > MAX_CACHE {
         return None;
