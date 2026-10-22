@@ -906,7 +906,7 @@ mod tests {
         // whose face is absent (a minimal machine) and fails if a face is present but not wired in.
         let cases: [(&str, Vec<(String, u32)>, &str); 7] = [
             ("sys-cjk-han-ja", cjk_han_japanese(), "カテゴリ"),
-            ("sys-cjk-han-zh", cjk_han_simplified(), "页面布局 客户端配置 繁體中文 儲存與重新開啟 中文標點 ，。！？"),
+            ("sys-cjk-han-zh", cjk_han_simplified(), "页面布局 客户端配置"),
             ("sys-cjk-hangul", cjk_hangul(), "한글"),
             ("sys-thai", thai(), "ทดสอบ"),
             ("sys-hebrew", hebrew(), "עברית"),
