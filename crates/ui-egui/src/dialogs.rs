@@ -458,7 +458,7 @@ impl Dialog {
                     Check { key: "header", label: "My data has headers" },
                     Text { key: "columnsText", label: "Columns (blank = all, e.g. A,C):" },
                 ],
-                json!({"range": sel, "header": true}),
+                json!({"range": remove_duplicates_range(app, &sel), "header": true}),
             ),
             "advancedFilter" => {
                 let list = app
@@ -873,6 +873,22 @@ fn validation_defaults(app: &SheetApp) -> Json {
     v["errorTitle"] = json!(dv.error_title);
     v["errorMessage"] = json!(dv.error_message);
     v
+}
+
+/// The range Remove Duplicates starts with. A block selection is used as given; with only the
+/// cursor placed, the table's data rows or the current region, as the command picks when it gets
+/// no range (a single-cell range would remove nothing).
+fn remove_duplicates_range(app: &SheetApp, sel: &str) -> String {
+    let Some(d) = app.session.active() else { return sel.to_string() };
+    let Some(sh) = d.wb.active() else { return sel.to_string() };
+    if !d.selection.current().is_single() {
+        return sel.to_string();
+    }
+    let range = match sh.table_at(d.selection.active) {
+        Some(t) => t.data_range().map(|dr| gridcraft_engine::core::RangeRef::new(t.range.start, dr.end)).unwrap_or(t.range),
+        None => gridcraft_engine::selection::current_region(sh, d.selection.active),
+    };
+    range.a1()
 }
 
 fn abs(r: &gridcraft_engine::core::RangeRef) -> String {
@@ -2956,6 +2972,17 @@ mod tests {
         assert_eq!(build_params(&dialog)["range"], "B2:C5");
         dialog.set_value("range", json!("D2:E6"));
         assert_eq!(build_params(&dialog)["range"], "D2:E6");
+    }
+
+    #[test]
+    fn remove_duplicates_with_only_the_cursor_prefills_the_current_region() {
+        let mut session = gridcraft_engine::Session::default();
+        session.new_workbook();
+        session.execute("range.setValues", json!({"range": "B2:C4", "values": [["a", 1], ["a", 1], ["b", 2]]})).unwrap();
+        session.execute("selection.set", json!({"range": "C3"})).unwrap();
+        let mut app = SheetApp::new(session, Default::default());
+        let dialog = Dialog::open(&mut app, "removeDuplicates", json!({})).unwrap();
+        assert_eq!(dialog.values.get("range"), Some(&json!("B2:C4")));
     }
 
     #[test]
