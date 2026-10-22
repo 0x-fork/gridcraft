@@ -212,7 +212,6 @@ pub(super) const CORE: &[(&str, &str)] = &[
     ("Gridlines", "目盛線"),
     ("Headings", "見出し"),
     ("Zoom", "ズーム"),
-    ("Fit selection", "選択範囲に合わせる"),
     ("100%", "100%"),
     ("Zoom to\nSelection", "選択範囲を拡大"),
     ("Freeze\nPanes", "ウィンドウ枠の固定"),
@@ -344,11 +343,6 @@ pub(super) const CORE: &[(&str, &str)] = &[
     ("Export", "エクスポート"),
     ("Close", "閉じる"),
     ("Options", "オプション"),
-    ("Account", "アカウント"),
-    ("Product Information", "製品情報"),
-    ("Version", "バージョン"),
-    ("Platform", "プラットフォーム"),
-    ("Licence", "ライセンス"),
     ("Blank workbook", "空白のブック"),
     ("Recent", "最近使ったアイテム"),
     ("No recent workbooks yet.", "最近使ったブックはまだありません。"),
@@ -962,6 +956,28 @@ pub(super) const DIALOGS: &[(&str, &str)] = &[
     ("Protect\nSheet", "シートの\n保護"),
     ("Watch\nWindow", "ウォッチ\nウィンドウ"),
     ("Workbook\nStatistics", "ブックの\n統計情報"),
+    ("Account", "アカウント"),
+    ("Product Information", "製品情報"),
+    ("Version", "バージョン"),
+    ("Platform", "プラットフォーム"),
+    ("Licence", "ライセンス"),
+    ("Fit selection", "選択範囲に合わせる"),
+    ("All sheets", "すべてのシート"),
+    ("AutoSave: save after every change (workbooks saved to a file)", "自動保存: 変更のたびに保存します (ファイルに保存したブック)"),
+    ("Convert to Number", "数値に変換"),
+    ("Duplicate", "複製"),
+    ("Error checking options", "エラー チェック オプション"),
+    ("Format Chart Area…", "グラフ エリアの書式設定…"),
+    ("Move or Copy…", "移動またはコピー…"),
+    ("No Color", "色なし"),
+    ("Number Stored as Text", "文字列として保存されている数値"),
+    ("Paste formulas that refer to the copied cells", "コピーしたセルを参照する数式を貼り付けます"),
+    ("Rename", "名前の変更"),
+    ("Select All Sheets", "すべてのシートを選択"),
+    ("Select Data…", "データの選択…"),
+    ("Tab Color", "シートの見出しの色"),
+    ("Unhide…", "再表示…"),
+    ("Unprotect Sheet…", "シート保護の解除…"),
 ];
 
 /// Translates an interface label; `None` for a label the catalog does not know, so `i18n.rs` can
@@ -1067,15 +1083,15 @@ mod tests {
             assert!(seen.insert(*english), "duplicate key across CORE and DIALOGS: {english:?}");
         }
         assert_eq!(seen.len(), catalog_keys().count());
-        assert_eq!(CORE.len(), 398, "the shared reference set every catalog covers");
-        assert_eq!(DIALOGS.len(), 545, "the dialog, message and menu strings beyond it");
-        assert_eq!(catalog_keys().count(), 943);
+        assert_eq!(CORE.len(), 392, "the shared reference set every catalog covers");
+        assert_eq!(DIALOGS.len(), 562, "the dialog, message and menu strings beyond it");
+        assert_eq!(catalog_keys().count(), 954);
     }
 
     #[test]
     fn covers_every_key_the_portuguese_catalog_translates() {
         let portuguese = portuguese_keys();
-        assert_eq!(portuguese.len(), 943, "pt.rs's arms changed: add the new keys here and update the count");
+        assert_eq!(portuguese.len(), 954, "pt.rs's arms changed: add the new keys here and update the count");
         let japanese: HashSet<&str> = catalog_keys().collect();
         for key in &portuguese {
             assert!(japanese.contains(key.as_str()), "the Portuguese catalog translates {key:?}, the Japanese one does not");

@@ -669,11 +669,13 @@ mod tests {
         let ctx = egui::Context::default();
         for key in [Key::Backspace, Key::Delete] {
             let mut completion = Some("SomeText".to_string());
-            let _ = ctx.run_ui(press(key), |ui| ui.input_mut(|i| dismiss_completion(i, &mut completion)));
+            let mut out = ctx.run_ui(press(key), |ui| ui.input_mut(|i| dismiss_completion(i, &mut completion)));
+            out.textures_delta.clear(); // nothing consumes the atlas in a headless test
             assert_eq!(completion, None, "{key:?} must drop the proposal");
         }
         let mut completion = Some("SomeText".to_string());
-        let _ = ctx.run_ui(press(Key::A), |ui| ui.input_mut(|i| dismiss_completion(i, &mut completion)));
+        let mut out = ctx.run_ui(press(Key::A), |ui| ui.input_mut(|i| dismiss_completion(i, &mut completion)));
+        out.textures_delta.clear();
         assert!(completion.is_some());
     }
 
