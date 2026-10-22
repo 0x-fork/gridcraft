@@ -328,7 +328,10 @@ pub fn write_xlsx(wb: &Workbook, kind: XlsxKind) -> Result<Vec<u8>, IoError> {
     }
 
     let mut w = format!("{XML_DECL}<workbook xmlns=\"{NS_MAIN}\" xmlns:r=\"{NS_REL}\">");
-    w.push_str(&crate::passthrough::workbook_elements(wb, "fileVersion"));
+    // A workbook read from a file keeps its <fileVersion> as it was: Excel trusts the saved values
+    // only when appName is "xl" (#799). One without names GridCraft (#1699), and Excel recalculates it.
+    let file_version = crate::passthrough::workbook_elements(wb, "fileVersion");
+    w.push_str(if file_version.is_empty() { "<fileVersion appName=\"gridcraft\"/>" } else { &file_version });
     w.push_str("<workbookPr");
     match wb.show_objects {
         ShowObjects::All => {}
