@@ -401,3 +401,72 @@ fn formulas_longer_than_excel_allows_are_refused() {
     assert!(text.len() > crate::MAX_FORMULA_LEN);
     assert!(parse(&text).is_ok());
 }
+
+#[test]
+fn longest_flat_chains_clone_compare_walk_and_adjust_without_deep_recursion() {
+    // `=1+1+…` with 4,096 operands is 8,192 characters, Excel's formula limit, and nests 4,095
+    // levels on its left. On a 1 MiB stack (the Windows main thread) the derived, recursive
+    // Clone overflowed when the engine stored such a formula (#916).
+    let handle = std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(|| {
+            let plus = vec!["1"; 4096].join("+");
+            let e = parse(&plus).expect("parse");
+            let copy = e.clone();
+            assert!(copy == e);
+            let other = parse(&format!("{}-1", vec!["1"; 4095].join("+"))).expect("parse");
+            assert!(other != e);
+            let mut nodes = 0;
+            e.walk(&mut |_| nodes += 1);
+            assert_eq!(nodes, 2 * 4096 - 1);
+            assert_eq!(print(&copy.map(&mut |x| x)), plus);
+            // A chain of references: walk finds them in order, adjust rewrites every one.
+            let refs = (1..=1000).map(|r| format!("A{r}")).collect::<Vec<_>>().join("+");
+            let e = parse(&refs).expect("parse");
+            let found: Vec<String> = e.references().iter().map(|r| printer::reference_a1(r)).collect();
+            assert_eq!(found.first().map(String::as_str), Some("A1"));
+            assert_eq!(found.last().map(String::as_str), Some("A1000"));
+            assert_eq!(found.len(), 1000);
+            let ins = Edit::Insert { axis: Axis::Rows, at: 0, count: 1 };
+            let moved = print(&adjust(e.clone(), "S", "S", &ins));
+            assert_eq!(moved, (2..=1001).map(|r| format!("A{r}")).collect::<Vec<_>>().join("+"));
+            assert_eq!(print(&shift_relative(e, 0, 1)), (1..=1000).map(|r| format!("B{r}")).collect::<Vec<_>>().join("+"));
+        })
+        .expect("spawn");
+    handle.join().expect("long chains must not overflow the stack");
+}
+
+#[test]
+fn spanish_input_counts_left_operand_of_a_chain_at_the_same_depth() {
+    // The leftmost operand of a flat chain is not nested, so `(((…1)))+1` is accepted whenever
+    // `(((…1)))` is, in both the pre-check and `normalize`.
+    let wrap = |n: usize| {
+        let mut e = Expr::Number(1.0);
+        for _ in 0..n {
+            e = Expr::Paren(Box::new(e));
+        }
+        e
+    };
+    let es = |e: &Expr| crate::print_input(e, FormulaLocale::Es, |_| false);
+    let deepest = (0..400).take_while(|&n| es(&wrap(n)).is_ok()).last().expect("depth 0 is accepted");
+    assert!(deepest > 1 && deepest < 400);
+    let chain = Expr::Binary(BinOp::Add, Box::new(wrap(deepest)), Box::new(Expr::Number(1.0)));
+    assert!(es(&chain).is_ok());
+}
+
+#[test]
+fn walk_is_preorder_and_map_is_postorder_left_to_right() {
+    // `(A1+B1)+SUM(C1,D1)-E1`: a chain with a call on its right. walk visits parents before
+    // children, map rewrites children (left to right) before their parent.
+    let e = parse("(A1+B1)+SUM(C1,D1)-E1").unwrap();
+    let mut walked = Vec::new();
+    e.walk(&mut |n| walked.push(print(n)));
+    assert_eq!(walked, ["(A1+B1)+SUM(C1,D1)-E1", "(A1+B1)+SUM(C1,D1)", "(A1+B1)", "A1+B1", "A1", "B1", "SUM(C1,D1)", "C1", "D1", "E1"]);
+    let mut mapped = Vec::new();
+    let out = e.map(&mut |n| {
+        mapped.push(print(&n));
+        n
+    });
+    assert_eq!(mapped, ["A1", "B1", "A1+B1", "(A1+B1)", "C1", "D1", "SUM(C1,D1)", "(A1+B1)+SUM(C1,D1)", "E1", "(A1+B1)+SUM(C1,D1)-E1"]);
+    assert_eq!(print(&out), "(A1+B1)+SUM(C1,D1)-E1");
+}
