@@ -648,6 +648,8 @@ impl SheetApp {
 
     /// Shows a command error: a toast for an unavailable command, else a message box.
     fn alert(&mut self, e: String) {
+        // Shown in the window the user ends up in, also after a command that switched windows.
+        self.follow_active_window();
         if e.contains("is not available right now") {
             self.toast = Some((e, now_ms()));
         } else {
@@ -799,6 +801,8 @@ impl SheetApp {
 
     /// Picks up requests commands made (dialogs, edit mode…).
     pub fn after_engine(&mut self) {
+        // The requests belong to the window the command left active.
+        self.follow_active_window();
         for req in self.session.take_ui_requests() {
             match req {
                 UiRequest::Dialog(name, params) => self.open_dialog(&name, params),
@@ -924,6 +928,9 @@ impl SheetApp {
     /// most important one (a preserved VBA project outranks, say, a skipped optional part).
     /// Kept deliberately generic: any open-time warning can reach the user this way.
     pub fn show_open_warnings(&mut self, r: &Json) {
+        // The opened workbook's window shows them, however it was opened (a script may have run
+        // `file.open` on the session directly).
+        self.follow_active_window();
         let Some(list) = r.get("warnings").and_then(Json::as_array) else {
             self.notice = None;
             return;

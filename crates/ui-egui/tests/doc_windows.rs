@@ -282,3 +282,28 @@ fn menu_commands_follow_the_focused_window_and_leaving_a_window_enters_its_draft
     desk.app.run("cell.set", json!({"cell": "B1", "input": "menu"})).unwrap();
     assert_eq!(desk.app.session.documents()[0].wb.active().unwrap().value(CellRef::new(0, 1)), Value::text("menu"));
 }
+
+#[test]
+fn feedback_from_opening_a_workbook_shows_in_its_new_window() {
+    let mut desk = Desk::new(true);
+    desk.app.run("cell.set", json!({"cell": "A1", "input": "kept"})).unwrap();
+    desk.frames(2);
+    let book1 = desk.window_of(0);
+    let mut wb = gridcraft_engine::model::Workbook::new();
+    wb.vba_project = Some(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1 fake OLE2 vbaProject".to_vec().into());
+    let b64 = gridcraft_engine::io::base64_encode(&gridcraft_engine::io::save_bytes(&wb, "macros.xlsm").unwrap());
+    desk.frame_with(|app, _| {
+        // A script opening the file on the session, then the interface reporting on it.
+        let r = app.session.run("file.open", json!({"name": "macros.xlsm", "base64": b64})).unwrap();
+        app.show_open_warnings(&r);
+        app.run_or_alert("no.such.command", json!({}));
+    });
+    desk.frames(2);
+    let opened = desk.window_of(1);
+    assert_eq!(desk.windows.shown_windows(), [book1, opened]);
+    assert_eq!(desk.app.session.active_window(), Some(opened));
+    assert_eq!(desk.app.notice.as_ref().map(|n| n.kind), Some(gridcraft_ui_egui::NoticeKind::Warning), "the macro notice shows in the opened window");
+    assert!(desk.app.message.is_some(), "and so does the alert");
+    desk.app.enter_window(book1);
+    assert!(desk.app.notice.is_none() && desk.app.message.is_none(), "Book1's window shows neither");
+}
