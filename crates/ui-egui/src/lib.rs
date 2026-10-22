@@ -1018,7 +1018,7 @@ impl SheetApp {
         else {
             return;
         };
-        let text = printing::feedback(&message, |label| self.ui.language.tr(label).to_owned());
+        let text = printing::feedback(&message, self.ui.language, |label| self.ui.language.tr(label).to_owned());
         if matches!(message, printing::Feedback::Submitted(_)) {
             self.toast = Some((text, now_ms()));
         } else {
