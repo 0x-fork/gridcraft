@@ -59,3 +59,23 @@ fn row_height_opens_with_the_height_ready_to_type() {
     };
     assert!((height as f64 - 40.0).abs() < 0.6, "row 3 is 40 high, got {height}");
 }
+
+#[test]
+fn command_search_arrow_and_page_keys_move_the_selection_and_keep_the_search_focused() {
+    let mut h = harness();
+    h.state_mut().open_dialog("commandSearch", json!({}));
+    h.run_steps(6);
+    h.input_mut().events.push(Event::Text("a".into()));
+    h.run_steps(3);
+    assert_eq!(h.state().dialog.as_ref().map(|d| d.list_index), Some(0));
+    for _ in 0..2 {
+        h.key_press(Key::ArrowDown);
+        h.run_steps(2);
+    }
+    assert_eq!(h.state().dialog.as_ref().map(|d| d.list_index), Some(2), "two ArrowDown presses");
+    h.key_press(Key::PageDown);
+    h.run_steps(2);
+    let after_page = h.state().dialog.as_ref().map(|d| d.list_index).unwrap_or(0);
+    assert!(after_page > 2, "PageDown moved past the third row, got {after_page}");
+    assert!(h.ctx.memory(|m| m.focused()).is_some(), "the search field kept focus");
+}
