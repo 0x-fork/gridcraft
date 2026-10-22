@@ -2268,10 +2268,10 @@ fn automate(app: &mut SheetApp, ui: &mut Ui) {
 }
 
 fn table_design(app: &mut SheetApp, ui: &mut Ui) {
-    let Some((tname, header, totals, banded, banded_c, first, last, filter)) = app.session.active().and_then(|d| {
+    let Some((tname, header, totals, banded, banded_c, first, last, filter, style)) = app.session.active().and_then(|d| {
         let sh = d.wb.active()?;
         let t = sh.table_at(d.selection.active)?;
-        Some((t.name.clone(), t.header_row, t.totals_row, t.banded_rows, t.banded_cols, t.first_col, t.last_col, t.filter_button))
+        Some((t.name.clone(), t.header_row, t.totals_row, t.banded_rows, t.banded_cols, t.first_col, t.last_col, t.filter_button, t.style.clone()))
     }) else {
         return;
     };
@@ -2330,9 +2330,46 @@ fn table_design(app: &mut SheetApp, ui: &mut Ui) {
         }
     });
     sep(ui);
-    let st = big_button(ui, Icon::FormatTable, "Table\nStyles", "Table Styles", true);
-    anchor_keytip(app, ui, &st, &["table.style"]);
-    egui::Popup::menu(&st).show(|ui| table_gallery(app, ui, "table.style"));
+    table_style_strip(app, ui, &tname, &style);
+}
+
+/// The first page of Excel's Table Styles gallery, drawn in the ribbon. The More arrow opens the
+/// full gallery (Light, Medium, Dark) as a popup.
+const RIBBON_TABLE_STYLES: [&str; 7] =
+    ["TableStyleLight1", "TableStyleLight2", "TableStyleLight3", "TableStyleLight4", "TableStyleLight5", "TableStyleLight6", "TableStyleLight7"];
+
+fn table_style_strip(app: &mut SheetApp, ui: &mut Ui, tname: &str, current: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.add_space(12.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 3.0;
+        // Borrow the workbook only while painting; the session must be free for `act` afterwards.
+        let clicked = {
+            let Some(d) = app.session.active() else { return };
+            let wb = &d.wb;
+            let mut clicked = None;
+            for name in RIBBON_TABLE_STYLES {
+                let (r, resp) = ui.allocate_exact_size(vec2(52.0, 40.0), Sense::click());
+                paint_table_swatch(ui, r, wb, name);
+                if name == current {
+                    ui.painter().rect_stroke(r.expand(2.5), 2.0, Stroke::new(2.0, t.accent), StrokeKind::Outside);
+                }
+                if resp.hovered() {
+                    ui.painter().rect_stroke(r.expand(1.0), 2.0, Stroke::new(2.0, Color32::from_rgb(0xE8, 0x7D, 0x2B)), StrokeKind::Outside);
+                }
+                if resp.on_hover_text(name).clicked() {
+                    clicked = Some(name);
+                }
+            }
+            clicked
+        };
+        if let Some(name) = clicked {
+            act(app, "table.style", json!({"table": tname, "style": name}));
+        }
+        let more = icon_button(ui, Icon::Chevron, t.text_dim, "More Table Styles", vec2(18.0, 40.0));
+        anchor_keytip(app, ui, &more, &["table.style"]);
+        egui::Popup::menu(&more).show(|ui| table_gallery(app, ui, "table.style"));
+    });
 }
 
 fn chart_design(app: &mut SheetApp, ui: &mut Ui) {
