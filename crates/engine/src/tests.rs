@@ -1148,6 +1148,44 @@ fn untrusted_workbook_scripts_are_refused_until_trusted() {
 }
 
 #[test]
+fn trust_scripts_only_defaults_to_trusted_when_the_flag_is_missing() {
+    let mut s = opened_with_script();
+    // A `trusted` that isn't a boolean is an error and leaves the workbook untrusted.
+    for wrong in [json!("false"), json!("true"), json!(0), json!(1), json!(null), json!([true])] {
+        let err = s.execute("automate.trustScripts", json!({"trusted": wrong})).unwrap_err().to_string();
+        assert!(err.contains("trusted"), "{wrong}: {err}");
+        assert!(!s.doc().unwrap().scripts_trusted, "{wrong} must not trust the workbook");
+        assert!(s.execute("automate.runScript", json!({"name": "Fill"})).is_err());
+    }
+    // The refusal names where the Trust Scripts button actually is.
+    let err = s.execute("automate.runScript", json!({"name": "Fill"})).unwrap_err().to_string();
+    assert!(err.contains("View › Macros") && err.contains("automate.trustScripts"), "{err}");
+    assert_eq!(s.execute("automate.trustScripts", json!({"trusted": false})).unwrap()["trusted"], false);
+    assert!(!s.doc().unwrap().scripts_trusted);
+    assert_eq!(s.execute("automate.trustScripts", json!({})).unwrap()["trusted"], true);
+    assert!(s.doc().unwrap().scripts_trusted);
+}
+
+#[test]
+fn scripts_leave_file_access_working_after_they_run() {
+    // The sandbox a script runs in is lifted afterwards, also when a step fails.
+    let dir = std::env::temp_dir().join(format!("gridcraft-script-sandbox-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let csv = dir.join("in.csv");
+    std::fs::write(&csv, b"a,b\n1,2\n").unwrap();
+    let csv = csv.to_string_lossy().to_string();
+    let mut s = s();
+    let bad_step = json!({"command": "cell.set", "params": {"cell": "not a cell", "input": "x"}});
+    s.execute("automate.newScript", json!({"name": "Bad", "commands": [bad_step]})).unwrap();
+    assert!(s.execute("automate.runScript", json!({"name": "Bad"})).is_err());
+    s.execute("automate.newScript", json!({"name": "Ok", "commands": [{"command": "cell.set", "params": {"cell": "A1", "input": "1"}}]})).unwrap();
+    s.execute("automate.runScript", json!({"name": "Ok"})).unwrap();
+    s.execute("data.fromTextCsv", json!({"path": csv})).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn scripts_cannot_reach_outside_the_workbook_even_when_trusted() {
     let dir = std::env::temp_dir().join(format!("gridcraft-script-deny-{}", std::process::id()));
     let leak = dir.join("leak.xlsx");

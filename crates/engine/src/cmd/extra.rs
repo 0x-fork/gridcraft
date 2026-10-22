@@ -1017,7 +1017,10 @@ pub(crate) fn has_scripts(wb: &Workbook) -> bool {
 /// Why a script step is refused, whatever the workbook's trust: scripts stay inside the
 /// workbook. Anything that reads or writes files (`file.*`, or any `path` parameter: Get Data,
 /// From Text/CSV, Insert Picture) or leaves the app (`link.*` opens URLs) is the caller's to run
-/// directly, not a stored script's. (Nested `automate.*` steps are skipped.)
+/// directly, not a stored script's. (Nested `automate.*` steps are skipped.) This check goes by
+/// command id and parameter name, so it is only the up-front refusal: the steps also run inside
+/// an [`crate::io::ScriptSandbox`] (file access refused whatever the parameter is called) and
+/// [`run_script`] drops any `OpenUrl` request a step raises.
 fn denied_script_step(id: &str, params: &Json) -> Option<String> {
     if id.starts_with("file.") || id.starts_with("link.") {
         return Some(format!("scripts can't run `{id}`: it reaches outside the workbook"));
@@ -1029,7 +1032,12 @@ fn denied_script_step(id: &str, params: &Json) -> Option<String> {
 }
 
 fn trust_scripts(s: &mut Session, p: &Json) -> Result<Json> {
-    let trusted = bool_param(p, "trusted").unwrap_or(true);
+    // Only a missing `trusted` means "trust"; `"false"`, `0` or `null` are mistakes, not consent.
+    let trusted = match p.get("trusted") {
+        None => true,
+        Some(Json::Bool(b)) => *b,
+        Some(_) => return Err(bad("automate.trustScripts", "`trusted` must be true or false")),
+    };
     s.doc_mut()?.scripts_trusted = trusted;
     Ok(json!({"trusted": trusted}))
 }
@@ -1045,7 +1053,7 @@ fn run_script(s: &mut Session, p: &Json) -> Result<Json> {
     if !d.scripts_trusted && !bool_param(p, "trusted").unwrap_or(false) {
         return Err(bad(
             "automate.runScript",
-            "scripts in this workbook came from a file and are disabled; trust the workbook first (Automate › Macros › Trust Scripts, or `trusted: true`)",
+            "scripts in this workbook came from a file and are disabled; trust the workbook first (Trust Scripts in View › Macros, Alt+F8; `automate.trustScripts`; or `trusted: true`)",
         ));
     }
     let steps: Vec<Json> = steps.into_iter().take(100_000).collect();
@@ -1055,13 +1063,25 @@ fn run_script(s: &mut Session, p: &Json) -> Result<Json> {
             return Err(bad("automate.runScript", why));
         }
     }
+    let _sandbox = crate::io::ScriptSandbox::enter();
     let mut n = 0;
     for st in &steps {
         let id = st["command"].as_str().unwrap_or("");
         if id.starts_with("automate.") {
             continue;
         }
-        s.execute(id, st["params"].clone())?;
+        let before = s.ui_requests.len();
+        let ran = s.execute(id, st["params"].clone());
+        // A step that asks the host to open a URL leaves the app: drop the request and stop.
+        if s.ui_requests.get(before..).is_some_and(|new| new.iter().any(|r| matches!(r, crate::UiRequest::OpenUrl(_)))) {
+            let mut i = 0;
+            s.ui_requests.retain(|r| {
+                i += 1;
+                i <= before || !matches!(r, crate::UiRequest::OpenUrl(_))
+            });
+            return Err(bad("automate.runScript", format!("scripts can't open links (`{id}`)")));
+        }
+        ran?;
         n += 1;
     }
     Ok(json!({"ran": n}))
