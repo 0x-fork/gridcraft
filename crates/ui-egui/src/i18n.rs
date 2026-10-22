@@ -57,6 +57,15 @@ impl Language {
         Self::En, Self::Es, Self::El, Self::Zh, Self::Ja, Self::Ko, Self::Ru, Self::PtBr, Self::De, Self::Cs, Self::Fr, Self::Sr, Self::Pl, Self::It, Self::Uk, Self::Vi, Self::Nl, Self::Ro,
     ];
 
+    /// Every language in the order the switcher lists them: English first (the source language),
+    /// then the rest by their own name with accents folded, so Čeština sits under C. Names in
+    /// other scripts follow the Latin ones in code point order: Cyrillic, then the CJK languages.
+    pub fn for_picker() -> Vec<Self> {
+        let mut rest: Vec<Self> = Self::ALL.into_iter().filter(|l| *l != Self::En).collect();
+        rest.sort_by_cached_key(|l| name_sort_key(l.name()));
+        std::iter::once(Self::En).chain(rest).collect()
+    }
+
     /// The language's own name, shown in the switcher.
     pub fn name(self) -> &'static str {
         match self {
@@ -484,5 +493,41 @@ mod tests {
         for l in Language::ALL {
             assert_eq!(Language::parse(l.code()), Some(l));
         }
+    }
+}
+
+/// `name` lowercased with the Latin accents that occur in language names folded away, so a
+/// byte-wise sort reads alphabetically. Other scripts are left as they are.
+fn name_sort_key(name: &str) -> String {
+    name.chars()
+        .flat_map(char::to_lowercase)
+        .map(|c| match c {
+            'à'..='å' | 'ā' | 'ă' | 'ą' => 'a',
+            'ç' | 'ć' | 'č' => 'c',
+            'è'..='ë' | 'ē' | 'ě' | 'ę' | 'ế' | 'ệ' => 'e',
+            'ì'..='ï' | 'ī' => 'i',
+            'ñ' | 'ń' | 'ň' => 'n',
+            'ò'..='ö' | 'ø' | 'ő' => 'o',
+            'ś' | 'š' => 's',
+            'ù'..='ü' | 'ū' | 'ů' | 'ű' => 'u',
+            'ý' | 'ÿ' => 'y',
+            'ź' | 'ż' | 'ž' => 'z',
+            c => c,
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod picker_order_tests {
+    use super::*;
+
+    #[test]
+    fn picker_lists_english_first_then_names_alphabetically() {
+        let order = Language::for_picker();
+        assert_eq!(order.first(), Some(&Language::En));
+        assert_eq!(order.len(), Language::ALL.len());
+        let keys: Vec<String> = order[1..].iter().map(|l| name_sort_key(l.name())).collect();
+        assert!(keys.windows(2).all(|w| w[0] <= w[1]), "{keys:?}");
+        assert_eq!(name_sort_key("Čeština"), "cestina");
     }
 }
