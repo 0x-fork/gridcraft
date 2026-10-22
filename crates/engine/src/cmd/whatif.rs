@@ -488,8 +488,15 @@ fn scenario_show(s: &mut Session, p: &Json) -> Result<Json> {
     let (_, cells) = cell_list(&d.wb, &sc.changing, CMD, MAX_SCENARIO_CELLS)?;
     edit(s, |cx| {
         for (c, v) in cells.iter().zip(sc.values.iter()) {
-            let input = super::edit::json_to_input(v);
-            let cell = super::edit::input_to_cell(&input, si, *c, &mut cx.wb)?;
+            // Stored numbers are values, not typed text: entering them through the parser would
+            // apply percent entry (9 -> 9%) to a Percentage-formatted cell.
+            let cell = match v.as_f64() {
+                Some(n) => {
+                    let style = cx.wb.sheet(si).map(|sh| sh.style_id(*c)).unwrap_or_default();
+                    Some(Cell { value: Value::Number(n), formula: None, style })
+                }
+                None => super::edit::input_to_cell(&super::edit::json_to_input(v), si, *c, &mut cx.wb)?,
+            };
             let sh = cx.sheet_mut(si)?;
             match cell {
                 Some(cell) => sh.set_cell(*c, cell),
@@ -1197,6 +1204,17 @@ mod tests {
         let mut h = |_: f64| f64::NAN;
         let r = super::seek(1.0, &mut h, 100, 0.001);
         assert!(!r.converged);
+    }
+
+    #[test]
+    fn scenario_show_restores_a_percentage_cells_stored_number() {
+        let mut s = s();
+        s.execute("home.numberFormat", json!({"range": "B2", "format": "Percentage"})).unwrap();
+        s.execute("cell.set", json!({"cell": "B2", "input": "5"})).unwrap();
+        s.execute("data.scenarioAdd", json!({"name": "Low", "changing": "B2"})).unwrap();
+        s.execute("cell.set", json!({"cell": "B2", "input": "9"})).unwrap();
+        s.execute("data.scenarioShow", json!({"name": "Low"})).unwrap();
+        assert_eq!(n(&s, "B2"), 0.05);
     }
 
     #[test]

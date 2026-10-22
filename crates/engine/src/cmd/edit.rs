@@ -165,7 +165,17 @@ pub(crate) fn input_to_cell(input: &str, sheet: usize, at: CellRef, wb: &mut gri
         }
         return Ok(Some(cell));
     }
-    let parsed = gridcraft_core::parse::parse_input(input, wb.date_system);
+    let mut parsed = gridcraft_core::parse::parse_input(input, wb.date_system);
+    // Like Excel's automatic percent entry: a bare number of 1 or more typed into a cell already
+    // formatted as a percentage is a percent (3 -> 3%); smaller numbers are taken as fractions.
+    if parsed.format.is_none()
+        && !input.contains('%')
+        && wb.styles.get(style).num_fmt.as_str().ends_with('%')
+        && let Value::Number(n) = parsed.value
+        && n.abs() >= 1.0
+    {
+        parsed.value = Value::Number(n / 100.0);
+    }
     let mut style = style;
     if let Some(code) = parsed.format {
         let cur = wb.styles.get(style).num_fmt.as_str().to_string();
@@ -834,10 +844,11 @@ fn paste_text(s: &mut Session, p: &Json, text: &str) -> Result<Json> {
     let sheet = target_sheet(s, p)?;
     let at = cell_param_on(s, p, "at", sheet)?.unwrap_or(s.doc()?.selection.current().start);
     let rows: Vec<Vec<String>> = parse_tsv(text);
-    // The HTML flavour, when the host passed it: the number behind each cell's shown text.
-    let html = str_param(p, "html").map(crate::clip_html::table_cells).unwrap_or_default();
     let h = rows.len();
     let w = rows.iter().map(Vec::len).max().unwrap_or(0);
+    // The HTML flavour, when the host passed it: the number behind each cell's shown text. Read
+    // only as far as the text's own shape, so spans in the markup can't expand without bound.
+    let html = str_param(p, "html").map(|html| crate::clip_html::table_cells(html, h, w)).unwrap_or_default();
     edit(s, |cx| {
         for (ri, row) in rows.iter().enumerate() {
             for (ci, v) in row.iter().enumerate() {
@@ -977,6 +988,10 @@ fn paste_special(s: &mut Session, p: &Json) -> Result<Json> {
     let src_wb = clip.wb.clone();
     let Some(src_sheet) = src_wb.sheet(clip.sheet) else { return Err(EngineError::Other("The copied sheet no longer exists.".into())) };
     let src_sheet_name = src_sheet.name.clone();
+    if cut_move && at.offset((tiles_r * h).saturating_sub(1) as i64, (tiles_c * w).saturating_sub(1) as i64).is_none() {
+        // Check the whole footprint before the source is emptied, so a move that overflows the grid loses nothing.
+        return Err(EngineError::Other("The cut area doesn't fit at this position; nothing was moved.".into()));
+    }
     edit(s, |cx| {
         // Styles from another workbook must be re-interned.
         let mut style_map = std::collections::HashMap::new();
@@ -993,6 +1008,13 @@ fn paste_special(s: &mut Session, p: &Json) -> Result<Json> {
             let source = cx.sheet_mut(clip.sheet)?;
             moved_pictures = source.cell_pictures.iter().filter(|(c, _)| src.contains(**c)).map(|(c, p)| (*c, p.clone())).collect();
             let taken = source.take_cells(src);
+            // Notes, hyperlinks and merged areas sit beside the cells, and a cut takes them
+            // with the block: the destination is written from the clipboard snapshot taken
+            // before the cut, so removing them here loses nothing and leaves the old place
+            // clean instead of leaving one merged block and one note behind.
+            source.comments.retain(|c, _| !src.contains(*c));
+            source.hyperlinks.retain(|c, _| !src.contains(*c));
+            source.merges.retain(|m| !src.contains_range(m));
             for (c, _) in &taken {
                 cx.touch(clip.sheet, *c);
             }
@@ -1171,6 +1193,9 @@ fn paste_special(s: &mut Session, p: &Json) -> Result<Json> {
                             What::All => {
                                 if let Some(cm) = src_sheet.comments.get(&sc).cloned() {
                                     cx.sheet_mut(dest_sheet)?.comments.insert(dest, cm);
+                                }
+                                if let Some(h) = src_sheet.hyperlinks.get(&sc).cloned() {
+                                    cx.sheet_mut(dest_sheet)?.hyperlinks.insert(dest, h);
                                 }
                                 cx.sheet_mut(dest_sheet)?.set_cell(dest, new);
                             }
@@ -1366,7 +1391,7 @@ fn fill_dir(s: &mut Session, p: &Json, dr: i64, dc: i64) -> Result<Json> {
             None => return Ok(Json::Null),
         }
     }
-    if r.count() > 5_000_000 {
+    if r.count() > crate::fill::MAX_FILL_CELLS {
         return Err(bad("edit.fill", "range too large"));
     }
     // With one row selected, Fill Down copies from the row above (Excel behaviour).
@@ -1403,8 +1428,14 @@ fn auto_fill(s: &mut Session, p: &Json) -> Result<Json> {
         "extend" => crate::fill::FillMode::Extend,
         _ => crate::fill::FillMode::Series,
     };
-    if target.count() > 5_000_000 || src.count() > 5_000_000 {
+    if target.count() > crate::fill::MAX_FILL_CELLS || src.count() > crate::fill::MAX_FILL_CELLS {
         return Err(bad("edit.autoFill", "range too large"));
+    }
+    // Excel refuses a target that doesn't hold the source in a corner. Such targets used to fill
+    // every source lane across the whole target extent: billions of cells for whole rows (`2:3`)
+    // into whole columns (`A:A`).
+    if !crate::fill::holds_source_in_corner(src, target) {
+        return Err(bad("edit.autoFill", "the target must contain the source in one of its corners"));
     }
     edit(s, |cx| {
         crate::fill::fill(cx, sheet, src, target, mode)?;
@@ -1590,10 +1621,24 @@ fn replace(s: &mut Session, p: &Json) -> Result<Json> {
     Ok(json!({"replaced": n}))
 }
 
+/// Whether case-folding `s` maps every char to exactly one char of the same UTF-8 length, so
+/// byte positions in the folded text still line up with the original's character boundaries.
+fn folds_in_place(s: &str) -> bool {
+    s.chars().all(|c| {
+        let mut folded = c.to_lowercase();
+        let first = folded.next();
+        folded.next().is_none() && first.is_some_and(|l| l.len_utf8() == c.len_utf8())
+    })
+}
+
 fn replace_ci(text: &str, what: &str, with: &str) -> String {
     let lower = text.to_lowercase();
     let w = what.to_lowercase();
-    if lower.len() != text.len() || w.is_empty() {
+    // Slicing `text` at positions found in `lower` is only sound when folding kept every byte
+    // boundary: a length check alone misses foldings that keep the total length while shifting
+    // boundaries (U+212A KELVIN SIGN shrinks 3→1 bytes, U+0130 grows 2→3), where the tail used
+    // to be dropped. Those fall back to the case-sensitive replace, as length changes already do.
+    if lower.len() != text.len() || w.is_empty() || !folds_in_place(text) || !folds_in_place(what) {
         return text.replace(what, with);
     }
     let mut out = String::new();
@@ -1794,7 +1839,43 @@ mod tests {
     }
 
     #[test]
+    fn cut_paste_that_overflows_the_grid_moves_nothing() {
+        // #997: the source was emptied first and the cells that fell off the grid were skipped.
+        let mut s = Session::new();
+        s.new_workbook();
+        s.execute("range.setValues", json!({"range": "A1", "values": [[1], [2]]})).unwrap();
+        let get = |s: &mut Session, a: &str| s.execute("cell.get", json!({"cell": a})).unwrap();
+        s.execute("edit.cut", json!({"range": "A1:A2"})).unwrap();
+        // Transposed, the 2 rows become 2 columns and the second one is past XFD.
+        assert!(s.execute("edit.pasteSpecial", json!({"what": "all", "transpose": true, "at": "XFD1"})).is_err());
+        assert_eq!(get(&mut s, "A1")["value"], json!(1.0));
+        assert_eq!(get(&mut s, "A2")["value"], json!(2.0));
+        // Not transposed, the second row would be past the last row.
+        assert!(s.execute("edit.pasteSpecial", json!({"what": "all", "at": "A1048576"})).is_err());
+        assert_eq!(get(&mut s, "A1")["value"], json!(1.0));
+        assert_eq!(get(&mut s, "A2")["value"], json!(2.0));
+        // Not transposed it still fits in column XFD.
+        s.execute("edit.pasteSpecial", json!({"what": "all", "at": "XFD1"})).unwrap();
+        assert_eq!(get(&mut s, "XFD1")["value"], json!(1.0));
+        assert_eq!(get(&mut s, "XFD2")["value"], json!(2.0));
+    }
+
+    #[test]
     fn replace_case_insensitive() {
         assert_eq!(replace_ci("Apple apple APPLE", "apple", "pear"), "pear pear pear");
+    }
+
+    #[test]
+    fn replace_case_insensitive_keeps_text_when_folding_moves_boundaries() {
+        // U+212A KELVIN SIGN folds to `k` (3→1 bytes) while U+0130 folds to `i` plus a
+        // combining dot (2→3 bytes): the folded text is the same length but its byte positions
+        // no longer line up with the original, and the old slicing dropped the tail.
+        let mut s = Session::new();
+        s.new_workbook();
+        let text = "\u{212A}\u{0130}\u{0130}";
+        s.execute("cell.set", json!({"cell": "A1", "input": text})).unwrap();
+        s.execute("edit.replace", json!({"what": "k", "with": "x"})).unwrap();
+        let sh = s.doc().unwrap().wb.active().unwrap();
+        assert_eq!(sh.value(CellRef::new(0, 0)), Value::text(text));
     }
 }

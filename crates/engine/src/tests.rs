@@ -79,6 +79,20 @@ fn pasted_currency_text_keeps_the_number_from_the_clipboard_html() {
 }
 
 #[test]
+fn pasting_html_with_huge_spans_reads_only_the_text_shape() {
+    // #2171: a web page's clipboard HTML with enormous colspan/rowspan crashed paste (OOM). The
+    // HTML is now read only as far as the tab-separated text reaches; its numbers still apply.
+    let mut s = s();
+    let row = "<tr><td colspan=16384 rowspan=1048576 x:num='5'>Rp5</td><td colspan=999999999999>x</td></tr>";
+    let html = format!("<table>{}</table>", row.repeat(100_000));
+    let r = s.execute("edit.paste", json!({"at": "B2", "text": "Rp5\tnext\nlast", "html": html})).unwrap();
+    assert_eq!(r, json!({"rows": 2, "cols": 2}));
+    assert_eq!(v(&s, "B2"), Value::number(5.0));
+    assert_eq!(v(&s, "C2"), Value::text("next"));
+    assert_eq!(v(&s, "B3"), Value::text("last"));
+}
+
+#[test]
 fn editing_a_name_renames_it_in_formulas() {
     // Name Manager › Edit…: `oldName` edits the name in place; formulas that use it follow.
     let mut s = s();
@@ -3145,6 +3159,33 @@ fn fill_series_year_clamps_leap_day() {
 }
 
 #[test]
+fn autofill_month_pattern_uses_workbook_date_system() {
+    use std::sync::Arc;
+
+    use gridcraft_core::date::serial_from_ymd;
+    use gridcraft_core::{DateSystem, RangeRef};
+
+    for sys in [DateSystem::D1900, DateSystem::D1904] {
+        for (source, target, seeds, expected) in [
+            ("A1:A2", "A1:A6", ["2026-01-31", "2026-03-31"], ["2026-01-31", "2026-03-31", "2026-05-31", "2026-07-31", "2026-09-30", "2026-11-30"]),
+            ("A5:A6", "A1:A6", ["2026-09-30", "2026-11-30"], ["2026-01-30", "2026-03-30", "2026-05-30", "2026-07-30", "2026-09-30", "2026-11-30"]),
+        ] {
+            let mut s = s();
+            Arc::make_mut(&mut s.doc_mut().unwrap().wb).date_system = sys;
+            let start = RangeRef::parse(source).unwrap().start.a1();
+            s.execute("range.setValues", json!({"range": start, "values": [[seeds[0]], [seeds[1]]]})).unwrap();
+            s.execute("edit.autoFill", json!({"source": source, "target": target})).unwrap();
+            for (row, date) in expected.iter().enumerate() {
+                let parts: Vec<i64> = date.split('-').map(|p| p.parse().unwrap()).collect();
+                let expected = Value::Number(serial_from_ymd(sys, parts[0], parts[1], parts[2]).unwrap());
+                let cell = CellRef::new(row as u32, 0).a1();
+                assert_eq!(v(&s, &cell), expected, "{sys:?} {source} -> {target}, {cell}: {date}");
+            }
+        }
+    }
+}
+
+#[test]
 fn autofill_month_pattern_clamps_to_month_end() {
     let mut s = s();
     s.execute("range.setValues", json!({"range": "A1", "values": [["2026-01-31"], ["2026-03-31"]]})).unwrap();
@@ -3170,6 +3211,36 @@ fn notes_comments_and_links_survive_a_json_save() {
     assert_eq!(after.comments, before.comments);
     assert_eq!(after.hyperlinks, before.hyperlinks);
     assert_eq!(after.cells, before.cells);
+}
+
+/// A cut moves the block's notes, hyperlinks and merged areas with it. The source's cells and
+/// pictures were removed but the block's merges and notes were not, so one merged block became
+/// two (an empty one left at the old place) and a note ended up on both the old and the new
+/// cell. Hyperlinks were not transferred at all.
+#[test]
+fn a_cut_moves_the_sources_notes_hyperlinks_and_merges() {
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "x"})).unwrap();
+    s.execute("cell.set", json!({"cell": "B1", "input": "y"})).unwrap();
+    s.execute("review.newNote", json!({"cell": "A1", "text": "note", "author": "Example"})).unwrap();
+    s.execute("insert.link", json!({"cell": "A1", "target": "https://example.com"})).unwrap();
+    s.execute("home.mergeCells", json!({"range": "A1:B1"})).unwrap();
+
+    s.execute("edit.cut", json!({"range": "A1:B1"})).unwrap();
+    s.execute("edit.paste", json!({"at": "D1"})).unwrap();
+
+    let d = s.doc().unwrap();
+    let sh = d.wb.active().unwrap();
+    let (a1, d1) = (CellRef::parse("A1").unwrap(), CellRef::parse("D1").unwrap());
+    assert_eq!(sh.merges, vec![gridcraft_core::RangeRef::parse("D1:E1").unwrap()], "the old merge must not stay behind");
+    assert!(!sh.comments.contains_key(&a1), "the note moved");
+    assert!(sh.comments.contains_key(&d1), "the note is at the new cell");
+    assert!(!sh.hyperlinks.contains_key(&a1), "the hyperlink moved");
+    assert!(sh.hyperlinks.contains_key(&d1), "the hyperlink is at the new cell");
+    // The cells themselves moved as before; E1 is covered by the pasted merge (merging
+    // A1:B1 cleared B1, so only the anchor's content travels).
+    assert_eq!(v(&s, "D1"), Value::text("x"));
+    assert!(v(&s, "A1").is_empty() && v(&s, "B1").is_empty());
 }
 
 /// Insert › Link sorts a target as Excel's dialog does: a sheet reference, a defined name or `#…` is
@@ -3613,6 +3684,29 @@ fn paste_special_validation_moves_relative_references() {
     s.execute("edit.pasteSpecial", json!({"what": "validation", "at": "C3"})).unwrap();
     assert!(!ok(&mut s, "C3", "5"), "the pasted rule checks C3, not A1");
     assert!(ok(&mut s, "C3", "20"));
+}
+
+#[test]
+fn editing_quote_prefixed_text_keeps_it_text() {
+    let mut s = s();
+    for (i, input) in ["'00123", "'=1+1", "'TRUE", "''abc"].iter().enumerate() {
+        let cell = format!("A{}", i + 1);
+        s.execute("cell.set", json!({"cell": cell, "input": input})).unwrap();
+        let at = CellRef::parse(&cell).unwrap();
+        let before = v(&s, &cell);
+        let edit = {
+            let d = s.doc().unwrap();
+            crate::display::edit_text(&d.wb, d.wb.active().unwrap(), at)
+        };
+        assert_eq!(&edit, input, "edit text of {cell}");
+        // Committing the editor unchanged leaves the cell as it was.
+        s.execute("cell.set", json!({"cell": cell, "input": edit})).unwrap();
+        assert_eq!(v(&s, &cell), before, "{cell}");
+    }
+    // Plain text is shown as typed, without a prefix.
+    s.execute("cell.set", json!({"cell": "B1", "input": "hello"})).unwrap();
+    let d = s.doc().unwrap();
+    assert_eq!(crate::display::edit_text(&d.wb, d.wb.active().unwrap(), CellRef::parse("B1").unwrap()), "hello");
 }
 
 #[test]
