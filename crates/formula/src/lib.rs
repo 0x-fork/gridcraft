@@ -20,6 +20,9 @@ pub use printer::{print, print_r1c1, quote_sheet};
 /// folds lower-casing misses for letters a name may hold (`ß`/`ẞ` -> `ss`, `ſ` -> `s`, `ς` -> `σ`).
 /// Dotless `ı` stays distinct from `i`, as outside Turkic languages.
 pub fn same_name(a: &str, b: &str) -> bool {
+    if a.is_ascii() && b.is_ascii() {
+        return a.eq_ignore_ascii_case(b);
+    }
     let fold = |s: &str| -> String {
         s.chars()
             .flat_map(char::to_lowercase)
