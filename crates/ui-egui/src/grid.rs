@@ -1268,13 +1268,16 @@ pub(crate) fn paint_quadrant(
         let mut galley = p.layout_no_wrap(first_line.clone(), font.clone(), color);
         let mut w = galley.size().x;
         // Numbers and dates never overflow: they show #### when too narrow.
-        if !shrunk && (numeric || matches!(v, Value::Number(_))) && w > avail_w - 2.0 * pad && st.align.h != HAlign::Fill {
+        let hashed = !shrunk && (numeric || matches!(v, Value::Number(_))) && w > avail_w - 2.0 * pad && st.align.h != HAlign::Fill;
+        if hashed {
             let n = ((avail_w - 2.0 * pad) / char_w).floor().max(1.0) as usize;
             galley = p.layout_no_wrap("#".repeat(n), font.clone(), color);
             w = galley.size().x;
         }
-        // Repeat fill (`*` in number formats) / Fill alignment.
+        // Repeat fill (`*` in number formats) / Fill alignment. A number already shown as #### keeps
+        // it: rebuilding it from the text would overflow and clip its leading digits.
         if let Some((ch, pos)) = fill_char
+            && !hashed
             && pos <= first_line.len()
         {
             let base_w = w;
