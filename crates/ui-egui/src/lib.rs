@@ -166,6 +166,23 @@ pub struct Notice {
     pub action: Option<(String, String)>,
 }
 
+/// One open workbook, as View › Switch Windows and the macOS Window menu list it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpenWindow {
+    /// The workbook's `DocState::uid`, the `doc` param of `view.switchWindows`.
+    pub doc: u64,
+    pub title: String,
+    pub dirty: bool,
+    pub active: bool,
+}
+
+impl OpenWindow {
+    /// The title, with a bullet after it while the workbook has unsaved changes.
+    pub fn label(&self) -> String {
+        if self.dirty { format!("{} •", self.title) } else { self.title.clone() }
+    }
+}
+
 /// Host services the platform shell provides (file pickers, opening URLs).
 #[derive(Default)]
 pub struct Services {
@@ -296,6 +313,9 @@ pub struct SheetApp {
     /// Every unsaved workbook has been answered for quitting (or `app.quit` asked): the next
     /// window close goes through.
     pub allow_close: bool,
+    /// View › Switch Windows opens its list on the next frame the View tab draws (asked for by a
+    /// key tip, the command search or a menu, possibly while another tab was showing).
+    pub(crate) open_switch_windows: bool,
 }
 
 impl SheetApp {
@@ -342,6 +362,7 @@ impl SheetApp {
             tab_run: None,
             started: now_ms(),
             allow_close: false,
+            open_switch_windows: false,
         }
     }
 
@@ -387,30 +408,30 @@ impl SheetApp {
     }
 
     fn run_command(&mut self, id: &str, params: Json) -> Result<Json, String> {
+        let switches_window = id.starts_with("window.")
+            || matches!(id, "view.newWindow" | "view.hideWindow" | "view.unhideWindow")
+            || (id == "view.switchWindows" && params.get("doc").is_some_and(|d| !d.is_null()));
+        if id.starts_with("file.") || switches_window {
+            self.settle_drafts();
+        }
         if matches!(id, "file.save" | "file.saveAs" | "file.saveBytes") {
             self.store_view_state();
         }
-        if id.starts_with("file.")
-            || matches!(
-                id,
-                "window.activate"
-                    | "sheet.activate"
-                    | "sheet.next"
-                    | "sheet.previous"
-                    | "sheet.move"
-                    | "sheet.hide"
-                    | "sheet.unhide"
-                    | "view.newWindow"
-                    | "view.hideWindow"
-                    | "view.unhideWindow"
-                    | "home.insertSheet"
-                    | "home.deleteSheet"
-                    | "edit.undo"
-                    | "edit.redo"
-                    | "object.delete"
-                    | "object.move"
-            )
-        {
+        if matches!(
+            id,
+            "sheet.activate"
+                | "sheet.next"
+                | "sheet.previous"
+                | "sheet.move"
+                | "sheet.hide"
+                | "sheet.unhide"
+                | "home.insertSheet"
+                | "home.deleteSheet"
+                | "edit.undo"
+                | "edit.redo"
+                | "object.delete"
+                | "object.move"
+        ) {
             self.commit_text_box_edit()?;
         }
         if let Some(r) = self.run_ui_command(id, &params) {
@@ -545,6 +566,14 @@ impl SheetApp {
         // which chart to insert; programmatic callers of `run` still get the first recommendation.
         if id == "insert.recommendedCharts" && params.get("type").is_none() {
             return self.open_dialog("recommendedCharts", json!({}));
+        }
+        // Switch Windows with no workbook named (key tip, command search) opens the View tab's
+        // list to choose from; programmatic callers of `run` get the list back.
+        if id == "view.switchWindows" && params.get("doc").is_none_or(Json::is_null) {
+            self.ui.ribbon_tab = "View".into();
+            self.ui.ribbon_collapsed = false;
+            self.open_switch_windows = true;
+            return;
         }
         if let Err(e) = self.run(id, params) {
             self.alert(e);
@@ -882,6 +911,17 @@ impl SheetApp {
         }
     }
 
+    /// The open workbooks in order, for the Switch Windows lists.
+    pub fn open_windows(&self) -> Vec<OpenWindow> {
+        let active = self.session.active_index();
+        self.session
+            .documents()
+            .iter()
+            .enumerate()
+            .map(|(i, d)| OpenWindow { doc: d.uid, title: d.display_title(), dirty: d.is_dirty(), active: i == active })
+            .collect()
+    }
+
     pub fn view_key(&self) -> Option<(u64, usize)> {
         self.session.active().map(|d| (d.uid, d.wb.active_sheet))
     }
@@ -961,7 +1001,7 @@ impl SheetApp {
             Some(t) => (t, true),
             None => (current.clone(), false),
         };
-        let mut ed = editor::EditState::new(d.wb.active_sheet, at, text, replace, from_formula_bar);
+        let mut ed = editor::EditState::new(d.uid, d.wb.active_sheet, at, text, replace, from_formula_bar);
         ed.locale = locale;
         if replace && self.ui.autocomplete && !ed.is_formula() {
             ed.completion = editor::column_completion(sh, at, &ed.text);
@@ -971,7 +1011,45 @@ impl SheetApp {
     }
 
     /// Commits the edit; `then` moves the selection (dr, dc) afterwards.
+    ///
+    /// The draft goes into the workbook it was typed in. If another workbook is showing, that
+    /// workbook stays active afterwards, and a draft its own workbook refuses (validation, a bad
+    /// formula) is dropped rather than left open over the wrong grid.
     pub fn commit_edit(&mut self, dr: i64, dc: i64, array: bool, fill_selection: bool) -> bool {
+        let Some(doc) = self.editor.as_ref().map(|ed| ed.doc) else { return true };
+        let shown = self.session.active().map(|d| d.uid);
+        if shown == Some(doc) {
+            return self.commit_edit_here(dr, dc, array, fill_selection);
+        }
+        let Some(owner) = self.session.document_index(doc) else {
+            self.cancel_edit();
+            return true;
+        };
+        let back = self.session.active_index();
+        self.session.set_active(owner);
+        if !self.commit_edit_here(dr, dc, array, fill_selection) {
+            self.cancel_edit();
+        }
+        self.session.set_active(back);
+        true
+    }
+
+    /// Settles the cell and text-box drafts before a command that can show another workbook or
+    /// write this one to a file: each is committed as Enter would, or dropped when it can't be
+    /// (the refusal is still reported), so a draft never lands in another workbook.
+    fn settle_drafts(&mut self) {
+        if !self.commit_edit(0, 0, false, false) {
+            self.cancel_edit();
+        }
+        if let Err(e) = self.commit_text_box_edit() {
+            self.cancel_text_box_edit();
+            if self.message.is_none() {
+                self.message = Some(("Text Box".into(), clean_error(&e)));
+            }
+        }
+    }
+
+    fn commit_edit_here(&mut self, dr: i64, dc: i64, array: bool, fill_selection: bool) -> bool {
         let Some(ed) = self.editor.take() else { return true };
         self.session.mode = gridcraft_engine::Mode::Ready;
         let text = match &ed.completion {
@@ -1276,6 +1354,11 @@ impl SheetApp {
         }
         let t0 = now_ms();
         text_box::before_ui(self, &ctx);
+        // Another workbook came forward without going through a command (which settles drafts
+        // first): the draft goes into its own workbook instead of floating over this one.
+        if self.editor.as_ref().is_some_and(|ed| self.session.active().map(|d| d.uid) != Some(ed.doc)) {
+            self.commit_edit(0, 0, false, false);
+        }
         // The language the widgets translate with this frame (see `i18n::current`).
         i18n::set_current(&ctx, self.ui.language);
         let t = theme::Tokens::get(&ctx);

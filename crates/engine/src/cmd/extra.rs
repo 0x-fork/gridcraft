@@ -145,7 +145,15 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "view.arrangeAll", "Arrange All", ["View", "Window"], None, "{}", has_doc, |_, _| ok()),
         cmd!(noundo "view.hideWindow", "Hide", ["View", "Window"], None, "{}", has_doc, hide_window),
         cmd!(noundo "view.unhideWindow", "Unhide…", ["View", "Window"], None, "{index?}", has_doc, unhide_window),
-        cmd!(query "view.switchWindows", "Switch Windows", ["View", "Window"], None, "{} → open windows", always, switch_windows),
+        cmd!(
+            noundo "view.switchWindows",
+            "Switch Windows",
+            ["View", "Window"],
+            None,
+            "{doc?} → open workbooks [{index, doc, title, dirty, active, hidden}]; with `doc` (a workbook's `doc` id from the list) makes that workbook active first",
+            always,
+            switch_windows
+        ),
         cmd!(noundo "view.ruler", "Ruler", ["View", "Show"], None, "{on?} → {on}: rulers in Page Layout view (an application option)", has_doc, ruler),
         cmd!(query "view.macros", "Macros", ["View", "Macros"], None, "{} → scripts", has_doc, all_scripts),
         // Table tools
@@ -808,12 +816,26 @@ fn unhide_window(s: &mut Session, p: &Json) -> Result<Json> {
     ok()
 }
 
-fn switch_windows(s: &mut Session, _: &Json) -> Result<Json> {
+fn switch_windows(s: &mut Session, p: &Json) -> Result<Json> {
+    if let Some(doc) = p.get("doc").filter(|v| !v.is_null()) {
+        let i = doc.as_u64().and_then(|uid| s.document_index(uid)).ok_or_else(|| bad("view.switchWindows", "no open workbook has that `doc` id"))?;
+        s.hidden_windows.retain(|x| *x != i);
+        s.set_active(i);
+    }
     Ok(Json::Array(
         s.documents()
             .iter()
             .enumerate()
-            .map(|(i, d)| json!({"index": i, "title": d.display_title(), "active": i == s.active_index(), "hidden": s.hidden_windows.contains(&i)}))
+            .map(|(i, d)| {
+                json!({
+                    "index": i,
+                    "doc": d.uid,
+                    "title": d.display_title(),
+                    "dirty": d.is_dirty(),
+                    "active": i == s.active_index(),
+                    "hidden": s.hidden_windows.contains(&i),
+                })
+            })
             .collect(),
     ))
 }

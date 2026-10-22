@@ -1744,6 +1744,7 @@ pub(crate) fn paint_selection(
     // Editing a formula: outline its references instead of the selection.
     if let Some(ed) = &app.editor
         && ed.is_formula()
+        && app.session.active().is_some_and(|d| d.uid == ed.doc)
     {
         let origin = app.session.active().and_then(|d| d.wb.sheet(ed.sheet)).map_or(sh.name.as_str(), |o| o.name.as_str());
         for (_, _, r, sheet, idx) in crate::editor::formula_refs(&ed.text) {
@@ -3045,7 +3046,7 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
 
 fn in_cell_editor(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet, wb: &Workbook) {
     let Some(ed) = app.editor.as_ref() else { return };
-    if ed.sheet != wb.active_sheet {
+    if app.view_key() != Some((ed.doc, ed.sheet)) {
         return;
     }
     let cell = ed.cell;

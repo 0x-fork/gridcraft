@@ -4,7 +4,7 @@
 use std::str::FromStr;
 use std::sync::mpsc::{Receiver, channel};
 
-use gridcraft_ui_egui::SheetApp;
+use gridcraft_ui_egui::{OpenWindow, SheetApp};
 use muda::accelerator::Accelerator;
 use muda::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use serde_json::{Value, json};
@@ -168,7 +168,16 @@ fn tree() -> Vec<(&'static str, Vec<Entry>)> {
                 ("Calculate Now", "formulas.calculateNow", None),
             ],
         ),
-        ("Window", vec![("New Window", "view.newWindow", None), ("Next Sheet", "sheet.next", None), ("Previous Sheet", "sheet.previous", None)]),
+        // The open workbooks follow the separator (`NativeMenu::sync_windows`).
+        (
+            "Window",
+            vec![
+                ("New Window", "view.newWindow", None),
+                ("Next Sheet", "sheet.next", None),
+                ("Previous Sheet", "sheet.previous", None),
+                ("-", "", None),
+            ],
+        ),
         (
             "Help",
             vec![
@@ -185,7 +194,18 @@ pub struct NativeMenu {
     _menu: Menu,
     events: Receiver<MenuEvent>,
     theme_items: Vec<(&'static str, CheckMenuItem)>,
+    window_menu: Option<Submenu>,
+    /// The Window menu's workbook items and what they last showed.
+    window_items: Vec<CheckMenuItem>,
+    windows: Vec<OpenWindow>,
 }
+
+/// Menu id of the Window menu item that brings workbook `doc` forward.
+const WINDOW_ITEM: &str = "window:doc:";
+
+/// The Quit item: closing the window asks about unsaved workbooks first, which AppKit's own
+/// Quit (terminate:) would skip.
+const QUIT: &str = "app.quit";
 
 fn select_theme(app: &mut SheetApp, id: &str) -> bool {
     let mode = match id {
@@ -212,7 +232,7 @@ impl NativeMenu {
             &PredefinedMenuItem::hide_others(None),
             &PredefinedMenuItem::show_all(None),
             &PredefinedMenuItem::separator(),
-            &PredefinedMenuItem::quit(None),
+            &MenuItem::with_id(QUIT, "Quit GridCraft", true, Accelerator::from_str("CMD+Q").ok()),
         ]);
         let _ = menu.append(&app_menu);
         let mut theme_items = Vec::new();
@@ -247,7 +267,7 @@ impl NativeMenu {
         // NSApp's windowsMenu is where macOS adds Move & Resize, Fill and Center, the targets of the
         // system tiling shortcuts (Fn+Ctrl+arrows, Fn+F). Only once the menu is NSApp's: muda looks
         // the submenu up in the installed main menu.
-        if let Some(window) = window_menu {
+        if let Some(window) = &window_menu {
             window.set_as_windows_menu_for_nsapp();
         }
         let (tx, rx) = channel();
@@ -256,12 +276,47 @@ impl NativeMenu {
             let _ = tx.send(e);
             ctx.request_repaint();
         }));
-        NativeMenu { _menu: menu, events: rx, theme_items }
+        NativeMenu { _menu: menu, events: rx, theme_items, window_menu, window_items: Vec::new(), windows: Vec::new() }
     }
 
-    pub fn poll(&self, app: &mut SheetApp, ctx: &egui::Context) {
+    /// Keeps the Window menu's list of open workbooks (title, unsaved bullet, active check) in
+    /// step with the session.
+    fn sync_windows(&mut self, app: &SheetApp) {
+        let windows = app.open_windows();
+        if windows == self.windows {
+            return;
+        }
+        let Some(menu) = &self.window_menu else { return };
+        let same_docs = windows.len() == self.windows.len() && windows.iter().zip(&self.windows).all(|(a, b)| a.doc == b.doc);
+        if same_docs {
+            for (item, w) in self.window_items.iter().zip(&windows) {
+                item.set_text(w.label());
+                item.set_checked(w.active);
+            }
+        } else {
+            for item in self.window_items.drain(..) {
+                let _ = menu.remove(&item);
+            }
+            for w in &windows {
+                let item = CheckMenuItem::with_id(format!("{WINDOW_ITEM}{}", w.doc), w.label(), true, w.active, None);
+                let _ = menu.append(&item);
+                self.window_items.push(item);
+            }
+        }
+        self.windows = windows;
+    }
+
+    pub fn poll(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
         while let Ok(ev) = self.events.try_recv() {
             let id = ev.id.as_ref().to_string();
+            if id == QUIT {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                continue;
+            }
+            if let Some(doc) = id.strip_prefix(WINDOW_ITEM).and_then(|d| d.parse::<u64>().ok()) {
+                app.run_or_alert("view.switchWindows", json!({"doc": doc}));
+                continue;
+            }
             // Text selection belongs to the inline editor, not the worksheet clipboard/undo.
             if app.text_box_editor.is_some() {
                 let clipboard = match id.as_str() {
@@ -321,6 +376,7 @@ impl NativeMenu {
                 item.set_checked(checked);
             }
         }
+        self.sync_windows(app);
     }
 }
 

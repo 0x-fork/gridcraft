@@ -106,6 +106,8 @@ pub struct DocState {
     pub path: Option<String>,
     pub saved: Arc<Workbook>,
     pub revision: u64,
+    /// Identifies this open workbook for the rest of the session: it never changes while the
+    /// workbook is open (saving, renaming, reordering) and is never reused for another one.
     pub uid: u64,
     pub title: String,
     /// Per-sheet selection memory.
@@ -335,6 +337,10 @@ impl Session {
     }
     pub fn active(&self) -> Option<&DocState> {
         self.docs.get(self.active)
+    }
+    /// Where the open workbook with this [`DocState::uid`] is in [`Session::documents`].
+    pub fn document_index(&self, uid: u64) -> Option<usize> {
+        self.docs.iter().position(|d| d.uid == uid)
     }
     pub fn active_mut(&mut self) -> Option<&mut DocState> {
         self.docs.get_mut(self.active)

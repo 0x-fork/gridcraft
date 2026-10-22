@@ -2336,6 +2336,7 @@ fn view(app: &mut SheetApp, ui: &mut Ui) {
             ],
         );
     });
+    switch_windows(app, ui);
     ui.vertical(|ui| {
         ui.label(lang.tr("Display theme"));
         let mode = app.ui.theme_mode();
@@ -2388,6 +2389,24 @@ fn view(app: &mut SheetApp, ui: &mut Ui) {
                 }
             },
         );
+    });
+}
+
+/// View › Switch Windows: the open workbooks, the active one checked and unsaved ones marked;
+/// choosing one brings it forward.
+fn switch_windows(app: &mut SheetApp, ui: &mut Ui) {
+    let anchor = big_button(ui, Icon::Book, "Switch\nWindows", "Switch Windows", true);
+    anchor.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "Switch Windows"));
+    control_keytip(app, ui, &anchor, "view.switchWindows");
+    let forced = std::mem::take(&mut app.open_switch_windows);
+    egui::Popup::menu(&anchor).open_memory(popup_command(forced, anchor.clicked())).show(|ui| {
+        for w in app.open_windows() {
+            let label = format!("{}{}", if w.active { "✓ " } else { "    " }, w.label());
+            if ui.add(egui::Button::selectable(w.active, label).min_size(vec2(220.0, 22.0))).clicked() {
+                act(app, "view.switchWindows", json!({"doc": w.doc}));
+                ui.close();
+            }
+        }
     });
 }
 
