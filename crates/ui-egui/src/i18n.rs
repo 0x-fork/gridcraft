@@ -734,6 +734,36 @@ mod tests {
     }
 
     #[test]
+    fn sheet_tab_menu_and_autosave_labels_are_translated() {
+        let labels = [
+            "Insert Sheet",
+            "Delete",
+            "Rename",
+            "Move or Copy…",
+            "Duplicate",
+            "Tab Color",
+            "No Color",
+            "Hide",
+            "Unhide…",
+            "Protect Sheet…",
+            "Unprotect Sheet…",
+            "Select All Sheets",
+            "AutoSave",
+            "AutoSave: save after every change (workbooks saved to a file)",
+            "Previous sheet",
+            "Next sheet",
+            "All sheets",
+            "New sheet (⇧F11)",
+        ];
+        for language in [Language::Es, Language::De, Language::Fr, Language::Ko, Language::Ru, Language::Zh, Language::Sr] {
+            for label in labels {
+                assert_ne!(language.tr(label), label, "{} lacks a translation of {label:?}", language.code());
+            }
+        }
+        assert_eq!(Language::Es.tr("AutoSave"), "Autoguardado");
+    }
+
+    #[test]
     fn translations_never_show_the_context_prefix() {
         // `tr` returns a found translation as it is, so a catalog that keeps `context|` in its
         // value shows it on screen (File › Options read "Options|Général" in French).

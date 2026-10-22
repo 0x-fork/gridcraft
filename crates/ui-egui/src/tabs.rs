@@ -173,7 +173,7 @@ pub fn sheet_tabs(app: &mut SheetApp, ui: &mut Ui) {
                                     if ui.button(app.ui.language.tr("Insert Sheet")).clicked() {
                                         app.run_or_alert("home.insertSheet", json!({"before": i}));
                                     }
-                                    if ui.button("Delete").clicked() {
+                                    if ui.button(app.ui.language.tr("Delete")).clicked() {
                                         app.run_or_alert("home.deleteSheet", json!({"sheet": i}));
                                     }
                                     if ui.button(app.ui.language.tr("Rename")).clicked() {
