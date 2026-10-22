@@ -3347,6 +3347,29 @@ fn paste_special_validation_moves_relative_references() {
 }
 
 #[test]
+fn editing_quote_prefixed_text_keeps_it_text() {
+    let mut s = s();
+    for (i, input) in ["'00123", "'=1+1", "'TRUE", "''abc"].iter().enumerate() {
+        let cell = format!("A{}", i + 1);
+        s.execute("cell.set", json!({"cell": cell, "input": input})).unwrap();
+        let at = CellRef::parse(&cell).unwrap();
+        let before = v(&s, &cell);
+        let edit = {
+            let d = s.doc().unwrap();
+            crate::display::edit_text(&d.wb, d.wb.active().unwrap(), at)
+        };
+        assert_eq!(&edit, input, "edit text of {cell}");
+        // Committing the editor unchanged leaves the cell as it was.
+        s.execute("cell.set", json!({"cell": cell, "input": edit})).unwrap();
+        assert_eq!(v(&s, &cell), before, "{cell}");
+    }
+    // Plain text is shown as typed, without a prefix.
+    s.execute("cell.set", json!({"cell": "B1", "input": "hello"})).unwrap();
+    let d = s.doc().unwrap();
+    assert_eq!(crate::display::edit_text(&d.wb, d.wb.active().unwrap(), CellRef::parse("B1").unwrap()), "hello");
+}
+
+#[test]
 fn csv_as_text_keeps_identifier_columns_as_written() {
     let csv = "gtin,zip,flag,day\n8435392892278,01234,TRUE,2026-03-04\n";
     let open = |s: &mut Session, extra: serde_json::Value| {
