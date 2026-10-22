@@ -188,7 +188,7 @@ impl Sheet {
     /// empty (or `from_row > cap`), same as a cell-by-cell `value_ref` scan would find, but
     /// without calling `value_ref` once per row: `CellStore::contiguous_value_run` walks each
     /// band's row map directly for the common case (a run of stored cells), only falling back to
-    /// a per-row `spill` check where the stored run stops short of `cap`. Used by the fill-handle
+    /// a per-row `value_ref` check where the stored run stops short of `cap`. Used by the fill-handle
     /// double-click, where `col` can be densely populated for very long stretches.
     pub fn last_contiguous_nonempty(&self, col: u32, from_row: u32, cap: u32) -> u32 {
         if from_row > cap {
@@ -203,10 +203,10 @@ impl Sheet {
             match self.cells.contiguous_value_run(c, cap) {
                 Some(last) => row = last + 1,
                 None => {
-                    // A stored cell decides the row on its own, even with an empty value (see
-                    // `contiguous_value_run`'s doc comment): only an unstored row falls through
-                    // to `spill`, exactly like `value_ref`.
-                    let qualifies = self.cells.get(c).is_none() && self.spill.get(&c).is_some_and(|v| !v.is_empty());
+                    // The run stopped short of `row`: ask `value_ref` for this one row, which also
+                    // covers a stored cell with no value and no formula (a formatted spill child)
+                    // falling through to `spill`.
+                    let qualifies = self.value_ref(c).is_some_and(|v| !v.is_empty());
                     if qualifies {
                         row += 1;
                     } else {
@@ -505,6 +505,12 @@ mod tests {
                         // Stored but blank: does not count (matches `has_value`/`value_ref`).
                         s.set_value(CellRef::new(r, 0), Value::Text("".into()));
                     }
+                    4 if rng.below(2) == 0 => {
+                        // A style-only stored cell over a spill value: `value_ref` falls through
+                        // to the spill value, so the row counts.
+                        s.spill.insert(CellRef::new(r, 0), Value::Number(r as f64));
+                        s.set_cell(CellRef::new(r, 0), Cell { style: StyleId(1), ..Default::default() });
+                    }
                     _ => {} // gap
                 }
             }
@@ -536,14 +542,25 @@ mod tests {
         let mut s = Sheet::new("S");
         s.set_value(CellRef::new(0, 1), Value::Number(1.0));
         s.set_value(CellRef::new(1, 1), Value::Number(2.0));
-        // row 2: a formula (e.g. `=""`) whose cached value is empty. A stored cell always
-        // decides the row on its own, exactly like `value_ref`: this does NOT count, same as
-        // `value_ref(...).is_some_and(|v| !v.is_empty())` would say for it, even though it has
-        // a formula (unlike `CellStore::has`, used for Ctrl+arrow navigation, which would).
+        // row 2: a formula (e.g. `=""`) whose cached value is empty. It does not count, same as
+        // `value_ref(...).is_some_and(|v| !v.is_empty())` says for it, even though it has a
+        // formula (unlike `CellStore::has`, used for Ctrl+arrow navigation, which counts it).
         s.set_cell(CellRef::new(2, 1), Cell { formula: Some(Arc::new(Formula::new("\"\""))), ..Default::default() });
         s.set_value(CellRef::new(3, 1), Value::Number(4.0)); // would extend the run if row 2 didn't stop it
         assert_eq!(s.last_contiguous_nonempty(1, 0, 100), 1);
         assert_eq!(s.last_contiguous_nonempty(1, 2, 100), 1); // from_row itself is the stop
+    }
+
+    #[test]
+    fn last_contiguous_nonempty_spill_extends_a_style_only_stored_row() {
+        let mut s = Sheet::new("S");
+        s.set_value(CellRef::new(0, 1), Value::Number(1.0));
+        // row 1: a formatted spill child: stored with a style only, value from `spill`.
+        s.spill.insert(CellRef::new(1, 1), Value::Number(2.0));
+        s.set_cell(CellRef::new(1, 1), Cell { style: StyleId(1), ..Default::default() });
+        s.set_value(CellRef::new(2, 1), Value::Number(3.0));
+        assert_eq!(s.last_contiguous_nonempty(1, 0, 100), 2);
+        assert_eq!(s.last_contiguous_nonempty(1, 1, 100), 2);
     }
 
     #[test]

@@ -132,10 +132,9 @@ impl CellStore {
     /// yet, for Ctrl+arrow navigation): this matches `Sheet::value_ref`, whose callers test the
     /// `Value` it returns with `!v.is_empty()` regardless of whether a formula produced it — a
     /// formula cell with an empty cached value (`=""`, or not yet recalculated) is "empty" to
-    /// them. A stored cell always decides the row on its own either way (`value_ref` never falls
-    /// through to `spill` once a cell is stored there, whether or not its value is empty), so
-    /// `last_contiguous_nonempty` only needs to check `spill` where this returns `None`, i.e.
-    /// no cell is stored at `from.col` for that row at all.
+    /// them. A stored cell with no value and no formula (for example a formatted spill child) does
+    /// fall through to `spill` in `value_ref`, so `last_contiguous_nonempty` asks `value_ref`
+    /// about the row where this run stops.
     ///
     /// Walks each band's row map with `BTreeMap::range` (one in-order pass per band) instead of
     /// one `get` per row, so a long, densely-populated run costs roughly one tree-traversal step
