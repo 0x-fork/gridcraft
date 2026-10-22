@@ -98,3 +98,17 @@ fn spanish_display_round_trips_text_containing_separators() {
     assert_eq!(shown, r#"SI(A1="a,b;c";CONCAT("1.5";",";";");SUMA(0,25;A1:A3 B2))"#);
     assert_eq!(print(&parse_input(&shown, es, |_| false).unwrap()), print(&expr));
 }
+
+#[test]
+fn local_names_match_aliases_in_any_case_like_the_evaluator() {
+    // `ſi` (long s) is `SI` case-insensitively, so the call is the LAMBDA, not IF.
+    assert_eq!(input("LET(ſi;LAMBDA(x;x*2);SI(3))"), "LET(ſi,LAMBDA(x,x*2),SI(3))");
+    assert!(gridcraft_formula::same_name("ß", "ẞ"));
+    assert!(gridcraft_formula::same_name("dług", "DŁUG"));
+    assert!(gridcraft_formula::same_name("ſi", "SI"));
+    assert!(gridcraft_formula::same_name("σοφός", "ΣΟΦΌΣ"));
+    // Dotless ı is its own letter outside Turkic languages.
+    assert!(!gridcraft_formula::same_name("ı", "i"));
+    assert!(!gridcraft_formula::same_name("ı", "I"));
+    assert!(!gridcraft_formula::same_name("a", "b"));
+}
