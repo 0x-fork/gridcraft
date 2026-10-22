@@ -958,7 +958,9 @@ pub(crate) fn horizontal_scrollbar(app: &mut SheetApp, ui: &mut egui::Ui, track:
 pub(crate) fn wrapped_cell_text_y(valign: VAlign, rect: Rect, gh: f32, z: f32) -> f32 {
     let pad_v = 1.5 * z;
     let y_top = rect.top() + pad_v;
-    let y_bottom = (rect.bottom() - gh - pad_v).max(y_top);
+    // Not clamped to `y_top`: text taller than the row overflows upward (Bottom) or both ways
+    // (Center), and the cell's clip rect trims it, so Middle and Bottom stay distinct from Top.
+    let y_bottom = rect.bottom() - gh - pad_v;
     match valign {
         VAlign::Top => y_top,
         VAlign::Center | VAlign::Justify | VAlign::Distributed => (y_top + y_bottom) / 2.0,
@@ -1067,7 +1069,9 @@ pub(crate) fn paint_quadrant(
     let (r0, r1) = rows;
     let (c0, c1) = cols;
     let range = RangeRef::new(CellRef::new(r0, c0), CellRef::new(r1, c1));
-    let merges: Vec<RangeRef> = sh.merges.iter().filter(|m| m.intersects(&range)).copied().collect();
+    // Merges are looked up 20 columns beyond the quadrant too: text overflowing in from off-screen cells stops at them.
+    let near = RangeRef::new(CellRef::new(r0, c0.saturating_sub(20)), CellRef::new(r1, c1.saturating_add(20).min(MAX_COLS - 1)));
+    let merges: Vec<RangeRef> = sh.merges.iter().filter(|m| m.intersects(&near)).copied().collect();
     let in_merge = |c: CellRef| merges.iter().find(|m| m.contains(c)).copied();
     // Gridlines.
     if sh.show_gridlines {
@@ -1121,8 +1125,25 @@ pub(crate) fn paint_quadrant(
         }
         looks.push((anchor, rect, lk, cfl));
     }
+    // Text cells just outside the quadrant whose text may overflow into it: the nearest non-empty
+    // cell left of `c0` and right of `c1` in each row (within the same frozen / scrolled pane).
+    let mut outside: Vec<(CellRef, Rect, Look, Option<CfLook>)> = Vec::new();
+    let same_pane = |col: u32| (col < geo.fc) == (c0 < geo.fc);
+    for r in r0..=r1 {
+        if sh.row_height(r) == 0.0 {
+            continue;
+        }
+        let left = (c0.saturating_sub(20)..c0).rev().map(|col| CellRef::new(r, col)).find(|&n| !empty_ok(n));
+        let right = (c1.saturating_add(1)..=c1.saturating_add(20).min(MAX_COLS - 1)).map(|col| CellRef::new(r, col)).find(|&n| !empty_ok(n));
+        for n in [left, right].into_iter().flatten() {
+            if same_pane(n.col) && sh.col_width(n.col) > 0.0 && in_merge(n).is_none() {
+                let (lk, cfl) = look(wb, si, sh, n, cf);
+                outside.push((n, geo.cell_rect(sh, n), lk, cfl));
+            }
+        }
+    }
     // Text and per-cell decorations.
-    for (c, rect, lk, cfl) in &looks {
+    for (c, rect, lk, cfl) in looks.iter().chain(&outside) {
         let c = *c;
         if let Some(picture) = sh.cell_pictures.get(&c) {
             crate::cell_pictures::paint(p, *rect, picture);
@@ -1230,7 +1251,10 @@ pub(crate) fn paint_quadrant(
             p.with_clip_rect(rect.intersect(p.clip_rect())).galley(pos2(x, y), galley, color);
             continue;
         }
-        let first_line = text.lines().next().unwrap_or("").to_string();
+        // Wrap Text off: Excel ignores the line breaks and draws the whole string on one line.
+        let first_line: String = text.chars().filter(|&ch| ch != '\n' && ch != '\r').collect();
+        // The fill position indexes `text`; move it back by the breaks removed before it.
+        let fill_char = fill_char.map(|(ch, pos)| (ch, pos.saturating_sub(text.get(..pos).map_or(0, |s| s.matches(['\n', '\r']).count()))));
         // Shrink to fit: too-wide content is drawn in a smaller font so it fits the cell (or the
         // merged area): it neither spills, nor is clipped, nor turns into ####.
         let small = (st.align.shrink && !rotated && st.align.h != HAlign::Fill && fill_char.is_none())
@@ -4060,10 +4084,24 @@ mod tests {
         assert!(y_top < y_center);
         assert!(y_center < y_bottom);
 
-        // Overflow case: gh exceeds rect height
+        // Overflow case: gh exceeds rect height; Top still starts inside the cell.
         let gh_overflow = 60.0;
-        let y_bottom_ovf = wrapped_cell_text_y(VAlign::Bottom, rect, gh_overflow, z);
-        assert!(y_bottom_ovf >= rect.top());
+        let y_top_ovf = wrapped_cell_text_y(VAlign::Top, rect, gh_overflow, z);
+        assert!(y_top_ovf >= rect.top());
+    }
+
+    #[test]
+    fn wrapped_cell_text_y_keeps_vertical_alignment_when_text_is_taller_than_the_row() {
+        // A default-height row holding three wrapped lines.
+        let rect = Rect::from_min_max(pos2(0.0, 0.0), pos2(100.0, 20.0));
+        let (gh, z) = (60.0, 1.0);
+        let y_top = wrapped_cell_text_y(VAlign::Top, rect, gh, z);
+        let y_center = wrapped_cell_text_y(VAlign::Center, rect, gh, z);
+        let y_bottom = wrapped_cell_text_y(VAlign::Bottom, rect, gh, z);
+        // Taller text overflows upward for Bottom and both ways for Center (the cell clips it).
+        assert!((y_top - 1.5).abs() < 0.01, "Top starts at the top edge, got {y_top}");
+        assert!((y_center + gh / 2.0 - rect.center().y).abs() < 0.01, "Center is centred, got {y_center}");
+        assert!((y_bottom + gh - (rect.bottom() - 1.5)).abs() < 0.01, "Bottom ends at the bottom edge, got {y_bottom}");
     }
 
     /// The screen box of a galley of `size` drawn at `pos` turned by `angle` about `pos`, as egui

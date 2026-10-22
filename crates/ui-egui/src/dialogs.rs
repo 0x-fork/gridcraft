@@ -1578,18 +1578,22 @@ fn paste_special_shortcuts(d: &mut Dialog, ctx: &egui::Context) {
 
 fn ok_cancel(ui: &mut egui::Ui, confirm: &mut bool, open: &mut bool) {
     ui.add_space(8.0);
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        let lang = crate::i18n::current(ui.ctx());
-        let ok = ui.add(
-            egui::Button::new(egui::RichText::new(format!("   {}   ", lang.tr("OK"))).color(Color32::WHITE))
-                .fill(crate::theme::Tokens::get(ui.ctx()).accent),
-        );
-        if ok.clicked() || ui.input(|i| i.key_pressed(Key::Enter)) {
-            *confirm = true;
-        }
-        if ui.button(format!(" {} ", lang.tr("Cancel"))).clicked() {
-            *open = false;
-        }
+    // A row as tall as the buttons: a right-to-left layout straight in the window takes all the
+    // height it is offered, which stretched every form dialog to the screen's height.
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let lang = crate::i18n::current(ui.ctx());
+            let ok = ui.add(
+                egui::Button::new(egui::RichText::new(format!("   {}   ", lang.tr("OK"))).color(Color32::WHITE))
+                    .fill(crate::theme::Tokens::get(ui.ctx()).accent),
+            );
+            if ok.clicked() || ui.input(|i| i.key_pressed(Key::Enter)) {
+                *confirm = true;
+            }
+            if ui.button(format!(" {} ", lang.tr("Cancel"))).clicked() {
+                *open = false;
+            }
+        })
     });
 }
 

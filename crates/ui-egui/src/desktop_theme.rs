@@ -12,6 +12,12 @@ use std::time::Duration;
 /// round trip every few seconds is cheap and reacts soon enough after a theme switch.
 const POLL: Duration = Duration::from_secs(4);
 
+/// How long one read waits for the portal's reply. Without it a portal that never answers blocks
+/// the watcher for good, and the theme stops following the desktop. Shorter than [`POLL`]: a read
+/// that times out drops the connection, and the next poll asks again on a fresh one.
+#[cfg(target_os = "linux")]
+const REPLY: Duration = Duration::from_secs(2);
+
 /// Whether the desktop asks applications to draw dark. `None` when it says nothing, and when
 /// there is no session bus or no portal to ask (a bare X server, a container), so the caller
 /// keeps whatever it chose itself.
@@ -87,7 +93,7 @@ fn read(link: &mut Link) -> Option<bool> {
     const SETTINGS: &str = "org.freedesktop.portal.Settings";
     const SCHEMAS: [(&str, &str); 2] = [("org.gnome.desktop.interface", "color-scheme"), ("org.freedesktop.interface.color-scheme", "color-scheme")];
     if link.is_none() {
-        *link = Some(zbus::blocking::Connection::session().ok()?);
+        *link = Some(zbus::blocking::connection::Builder::session().ok()?.method_timeout(REPLY).build().ok()?);
     }
     let connection = link.as_ref()?;
     for (schema, key) in SCHEMAS {

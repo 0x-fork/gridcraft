@@ -1315,6 +1315,35 @@ fn open_grows_default_height_rows_to_their_font() {
     assert_eq!(s.doc().unwrap().wb.active().unwrap().row_height(0), default_h, "11pt row stays default");
 }
 
+#[test]
+fn line_breaks_grow_a_row_only_when_the_cell_wraps() {
+    // Excel: a cell holding "a\nb" with Wrap Text off displays on one line and AutoFit gives a
+    // one-line row; with Wrap Text on it gets one line per break.
+    // Typing a break (Alt+Enter) turns wrap on, as in Excel, so the unwrapped case comes from a
+    // file, built with the model API and exported without row heights.
+    let text = "first line\n\n\nfourth line";
+    let bytes = {
+        let mut wb = gridcraft_model::Workbook::new();
+        let sh = wb.sheet_mut(0).unwrap();
+        sh.set_value(CellRef::new(1, 1), Value::text(text));
+        gridcraft_xlsx::write_xlsx(&wb).unwrap()
+    };
+    let default_h = gridcraft_model::Workbook::new().active().unwrap().row_height(1);
+    let mut s = Session::new();
+    s.execute("file.open", json!({"name": "notes.xlsx", "base64": crate::io::base64_encode(&bytes)})).unwrap();
+    assert_eq!(s.doc().unwrap().wb.active().unwrap().row_height(1), default_h, "an unwrapped multi-line cell keeps the default row height on open");
+    // Turning wrap on lays the text out over its lines and the row grows to hold them.
+    s.execute("home.wrapText", json!({"range": "B2", "on": true})).unwrap();
+    let wrapped_h = s.doc().unwrap().wb.active().unwrap().row_height(1);
+    assert!(wrapped_h > default_h * 2.5, "wrapped four-line text grows the row, got {wrapped_h} vs default {default_h}");
+    // Turning it off again returns the row to one line.
+    s.execute("home.wrapText", json!({"range": "B2", "on": false})).unwrap();
+    assert_eq!(s.doc().unwrap().wb.active().unwrap().row_height(1), default_h, "wrap off: back to a one-line row");
+    // Entering a break by hand wraps the cell (Alt+Enter), so that row does grow.
+    s.execute("cell.set", json!({"cell": "D4", "input": text})).unwrap();
+    assert!(s.doc().unwrap().wb.active().unwrap().row_height(3) > default_h * 2.5, "typed line breaks turn wrap on and grow the row");
+}
+
 #[test] // B — Review Focus 1
 fn open_keeps_custom_height_rows() {
     let mut s = Session::new();
@@ -1360,6 +1389,53 @@ fn open_leaves_plain_workbooks_untouched() {
     let sh = s.doc().unwrap().wb.active().unwrap();
     assert!(sh.rows.get(&0).is_none_or(|i| i.size.is_none()), "11pt default rows get no height entry");
     assert!(sh.rows.values().all(|i| i.size.is_none()), "no row gains a height entry");
+}
+
+/// Merged cells never auto-fit their rows, like Excel (issue #1605): a wrapped merged
+/// header keeps the default height instead of growing to its column-A wrap width, while an
+/// unmerged wrapped cell in the same sheet still fits.
+#[test]
+fn autofit_skips_merged_cells() {
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "This is a long sentence that should wrap across the merged width of five columns"}))
+        .unwrap();
+    s.execute("home.mergeCells", json!({"range": "A1:E1"})).unwrap();
+    s.execute("home.wrapText", json!({"range": "A1:E1", "on": true})).unwrap();
+    s.execute("cell.set", json!({"cell": "A3", "input": "This is a long sentence that should wrap across the merged width of five columns"}))
+        .unwrap();
+    s.execute("home.wrapText", json!({"range": "A3", "on": true})).unwrap();
+    let sh = s.doc().unwrap().wb.active().unwrap();
+    assert!(sh.rows.get(&0).is_none_or(|i| i.size.is_none()), "merged wrap must not auto-fit row 1, got {:?}", sh.rows.get(&0));
+    assert!(sh.rows.get(&2).is_some_and(|i| i.size.is_some_and(|h| h > 15.0)), "unmerged wrap still fits its row");
+    // The save writes no height for the merged row.
+    let r = s.execute("file.saveBytes", json!({"format": "xlsx"})).unwrap();
+    let bytes = crate::io::base64_decode(r["base64"].as_str().unwrap()).unwrap();
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut xml = String::new();
+    std::io::Read::read_to_string(&mut zip.by_name("xl/worksheets/sheet1.xml").unwrap(), &mut xml).unwrap();
+    let row1 = xml.split("<row").skip(1).map(|r| format!("<row{r}")).find(|r| r.starts_with("<row r=\"1\"")).unwrap();
+    assert!(!row1.split('>').next().unwrap().contains("ht="), "merged row 1 must be saved without ht, got {row1}");
+    assert!(xml.contains("<mergeCell ref=\"A1:E1\"/>"), "the merge itself is saved");
+}
+
+#[test]
+fn open_fits_big_font_rows_from_the_font_not_the_sheet_default() {
+    // Excel saves a sheet whose rows hold 16pt text with a 21pt (28px) default row height and no
+    // `ht` on rows of that height. Those rows already fit their font: they open at about 28px,
+    // not scaled up again by 16/11 to 41px.
+    let mut wb = gridcraft_model::Workbook::new();
+    let big = wb.styles.derive(gridcraft_model::StyleId::DEFAULT, |s| s.font.size = 16.0);
+    let sh = wb.sheet_mut(0).unwrap();
+    sh.default_row_height = 28.0;
+    sh.set_value(CellRef::new(4, 0), Value::text("SANTANDER"));
+    sh.set_style(CellRef::new(4, 0), big);
+    let bytes = gridcraft_xlsx::write_xlsx(&wb).unwrap();
+    let mut s = Session::new();
+    s.execute("file.open", json!({"name": "tall-default.xlsx", "base64": crate::io::base64_encode(&bytes)})).unwrap();
+    let sh = s.doc().unwrap().wb.active().unwrap();
+    assert_eq!(sh.default_row_height, 28.0);
+    let h = sh.row_height(4);
+    assert!((28.0..30.0).contains(&h), "a 16pt row on a 28px-default sheet opens at about 28px, got {h}");
 }
 
 #[test]
@@ -3241,6 +3317,38 @@ fn autofill_month_pattern_clamps_to_month_end() {
     assert_eq!(v(&s, "A4"), ymd(2026, 7, 31));
     assert_eq!(v(&s, "A5"), ymd(2026, 9, 30));
     assert_eq!(v(&s, "A6"), ymd(2026, 11, 30));
+}
+
+#[test]
+fn json_import_rebuilds_cell_store_bands_and_counts() {
+    // #1008: the JSON reader trusted serialized band keys and the cached length. A file written
+    // with a cell in the wrong band lost it from lookup, and a forged count underflowed on the
+    // next removal.
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A5", "input": "keep"})).unwrap();
+    let wb = &s.doc().unwrap().wb;
+    let mut v: serde_json::Value = serde_json::to_value(&**wb).unwrap();
+    {
+        let cells = v["sheets"][0]["cells"].as_object_mut().unwrap();
+        let bands = cells["bands"].as_object_mut().unwrap();
+        let band = bands.remove("0").expect("the cell is in band 0");
+        let cell = band["rows"]["4"]["0"].clone();
+        // Off-grid rows never belong in a sheet, whatever band holds them.
+        bands.insert("1".into(), band);
+        bands.insert("16384".into(), json!({"rows": {"1048576": {"0": cell}}}));
+        cells.insert("len".into(), json!(0));
+    }
+    let bytes = serde_json::to_vec(&v).unwrap();
+    let (back, warnings) = crate::io::open_bytes("book.json", &bytes).unwrap();
+    let sh = back.active().unwrap();
+    let cell = sh.cell(CellRef::parse("A5").unwrap());
+    assert_eq!(cell.map(|c| c.value.clone()), Some(Value::text("keep")), "the cell is found where its row says");
+    assert_eq!(sh.cells.len(), 1, "the count is rebuilt from the cells");
+    assert!(warnings.iter().any(|w| w.contains("outside the 1,048,576")), "{warnings:?}");
+    // Removal stays consistent: the forged count used to underflow.
+    let mut cells = sh.cells.clone();
+    cells.remove(CellRef::parse("A5").unwrap());
+    assert_eq!(cells.len(), 0);
 }
 
 #[test]
