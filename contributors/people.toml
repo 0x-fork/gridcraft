@@ -78,3 +78,15 @@ sync_github_name = true
 [people.Stefanfra]
 real_name = "Stefan Fransen"
 sync_github_name = true
+
+[people.allenyllee]
+sync_github_name = true
+
+[people.marcoarnulfo]
+real_name = "Marco Arnulfo"
+display_name = "Marco Arnulfo"
+sync_github_name = false
+
+[people.Harrison-Booth]
+real_name = "Harrison Booth"
+sync_github_name = false
