@@ -18,7 +18,7 @@ fn sheet_with(name: &str, pictures: &[(u32, &[u8])]) -> Arc<Sheet> {
     let mut s = Sheet::new(name);
     for (id, data) in pictures {
         let anchor = Anchor { cell: CellRef::parse("B2").unwrap(), width: 40.0, height: 30.0, ..Default::default() };
-        s.images.push(Image { id: *id, anchor, data: data.to_vec(), mime: "image/png".into(), alt: String::new() });
+        s.images.push(Image { id: *id, anchor, data: data.to_vec().into(), mime: "image/png".into(), alt: String::new() });
     }
     Arc::new(s)
 }
@@ -66,7 +66,7 @@ fn a_picture_on_several_sheets_is_one_media_part() {
     assert_eq!(first_of(1), first_of(3));
     // They read back with the right bytes on the right sheets.
     let back = read_xlsx(&bytes).unwrap().0;
-    let data = |i: usize| back.sheets[i].images.iter().map(|im| im.data.clone()).collect::<Vec<_>>();
+    let data = |i: usize| back.sheets[i].images.iter().map(|im| im.data.to_vec()).collect::<Vec<_>>();
     assert_eq!(data(0), vec![a.clone()]);
     assert_eq!(data(1), vec![a.clone(), b.clone()]);
     assert_eq!(data(2), vec![a.clone(), a.clone()]);
@@ -83,5 +83,5 @@ fn different_pictures_with_the_same_length_stay_separate() {
     let bytes = write_xlsx(&wb).unwrap();
     assert_eq!(names(&bytes).iter().filter(|n| n.starts_with("xl/media/")).count(), 2);
     let back = read_xlsx(&bytes).unwrap().0;
-    assert_eq!(back.sheets[0].images.iter().map(|i| i.data.clone()).collect::<Vec<_>>(), vec![a, b]);
+    assert_eq!(back.sheets[0].images.iter().map(|i| i.data.to_vec()).collect::<Vec<_>>(), vec![a, b]);
 }
