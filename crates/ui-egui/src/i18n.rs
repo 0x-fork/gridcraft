@@ -14,6 +14,7 @@ mod de;
 mod el;
 mod es;
 mod fr;
+mod it;
 mod ko;
 mod pl;
 mod pt;
@@ -39,11 +40,13 @@ pub enum Language {
     Fr,
     Sr,
     Pl,
+    It,
 }
 
 impl Language {
-    pub const ALL: [Self; 13] =
-        [Self::En, Self::Es, Self::El, Self::Zh, Self::Ja, Self::Ko, Self::Ru, Self::PtBr, Self::De, Self::Cs, Self::Fr, Self::Sr, Self::Pl];
+    pub const ALL: [Self; 14] = [
+        Self::En, Self::Es, Self::El, Self::Zh, Self::Ja, Self::Ko, Self::Ru, Self::PtBr, Self::De, Self::Cs, Self::Fr, Self::Sr, Self::Pl, Self::It,
+    ];
 
     /// The language's own name, shown in the switcher.
     pub fn name(self) -> &'static str {
@@ -61,6 +64,7 @@ impl Language {
             Self::Fr => "Français",
             Self::Sr => "Srpski",
             Self::Pl => "Polski",
+            Self::It => "Italiano",
         }
     }
 
@@ -80,6 +84,7 @@ impl Language {
             Self::Fr => "fr",
             Self::Sr => "sr",
             Self::Pl => "pl",
+            Self::It => "it",
         }
     }
 
@@ -102,6 +107,7 @@ impl Language {
             "fr" => Some(Self::Fr),
             "sr" => Some(Self::Sr),
             "pl" => Some(Self::Pl),
+            "it" => Some(Self::It),
             _ => None,
         }
     }
@@ -142,6 +148,7 @@ impl Language {
             Self::Fr => fr::translate(text),
             Self::Sr => sr::translate(text),
             Self::Pl => pl::translate(text),
+            Self::It => it::translate(text),
         };
         translated.unwrap_or_else(|| text.rsplit_once('|').map_or(text, |(_, label)| label))
     }
@@ -626,6 +633,7 @@ mod tests {
             assert!(fr::translate(english).is_some_and(|text| !text.is_empty()), "missing French: {english}");
             assert!(sr::translate(english).is_some_and(|text| !text.is_empty()), "missing Serbian: {english}");
             assert!(pl::translate(english).is_some_and(|text| !text.is_empty()), "missing Polish: {english}");
+            assert!(it::translate(english).is_some_and(|text| !text.is_empty()), "missing Italian: {english}");
         }
         assert_eq!(Language::Ja.tr("Data"), "データ");
         assert_eq!(Language::Zh.tr("Data"), "数据");
@@ -666,6 +674,11 @@ mod tests {
         assert_eq!(Language::Pl.tr("Data"), "Dane");
         assert_eq!(Language::Pl.tr("Sheet1!A1"), "Sheet1!A1");
         assert_eq!(Language::Pl.tr("Page Layout|Orientation"), "Orientacja");
+        assert_eq!(Language::It.tr("Data"), "Dati");
+        assert_eq!(Language::It.tr("Sheet1!A1"), "Sheet1!A1");
+        assert_eq!(Language::It.tr("Freeze Panes"), "Blocca riquadri");
+        assert_eq!(Language::It.tr("Page Layout|Orientation"), "Orientamento");
+        assert_eq!(Language::It.tr("Orientation"), "Orientamento");
         assert_eq!(Language::parse("xx"), None);
     }
 
@@ -798,6 +811,9 @@ mod tests {
         assert_eq!(Language::from_tag("pl-PL"), Some(Language::Pl));
         assert_eq!(Language::from_tag("pl_PL.UTF-8"), Some(Language::Pl));
         assert_eq!(Language::parse("pl"), Some(Language::Pl));
+        assert_eq!(Language::from_tag("it-IT"), Some(Language::It));
+        assert_eq!(Language::from_tag("it_CH.UTF-8"), Some(Language::It));
+        assert_eq!(Language::parse("it"), Some(Language::It));
     }
 
     #[test]
