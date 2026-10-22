@@ -60,6 +60,9 @@ pub struct UiState {
     /// Enable AutoComplete for cell values (File ▸ Options ▸ Editing): typed text is completed
     /// from the one matching entry in the same column.
     pub autocomplete: bool,
+    /// AutoSave (the title-bar switch): save saved-to-file .xlsx workbooks shortly after every
+    /// change. A preference like the rest of this struct — it stays on across restarts (#1901).
+    pub autosave: bool,
     pub recent: Vec<String>,
     /// One-shot keytip request for a ribbon control: set when a keytip action resolves to
     /// [`keytips::Action::Control`], consumed (and cleared) by the control's render site.
@@ -103,6 +106,7 @@ impl Default for UiState {
             status_bar: true,
             animations: true,
             autocomplete: true,
+            autosave: false,
             recent: vec![],
             keytip_invoke: None,
             language: i18n::Language::En,
@@ -1128,6 +1132,12 @@ impl SheetApp {
         }
     }
 
+    /// Flip AutoSave (title-bar switch / Options ▸ Save). Persisted with the other UI
+    /// preferences, so it stays as the user left it across restarts (#1901).
+    pub fn toggle_autosave(&mut self) {
+        self.ui.autosave = !self.ui.autosave;
+    }
+
     /// Lays out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
@@ -1190,7 +1200,7 @@ impl SheetApp {
         }
         self.perf.last = now;
         // AutoSave: save workbooks that have a file shortly after they change.
-        if self.grid.autosave
+        if self.ui.autosave
             && self.editor.is_none()
             && self.text_box_editor.is_none()
             && now - self.grid.last_autosave > 2000.0
