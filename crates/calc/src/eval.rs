@@ -1012,10 +1012,8 @@ impl<'h> Evaluator<'h> {
                 let arrays: Vec<Arc<Array>> = args[..args.len() - 1].iter().map(|a| as_array(self.value(a))).collect();
                 let rows = arrays.iter().map(|a| a.rows).max().unwrap_or(1);
                 let cols = arrays.iter().map(|a| a.cols).max().unwrap_or(1);
-                if (rows * cols) as u64 > MAX_CELLS {
-                    return err(CellError::Num);
-                }
-                let mut out = Vec::with_capacity(rows * cols);
+                let Some(n) = broadcast_len(rows, cols) else { return err(CellError::Num) };
+                let mut out = Vec::with_capacity(n);
                 for r in 0..rows {
                     for c in 0..cols {
                         let bound = l.params.iter().zip(arrays.iter()).map(|(p, a)| (p.clone(), Ev::V(a.get_broadcast(r, c)))).collect();
@@ -1615,7 +1613,8 @@ pub fn zip2(a: &Value, b: &Value, f: impl Fn(&Value, &Value) -> Value) -> Value 
         (Value::Array(x), Value::Array(y)) => {
             let rows = broadcast_dim(x.rows, y.rows);
             let cols = broadcast_dim(x.cols, y.cols);
-            let mut data = Vec::with_capacity(rows * cols);
+            let Some(n) = broadcast_len(rows, cols) else { return Value::Error(CellError::Num) };
+            let mut data = Vec::with_capacity(n);
             for r in 0..rows {
                 for c in 0..cols {
                     data.push(f(&x.get_broadcast(r, c), &y.get_broadcast(r, c)));
@@ -1627,6 +1626,13 @@ pub fn zip2(a: &Value, b: &Value, f: impl Fn(&Value, &Value) -> Value) -> Value 
         (s, Value::Array(y)) => Value::from(Array { rows: y.rows, cols: y.cols, data: y.data.iter().map(|v| f(s, v)).collect() }),
         (x, y) => f(x, y),
     }
+}
+
+/// Cell count of a `rows`×`cols` broadcast result, or `None` when it would exceed [`MAX_CELLS`].
+/// Each operand passes its own size cap, but their broadcast product can be far larger
+/// (`SEQUENCE(1048576)*SEQUENCE(1,16384)` is 17 billion cells), so it is checked before allocating.
+fn broadcast_len(rows: usize, cols: usize) -> Option<usize> {
+    rows.checked_mul(cols).filter(|&n| n as u64 <= MAX_CELLS)
 }
 
 fn broadcast_dim(a: usize, b: usize) -> usize {
@@ -1645,8 +1651,9 @@ fn zip3(c: &Array, t: &Value, f: &Value, g: impl Fn(&Value, &Value, &Value) -> V
     let (fr, fc) = dims(f);
     let rows = broadcast_dim(broadcast_dim(c.rows, tr), fr);
     let cols = broadcast_dim(broadcast_dim(c.cols, tc), fc);
+    let Some(n) = broadcast_len(rows, cols) else { return Value::Error(CellError::Num) };
     let get = |v: &Value, r: usize, col: usize| if let Value::Array(a) = v { a.get_broadcast(r, col) } else { v.clone() };
-    let mut data = Vec::with_capacity(rows * cols);
+    let mut data = Vec::with_capacity(n);
     for r in 0..rows {
         for col in 0..cols {
             data.push(g(&c.get_broadcast(r, col), &get(t, r, col), &get(f, r, col)));

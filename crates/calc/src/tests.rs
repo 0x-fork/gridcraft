@@ -685,6 +685,34 @@ fn legacy_array_formulas_fill_their_range() {
 }
 
 #[test]
+fn array_broadcast_result_is_capped() {
+    // A full column against a full row broadcasts to 1048576 x 16384 (17 billion cells, about
+    // 400 GB): each operand is within its own cap, so only the product check stops the abort.
+    let mut t = T::new();
+    let col = "SEQUENCE(1048576)";
+    let row = "SEQUENCE(1,16384)";
+    for (at, formula) in [
+        ("A1", format!("=ROWS({col}*{row})")),
+        ("A2", format!("=ROWS({col}&{row})")),
+        ("A3", format!("=ROWS({col}>{row})")),
+        ("A4", format!("=ROWS(IF({col},{row}))")),
+        ("A5", format!("=ROWS(IF({col}>0,1,{row}))")),
+        ("A6", format!("=ROWS(TEXT({col},{row}))")),
+        ("A7", format!("=ROWS(MAP({col},{row},LAMBDA(a,b,a)))")),
+    ] {
+        t.set(at, &formula);
+        assert_eq!(t.get(at), Value::Error(CellError::Num), "{formula}");
+    }
+    // Broadcasts within the cap are unchanged.
+    t.set("C1", "=SUM(SEQUENCE(3)*SEQUENCE(1,4))");
+    assert_eq!(t.num("C1"), 60.0);
+    t.set("C2", "=SUM(IF(SEQUENCE(2)>1,SEQUENCE(1,3),0))");
+    assert_eq!(t.num("C2"), 6.0);
+    t.set("C3", "=COLUMNS(TEXT(SEQUENCE(2),SEQUENCE(1,5)))");
+    assert_eq!(t.num("C3"), 5.0);
+}
+
+#[test]
 fn text_function() {
     let mut t = T::new();
     t.set("A1", "=TEXT(1234.5,\"#,##0.00\")");
