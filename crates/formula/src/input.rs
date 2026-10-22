@@ -20,6 +20,18 @@ const SPANISH: &[(&str, &str)] = &[
     ("COUNTIF", "CONTAR.SI"),
     ("VLOOKUP", "BUSCARV"),
     ("TODAY", "HOY"),
+    // Financial block (#1986): the loan-schedule and investment staples.
+    ("NPV", "VNA"),
+    ("IRR", "TIR"),
+    ("PMT", "PAGO"),
+    ("PV", "VA"),
+    ("FV", "VF"),
+    // Financial block (#1986): the loan-schedule and investment staples.
+    ("NPV", "VNA"),
+    ("IRR", "TIR"),
+    ("PMT", "PAGO"),
+    ("PV", "VA"),
+    ("FV", "VF"),
     ("TRUE", "VERDADERO"),
     ("FALSE", "FALSO"),
 ];
