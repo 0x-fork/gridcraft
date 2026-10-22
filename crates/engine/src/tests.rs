@@ -940,6 +940,93 @@ fn protection_passwords_stay_out_of_the_journal_and_recorded_scripts() {
     s.execute("automate.runScript", json!({"name": "Lock"})).unwrap();
 }
 
+/// A session holding a workbook opened from file bytes whose `Fill` script sets B1 (#2178).
+fn opened_with_script() -> Session {
+    let mut author = s();
+    author
+        .execute("automate.newScript", json!({"name": "Fill", "commands": [{"command": "cell.set", "params": {"cell": "B1", "input": "ran"}}]}))
+        .unwrap();
+    let bytes = crate::io::save_bytes(&author.doc().unwrap().wb, "book.xlsx").unwrap();
+    let mut s = Session::new();
+    s.execute("file.open", json!({"name": "downloaded.xlsx", "base64": crate::io::base64_encode(&bytes)})).unwrap();
+    s
+}
+
+#[test]
+fn scripts_written_in_this_session_run_without_a_trust_step() {
+    let mut s = s();
+    assert!(s.doc().unwrap().scripts_trusted);
+    s.execute("automate.newScript", json!({"name": "Fill", "commands": [{"command": "cell.set", "params": {"cell": "B1", "input": "ran"}}]}))
+        .unwrap();
+    assert_eq!(s.execute("automate.runScript", json!({"name": "Fill"})).unwrap()["ran"], 1);
+    assert_eq!(v(&s, "B1"), Value::Text("ran".into()));
+}
+
+#[test]
+fn untrusted_workbook_scripts_are_refused_until_trusted() {
+    let mut s = opened_with_script();
+    s.ui_requests.clear();
+    assert!(!s.doc().unwrap().scripts_trusted, "a workbook opened with scripts starts untrusted");
+    let listed = s.execute("automate.allScripts", json!({})).unwrap();
+    assert_eq!(listed[0]["trusted"], false, "{listed}");
+    let err = s.execute("automate.runScript", json!({"name": "Fill"})).unwrap_err().to_string();
+    assert!(err.contains("trust"), "{err}");
+    assert_eq!(v(&s, "B1"), Value::Empty, "no step of an untrusted script runs");
+    // Trust can't be smuggled in as a string, and nothing opens a dialog.
+    assert!(s.execute("automate.runScript", json!({"name": "Fill", "trusted": "yes"})).is_err());
+    assert!(s.ui_requests.is_empty(), "{:?}", s.ui_requests);
+
+    // An explicit `trusted: true` runs it this once without trusting the workbook.
+    s.execute("automate.runScript", json!({"name": "Fill", "trusted": true})).unwrap();
+    assert_eq!(v(&s, "B1"), Value::Text("ran".into()));
+    assert!(!s.doc().unwrap().scripts_trusted);
+    s.execute("cell.set", json!({"cell": "B1", "input": ""})).unwrap();
+    assert!(s.execute("automate.runScript", json!({"name": "Fill"})).is_err());
+
+    // Trusting the workbook (the UI's Trust Scripts action) lets its scripts run this session.
+    assert_eq!(s.execute("automate.trustScripts", json!({})).unwrap()["trusted"], true);
+    s.execute("automate.runScript", json!({"name": "Fill"})).unwrap();
+    assert_eq!(v(&s, "B1"), Value::Text("ran".into()));
+    // A second window on the same workbook keeps the decision; withdrawing it disables them again.
+    s.execute("view.newWindow", json!({})).unwrap();
+    assert!(s.doc().unwrap().scripts_trusted);
+    s.execute("automate.trustScripts", json!({"trusted": false})).unwrap();
+    assert!(s.execute("automate.runScript", json!({"name": "Fill"})).is_err());
+}
+
+#[test]
+fn scripts_cannot_reach_outside_the_workbook_even_when_trusted() {
+    let dir = std::env::temp_dir().join(format!("gridcraft-script-deny-{}", std::process::id()));
+    let leak = dir.join("leak.xlsx");
+    let leak = leak.to_string_lossy().to_string();
+    let mut s = opened_with_script();
+    s.ui_requests.clear();
+    s.execute("automate.trustScripts", json!({})).unwrap();
+    let denied = [
+        json!({"command": "link.open", "params": {"url": "https://example.com/?d=secret"}}),
+        json!({"command": "file.saveAs", "params": {"path": leak}}),
+        json!({"command": "file.save", "params": {}}),
+        json!({"command": "file.exportPdf", "params": {"path": leak}}),
+        json!({"command": "file.open", "params": {"path": leak}}),
+        json!({"command": "data.getData", "params": {"path": leak}}),
+        json!({"command": "data.fromTextCsv", "params": {"path": leak}}),
+        json!({"command": "insert.picture", "params": {"path": leak}}),
+    ];
+    for step in denied {
+        // The harmless first step proves the whole script is refused before anything runs.
+        let first = json!({"command": "cell.set", "params": {"cell": "C1", "input": "partial"}});
+        s.execute("automate.newScript", json!({"name": "Leak", "commands": [first, step]})).unwrap();
+        let r = s.execute("automate.runScript", json!({"name": "Leak", "trusted": true}));
+        assert!(r.is_err(), "{step} must be refused");
+        assert_eq!(v(&s, "C1"), Value::Empty, "{step}: no step runs");
+    }
+    assert!(!s.ui_requests.iter().any(|r| matches!(r, crate::UiRequest::OpenUrl(_))), "{:?}", s.ui_requests);
+    assert!(!std::path::Path::new(&leak).exists());
+    // Data a script supplies itself is still fine.
+    s.execute("automate.newScript", json!({"name": "Csv", "commands": [{"command": "data.fromTextCsv", "params": {"text": "a,b\n1,2"}}]})).unwrap();
+    s.execute("automate.runScript", json!({"name": "Csv"})).unwrap();
+}
+
 /// A sheet with locked data in A1:B3, unlocked cells in D1:D3 and row 10, then protected.
 fn protected(extra: serde_json::Value) -> Session {
     let mut s = s();
