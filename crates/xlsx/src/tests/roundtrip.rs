@@ -1222,3 +1222,51 @@ fn a_table_filter_criteria_survive_a_round_trip() {
     assert!(b.is_row_hidden(1), "the row the filter hid is still hidden");
     assert!(b.autofilter.is_none(), "a table's filter belongs to the table part, not the sheet");
 }
+
+/// Stored `colId` offsets are relative to the filter range's first column, so criteria of a filter
+/// that starts right of the table's first column must not be folded into the table part, where
+/// they would apply to the wrong column.
+#[test]
+fn a_partial_sheet_filter_is_not_folded_into_a_table() {
+    let mut wb = Workbook::new();
+    let s = wb.sheet_mut(0).unwrap();
+    for (a, v) in [("A1", "Id"), ("B1", "Region"), ("A2", "1"), ("B2", "East"), ("A3", "2"), ("B3", "West")] {
+        s.set_value(at(a), Value::text(v));
+    }
+    let column = |name: &str| TableColumn {
+        name: name.into(),
+        totals: TotalsFn::None,
+        totals_label: None,
+        formula: None,
+        unique_name: None,
+        xml: None,
+    };
+    s.tables.push(Table {
+        id: 1,
+        name: "Sales".into(),
+        range: rr("A1:B3"),
+        header_row: true,
+        totals_row: false,
+        columns: vec![column("Id"), column("Region")],
+        style: "TableStyleMedium2".into(),
+        banded_rows: true,
+        banded_cols: false,
+        first_col: false,
+        last_col: false,
+        filter_button: true,
+        filter: vec![],
+        table_type: None,
+        connection_id: None,
+    });
+    s.autofilter = Some(AutoFilter {
+        range: rr("B1:B3"),
+        criteria: vec![(0, FilterCriterion::Values { values: vec!["East".into()], blanks: false })],
+    });
+
+    let (back, rep) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    assert!(rep.warnings.is_empty(), "{:?}", rep.warnings);
+    let b = back.sheet(0).unwrap();
+    let t = b.tables.first().expect("the table survived");
+    assert!(t.filter.is_empty(), "the criteria landed on the wrong table column: {:?}", t.filter);
+    assert!(b.autofilter.is_none(), "a sheet filter inside a table would be invalid");
+}

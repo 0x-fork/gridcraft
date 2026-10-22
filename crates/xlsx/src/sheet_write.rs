@@ -88,7 +88,12 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
             .iter()
             .cloned()
             .map(|mut t| {
-                if t.header_row && t.filter_button && t.filter.is_empty() && t.range.contains_range(&af.range) {
+                if t.header_row
+                    && t.filter_button
+                    && t.filter.is_empty()
+                    && t.range.contains_range(&af.range)
+                    && t.range.start.col == af.range.start.col
+                {
                     t.filter = af.criteria.clone();
                 }
                 t
@@ -360,7 +365,7 @@ pub fn write_sheet(wb: &Workbook, si: usize, selected: bool, out: &mut Out) -> (
     s.push_str(&protected_ranges_xml(sheet));
     // autoFilter (a sheet filter overlapping a table would be invalid).
     if let Some(af) = &sheet.autofilter
-        && !folded.iter().any(|t| t.range.contains_range(&af.range) && t.header_row && t.filter_button)
+        && !sheet.tables.iter().any(|t| t.range.intersects(&af.range))
     {
         s.push_str(&autofilter_xml(af.range, &af.criteria, out));
     }
