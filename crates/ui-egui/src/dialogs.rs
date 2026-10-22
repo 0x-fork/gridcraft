@@ -36,10 +36,14 @@ pub struct Dialog {
     pub result: Option<Json>,
     /// "Show password" is ticked: password fields show their text.
     pub show_password: bool,
+    /// The first text or number field still has to take keyboard focus (set when a form opens,
+    /// used once): like Excel, Column Width opens ready to type, its value selected.
+    focus_first_field: bool,
     picture_inbox: Option<crate::Inbox>,
     picture_target: Option<(u64, usize)>,
     /// The dialog this one was opened from (Name Manager › New…): it comes back when this closes.
     back: Option<Box<Dialog>>,
+    focus_initialized: bool,
 }
 
 impl Dialog {
@@ -70,9 +74,11 @@ impl Dialog {
             list_index: 0,
             result: None,
             show_password: false,
+            focus_first_field: true,
             picture_inbox: None,
             picture_target: None,
             back: None,
+            focus_initialized: false,
         }
     }
 
@@ -88,9 +94,11 @@ impl Dialog {
             list_index: 0,
             result: None,
             show_password: false,
+            focus_first_field: false,
             picture_inbox: None,
             picture_target: None,
             back: None,
+            focus_initialized: false,
         }
     }
 
@@ -1399,14 +1407,38 @@ fn form(ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, open: &mut bool) 
     ok_cancel(ui, confirm, open);
 }
 
+/// Gives keyboard focus to the first text or number field the first time a form is drawn. A
+/// focused number field is in typing mode with its value selected, so Alt+H, O, W then 12 and
+/// Enter sets the width, as in Excel.
+/// Keeps asking until the field really has focus: a new window's first frame is an invisible
+/// sizing pass where a focus request is ignored.
+fn take_first_focus(d: &mut Dialog, r: &egui::Response) {
+    if !d.focus_first_field {
+        return;
+    }
+    if !r.has_focus() {
+        r.request_focus();
+        return;
+    }
+    // Focus has landed, and the field is now a text box: select its whole value so typing
+    // replaces it (the field's own select-on-focus fired before it was a text box).
+    let mut state = egui::text_edit::TextEditState::load(&r.ctx, r.id).unwrap_or_default();
+    let all = egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(usize::MAX / 2));
+    state.cursor.set_char_range(Some(all));
+    state.store(&r.ctx, r.id);
+    d.focus_first_field = false;
+}
+
 /// Draws a dialog's `fields`, editing its values.
 fn form_fields(ui: &mut egui::Ui, d: &mut Dialog) {
+    // Field labels, choices and notes are English source strings, translated as they are drawn.
+    let lang = crate::i18n::current(ui.ctx());
     egui::Grid::new("form").num_columns(1).spacing(vec2(8.0, 6.0)).show(ui, |ui| {
         for f in d.fields.clone() {
             match f {
                 Field::Text { key, label } => {
                     ui.vertical(|ui| {
-                        ui.label(label);
+                        ui.label(lang.tr(label));
                         let mut s = d
                             .values
                             .get(key)
@@ -1418,6 +1450,7 @@ fn form_fields(ui: &mut egui::Ui, d: &mut Dialog) {
                         } else {
                             ui.add(egui::TextEdit::singleline(&mut s).desired_width(320.0))
                         };
+                        take_first_focus(d, &r);
                         if r.changed() {
                             d.values.insert(key.into(), json!(s));
                         }
@@ -1426,39 +1459,43 @@ fn form_fields(ui: &mut egui::Ui, d: &mut Dialog) {
                 Field::Password { key, label } => {
                     // Masked as typed (Excel shows dots); "Show password" reveals it on purpose.
                     ui.vertical(|ui| {
-                        ui.label(label);
+                        ui.label(lang.tr(label));
                         let mut s = d.values.get(key).and_then(Json::as_str).unwrap_or_default().to_string();
                         if ui.add(egui::TextEdit::singleline(&mut s).password(!d.show_password).desired_width(320.0)).changed() {
                             d.values.insert(key.into(), json!(s));
                         }
-                        ui.checkbox(&mut d.show_password, "Show password");
+                        ui.checkbox(&mut d.show_password, lang.tr("Show password"));
                     });
                 }
                 Field::Number { key, label } => {
                     ui.horizontal(|ui| {
-                        ui.label(label);
+                        ui.label(lang.tr(label));
                         let mut n = d.values.get(key).and_then(Json::as_f64).unwrap_or(0.0);
-                        if ui.add(egui::DragValue::new(&mut n).speed(0.5)).changed() {
+                        // Typed values count straight away: otherwise Enter or OK in the same frame
+                        // confirms the old value, because a number field only commits when it loses focus.
+                        let r = ui.add(egui::DragValue::new(&mut n).speed(0.5).update_while_editing(true));
+                        take_first_focus(d, &r);
+                        if r.changed() {
                             d.values.insert(key.into(), json!(n));
                         }
                     });
                 }
                 Field::Choice { key, label, options } => {
                     ui.vertical(|ui| {
-                        ui.label(egui::RichText::new(label).strong());
+                        ui.label(egui::RichText::new(lang.tr(label)).strong());
                         let cur = d.values.get(key).and_then(Json::as_str).unwrap_or("").to_string();
                         if d.name == "dataValidation" {
-                            let selected = options.iter().find(|(val, _)| *val == cur).map(|(_, text)| *text).unwrap_or("");
+                            let selected = options.iter().find(|(val, _)| *val == cur).map(|(_, text)| lang.tr(text)).unwrap_or("");
                             egui::ComboBox::from_id_salt(("dataValidation", key)).selected_text(selected).width(300.0).show_ui(ui, |ui| {
                                 for (val, text) in options {
-                                    if ui.selectable_label(cur == val, text).clicked() {
+                                    if ui.selectable_label(cur == val, lang.tr(text)).clicked() {
                                         d.set_value(key, json!(val));
                                     }
                                 }
                             });
                         } else {
                             for (val, text) in options {
-                                if ui.radio(cur == val, text).clicked() {
+                                if ui.radio(cur == val, lang.tr(text)).clicked() {
                                     d.set_value(key, json!(val));
                                 }
                             }
@@ -1467,12 +1504,15 @@ fn form_fields(ui: &mut egui::Ui, d: &mut Dialog) {
                 }
                 Field::Check { key, label } => {
                     let mut b = d.values.get(key).and_then(Json::as_bool).unwrap_or(false);
-                    if ui.checkbox(&mut b, label).changed() {
+                    if ui.checkbox(&mut b, lang.tr(label)).changed() {
                         d.values.insert(key.into(), json!(b));
                     }
                 }
                 Field::Note(t) => {
-                    ui.label(egui::RichText::new(t).small());
+                    // A note can carry user data (a URL, a file or sheet name); `tr` reads a `|` as a
+                    // context separator, so such a note is shown as it is.
+                    let text = if t.contains('|') { t.as_str() } else { lang.tr(&t) };
+                    ui.label(egui::RichText::new(text).small());
                 }
             }
             ui.end_row();
@@ -2266,8 +2306,24 @@ fn manage_rules(app: &mut SheetApp, ui: &mut egui::Ui) {
 }
 
 fn command_search(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool) {
-    let r = ui.add(egui::TextEdit::singleline(&mut d.search).desired_width(480.0).hint_text("Type a command, e.g. freeze, chart, bold…"));
-    r.request_focus();
+    let (down, up, home, end, pgup, pgdn) = ui.input_mut(|i| {
+        (
+            i.consume_key(egui::Modifiers::NONE, Key::ArrowDown),
+            i.consume_key(egui::Modifiers::NONE, Key::ArrowUp),
+            i.consume_key(egui::Modifiers::CTRL, Key::Home),
+            i.consume_key(egui::Modifiers::CTRL, Key::End),
+            i.consume_key(egui::Modifiers::NONE, Key::PageUp),
+            i.consume_key(egui::Modifiers::NONE, Key::PageDown),
+        )
+    });
+    let width = ui.available_width();
+    let r = ui.add(egui::TextEdit::singleline(&mut d.search).desired_width(width).hint_text("Type a command, e.g. freeze, chart, bold…"));
+
+    if !d.focus_initialized {
+        r.request_focus();
+        d.focus_initialized = true;
+    }
+
     let q = d.search.to_ascii_lowercase();
     let cmds: Vec<(String, String, String)> = app
         .session
@@ -2278,19 +2334,51 @@ fn command_search(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm
         .map(|c| (c.id.to_string(), c.label.to_string(), c.menu.join(" › ")))
         .take(40)
         .collect();
-    if ui.input(|i| i.key_pressed(Key::ArrowDown)) {
-        d.list_index = (d.list_index + 1).min(cmds.len().saturating_sub(1));
+
+    let last = cmds.len().saturating_sub(1);
+
+    let row_h = ui.spacing().interact_size.y.max(20.0);
+    let row_step = row_h + ui.spacing().item_spacing.y;
+
+    const LIST_HEIGHT: f32 = 320.0;
+
+    let page_size = ((LIST_HEIGHT / row_step).floor() as usize).saturating_sub(1).max(1);
+
+    if down {
+        d.list_index = (d.list_index + 1).min(last);
     }
-    if ui.input(|i| i.key_pressed(Key::ArrowUp)) {
+    if up {
         d.list_index = d.list_index.saturating_sub(1);
     }
-    egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+    if pgdn {
+        d.list_index = (d.list_index + page_size).min(last);
+    }
+    if pgup {
+        d.list_index = d.list_index.saturating_sub(page_size);
+    }
+    if home {
+        d.list_index = 0;
+    }
+    if end {
+        d.list_index = last;
+    }
+
+    d.list_index = d.list_index.min(last);
+
+    egui::ScrollArea::vertical().max_height(LIST_HEIGHT).auto_shrink([true, false]).show(ui, |ui| {
+        let scroll_area_width = ui.available_width();
         for (i, (id, label, menu)) in cmds.iter().enumerate() {
-            let r = ui.add(egui::Button::selectable(i == d.list_index, format!("{label}    {menu}")).min_size(vec2(480.0, 20.0)));
+            let r = ui.add(egui::Button::selectable(i == d.list_index, format!("{label}    {menu}")).min_size(vec2(scroll_area_width, 20.0)));
+
+            if (down || up || home || end || pgup || pgdn) && i == d.list_index && !ui.clip_rect().contains_rect(r.rect) {
+                r.scroll_to_me(Some(if down || end || pgdn { egui::Align::Max } else { egui::Align::Min }));
+            }
+
             if r.clicked() {
                 d.list_index = i;
                 *confirm = true;
             }
+
             r.on_hover_text(id);
         }
     });

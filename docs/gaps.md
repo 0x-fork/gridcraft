@@ -1,6 +1,6 @@
 # Gaps
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-12 · **Change:** minor (rows auto-fit oversized fonts on open and whole-row/column formatting) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-20 · **Change:** minor (the Japanese catalog covers the dialogs, messages and menus) · **Target:** Microsoft Excel (Microsoft 365)
 
 Every known shortfall against Excel, one entry each, ranked by user impact (what blocks someone
 using GridCraft for real work first). This is the work list: pick from the top, check the open
@@ -97,8 +97,10 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 ## After beta
 
 ### 11. No localization at all (L)
-- Ribbon-only catalog in five languages (#31, #104, #82; ~12% of strings each); dialogs, menus and
-  messages English; en-US function names and separators (#45); German in PR #163. **Estimate:**
+- Catalog: ribbon-only in five languages (#31, #104, #82; ~12% of strings each), and 943 strings
+  (~43%) in Japanese (10-17) and Brazilian Portuguese, including the dialog labels, messages, File
+  view and menus. The remaining dialogs, menus and messages are English; en-US function names and
+  separators (#45); German in PR #163. **Estimate:**
   100–165 h including #5. [localization-parity.md](localization-parity.md)
 
 ### 12. Get & Transform, external data, data model (F)
@@ -168,6 +170,7 @@ No alpha blockers: every core workflow passes the [alpha gate](roadmap.md#alpha-
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-20 | minor | §11: the Japanese catalog covers the dialogs, messages and menus — 943 keys (~43%), matching the pt-BR coverage; a test keeps the two catalogs in step |
 | 2026-10-13 | trivial | §4: multi-level category axes landed |
 | 2026-10-12 | minor | rows auto-fit oversized fonts on open and whole-row/column formatting (#833) |
 | 2026-10-12 | minor | Page Layout view: dragging margins on the rulers (#792) removed from the §14 remainder |

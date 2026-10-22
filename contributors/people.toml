@@ -74,3 +74,7 @@ sync_github_name = true
 
 [people.pourie-he]
 sync_github_name = true
+
+[people.Stefanfra]
+real_name = "Stefan Fransen"
+sync_github_name = true
