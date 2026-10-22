@@ -141,6 +141,9 @@ pub struct GridState {
     pub ink: Vec<[f32; 2]>,
     /// Page ranges for Page Break Preview, cached per (doc uid, revision, sheet).
     pub pages: Option<((u64, u64, usize), Vec<(RangeRef, u32)>)>,
+    /// The PivotTable Fields pane's `pivot.fields` answer, cached per (doc uid, revision, pivot):
+    /// it scans the whole source list, far too slow to repeat every frame (#2113).
+    pub pivot_fields: Option<((u64, u64, String), serde_json::Value)>,
     pub header_menu: Option<(Pos2, bool)>,
     /// Page Layout view pagination, cached per (doc uid, revision, sheet, rows, columns).
     pub paper: Option<crate::paper_view::PaperCache>,

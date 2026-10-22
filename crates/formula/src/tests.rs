@@ -495,3 +495,11 @@ fn missing_closing_parentheses_are_closed_and_errors_describe_the_typed_text() {
     }
     assert_eq!(entry("1+").unwrap_err().msg, "unexpected end of formula");
 }
+
+#[test]
+fn number_literal_too_large_for_f64_is_a_parse_error() {
+    for bad in ["1E+400", "-1E+400", "1E+400*A1", "SUM(1E309,1)", "9".repeat(400).as_str()] {
+        assert!(parse(bad).is_err(), "{bad} should fail");
+    }
+    assert!(parse("1E+308").is_ok());
+}

@@ -465,6 +465,28 @@ fn pivot_fields_pane_follows_the_interface_language() {
 }
 
 #[test]
+fn pivot_fields_pane_reuses_its_field_list_until_the_workbook_changes() {
+    // #2113: the pane ran `pivot.fields`, a scan of the whole source list, on every frame.
+    let mut h = harness(blank());
+    h.state_mut().run("range.setValues", json!({"range": "A1:B3", "values": [["Region", "Sales"], ["North", 10], ["South", 20]]})).unwrap();
+    h.state_mut().run("insert.pivotTable", json!({"source": "Sheet1!$A$1:$B$3", "rows": ["Region"], "destination": "Sheet1!D1"})).unwrap();
+    h.run_steps(2);
+    assert!(h.query_by_label("Sales").is_some(), "the pane lists the source fields");
+    let (key, mut info) = h.state().grid.pivot_fields.clone().expect("the pane keeps its field list");
+    info["fields"][1]["name"] = json!("Cached");
+    h.state_mut().grid.pivot_fields = Some((key, info));
+    h.run_steps(2);
+    assert!(h.query_by_label("Cached").is_some(), "repaints reuse the kept list instead of scanning the source again");
+    h.state_mut().run("cell.set", json!({"cell": "B1", "input": "Revenue"})).unwrap();
+    h.run_steps(2);
+    assert!(h.query_by_label("Cached").is_none(), "an edit drops the kept list");
+    assert!(h.query_by_label("Revenue").is_some(), "the pane shows the edited source");
+    h.state_mut().run("edit.undo", json!({})).unwrap();
+    h.run_steps(2);
+    assert!(h.query_by_label("Sales").is_some(), "undo brings the previous field list back");
+}
+
+#[test]
 fn format_cells_draws_its_labels_in_the_interface_language() {
     let mut h = harness(blank());
     h.state_mut().run("app.language.set", json!({"language": "de"})).unwrap();
