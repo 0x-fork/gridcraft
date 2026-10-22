@@ -1385,7 +1385,7 @@ pub(crate) fn paint_quadrant(
             let s = 6.0 * z.max(0.7);
             p.add(egui::Shape::convex_polygon(
                 vec![rect.left_top(), pos2(rect.left() + s, rect.top()), pos2(rect.left(), rect.top() + s)],
-                ERROR_CHECK_GREEN,
+                t.error_check_green,
                 Stroke::NONE,
             ));
         }
@@ -3042,9 +3042,6 @@ fn object_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
     }
 }
 
-/// Excel's background error-checking indicator colour.
-const ERROR_CHECK_GREEN: Color32 = Color32::from_rgb(0x1E, 0x8E, 0x3E);
-
 /// The warning button beside an active cell holding a number stored as text, as in Excel: its
 /// menu names the problem and offers Convert to Number for the selection (#1994).
 fn error_check_tag(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet) {
@@ -3075,10 +3072,10 @@ fn error_check_tag(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet)
     let r = 6.0;
     p.add(egui::Shape::convex_polygon(
         vec![pos2(c.x, c.y - r), pos2(c.x + r, c.y), pos2(c.x, c.y + r), pos2(c.x - r, c.y)],
-        Color32::from_rgb(0xF2, 0xB7, 0x05),
+        t.warning_fill,
         Stroke::NONE,
     ));
-    p.text(c, egui::Align2::CENTER_CENTER, "!", egui::FontId::proportional(10.0), Color32::BLACK);
+    p.text(c, egui::Align2::CENTER_CENTER, "!", egui::FontId::proportional(10.0), t.warning_ink);
     egui::Popup::menu(&resp).show(|ui| {
         ui.label(egui::RichText::new(lang.tr("Number Stored as Text")).strong());
         ui.separator();
