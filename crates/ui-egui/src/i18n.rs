@@ -17,15 +17,15 @@ mod fr;
 mod it;
 mod ja;
 mod ko;
-mod pl;
 mod nl;
+mod pl;
 mod pt;
 mod ro;
 mod ru;
 mod sr;
+mod uk;
 mod vi;
 mod zh;
-mod uk;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -54,7 +54,24 @@ pub enum Language {
 
 impl Language {
     pub const ALL: [Self; 18] = [
-        Self::En, Self::Es, Self::El, Self::Zh, Self::Ja, Self::Ko, Self::Ru, Self::PtBr, Self::De, Self::Cs, Self::Fr, Self::Sr, Self::Pl, Self::It, Self::Uk, Self::Vi, Self::Nl, Self::Ro,
+        Self::En,
+        Self::Es,
+        Self::El,
+        Self::Zh,
+        Self::Ja,
+        Self::Ko,
+        Self::Ru,
+        Self::PtBr,
+        Self::De,
+        Self::Cs,
+        Self::Fr,
+        Self::Sr,
+        Self::Pl,
+        Self::It,
+        Self::Uk,
+        Self::Vi,
+        Self::Nl,
+        Self::Ro,
     ];
 
     /// Every language in the order the switcher lists them: English first (the source language),
