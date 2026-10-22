@@ -242,6 +242,21 @@ fn formulas_with_the_wrong_argument_count_are_refused_on_entry() {
 }
 
 #[test]
+fn an_incomplete_formula_is_refused_with_an_error_about_what_was_typed() {
+    // #2030: `=1+` said "unexpected `)`", although no `)` was typed: entry closes missing
+    // parentheses and reported the error of its last retry.
+    let mut s = s();
+    for (input, msg) in [("=1+", "unexpected end of formula"), ("=SUM(1,+", "unexpected end of formula")] {
+        let e = s.execute("cell.set", json!({"cell": "A1", "input": input})).unwrap_err().to_string();
+        assert!(e.contains("problem with this formula") && e.contains(msg), "{input}: {e}");
+        assert!(!e.contains('`'), "{input}: {e}");
+    }
+    // Missing closing parentheses are still added.
+    s.execute("cell.set", json!({"cell": "A1", "input": "=SUM(1,(2+3"})).unwrap();
+    assert_eq!(v(&s, "A1"), Value::Number(6.0));
+}
+
+#[test]
 fn undo_redo() {
     let mut s = s();
     s.execute("cell.set", json!({"cell": "A1", "input": "1"})).unwrap();
