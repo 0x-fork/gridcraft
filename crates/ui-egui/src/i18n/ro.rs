@@ -1016,6 +1016,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Print job submitted: {receipt}" => "Lucrarea de imprimare a fost trimisă: {receipt}",
         "Print failed: {error}" => "Imprimarea a eșuat: {error}",
         "Print failed: the printing worker stopped." => "Imprimarea a eșuat: procesul de imprimare s-a oprit.",
+        "Options|Editing" => "Editing",
         _ => return None,
     })
 }
