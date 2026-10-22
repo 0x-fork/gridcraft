@@ -21,10 +21,15 @@ pub fn show(app: &mut SheetApp, ui: &mut Ui) {
     let Some(name) = active_pivot(app) else { return };
     let t = Tokens::get(ui.ctx());
     let lang = i18n::current(ui.ctx());
-    let info = match app.session.run("pivot.fields", json!({"pivot": name})) {
-        Ok(v) => v,
-        Err(_) => return,
-    };
+    let Some(key) = app.session.active().map(|d| (d.uid, d.revision, name.clone())) else { return };
+    if app.grid.pivot_fields.as_ref().is_none_or(|(k, _)| *k != key) {
+        let info = match app.session.run("pivot.fields", json!({"pivot": name})) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        app.grid.pivot_fields = Some((key, info));
+    }
+    let Some((_, info)) = app.grid.pivot_fields.clone() else { return };
     egui::Panel::right("pivot_pane").default_size(280.0).resizable(true).frame(egui::Frame::NONE.fill(t.ribbon).inner_margin(10)).show(ui, |ui| {
         ui.label(egui::RichText::new(lang.tr("PivotTable Fields")).font(theme::ui_bold(15.0)));
         ui.label(egui::RichText::new(lang.tr("Choose fields to add to report:")).small().color(t.text_dim));
