@@ -1327,7 +1327,7 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
                     let quitting = d.values.get("quit").and_then(Json::as_bool) == Some(true);
                     ui.horizontal(|ui| {
                         if ui.button("Don't Save").clicked() {
-                            app.run_or_alert("file.close", json!({"force": true}));
+                            app.run_or_alert("file.close", json!({"force": true, "document": true}));
                             if quitting {
                                 app.continue_quit(ui.ctx());
                             }
@@ -1340,7 +1340,7 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
                         if ui.button("Save").clicked() && app.commit_edit(0, 0, false, false) {
                             app.run_or_alert("file.save", json!({}));
                             if app.session.active().is_some_and(|x| !x.is_dirty()) {
-                                app.run_or_alert("file.close", json!({"force": true}));
+                                app.run_or_alert("file.close", json!({"force": true, "document": true}));
                                 if quitting {
                                     app.continue_quit(ui.ctx());
                                 }

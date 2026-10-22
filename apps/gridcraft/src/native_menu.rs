@@ -195,13 +195,13 @@ pub struct NativeMenu {
     events: Receiver<MenuEvent>,
     theme_items: Vec<(&'static str, CheckMenuItem)>,
     window_menu: Option<Submenu>,
-    /// The Window menu's workbook items and what they last showed.
+    /// The Window menu's window items and what they last showed.
     window_items: Vec<CheckMenuItem>,
     windows: Vec<OpenWindow>,
 }
 
 /// Menu id of the Window menu item that brings workbook `doc` forward.
-const WINDOW_ITEM: &str = "window:doc:";
+const WINDOW_ITEM: &str = "window:id:";
 
 /// The Quit item: closing the window asks about unsaved workbooks first, which AppKit's own
 /// Quit (terminate:) would skip.
@@ -279,15 +279,15 @@ impl NativeMenu {
         NativeMenu { _menu: menu, events: rx, theme_items, window_menu, window_items: Vec::new(), windows: Vec::new() }
     }
 
-    /// Keeps the Window menu's list of open workbooks (title, unsaved bullet, active check) in
+    /// Keeps the Window menu's list of open windows (title, unsaved bullet, active check) in
     /// step with the session.
     fn sync_windows(&mut self, app: &SheetApp) {
         let windows = app.open_windows();
         if windows != self.windows
             && let Some(menu) = &self.window_menu
         {
-            let same_docs = windows.len() == self.windows.len() && windows.iter().zip(&self.windows).all(|(a, b)| a.doc == b.doc);
-            if same_docs {
+            let same_windows = windows.len() == self.windows.len() && windows.iter().zip(&self.windows).all(|(a, b)| a.window == b.window);
+            if same_windows {
                 for (item, w) in self.window_items.iter().zip(&windows) {
                     item.set_text(w.label());
                 }
@@ -296,7 +296,7 @@ impl NativeMenu {
                     let _ = menu.remove(&item);
                 }
                 for w in &windows {
-                    let item = CheckMenuItem::with_id(format!("{WINDOW_ITEM}{}", w.doc), w.label(), true, w.active, None);
+                    let item = CheckMenuItem::with_id(format!("{WINDOW_ITEM}{}", w.window), w.label(), true, w.active, None);
                     let _ = menu.append(&item);
                     self.window_items.push(item);
                 }
@@ -318,8 +318,8 @@ impl NativeMenu {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 continue;
             }
-            if let Some(doc) = id.strip_prefix(WINDOW_ITEM).and_then(|d| d.parse::<u64>().ok()) {
-                app.run_or_alert("view.switchWindows", json!({"doc": doc}));
+            if let Some(window) = id.strip_prefix(WINDOW_ITEM).and_then(|w| w.parse::<u64>().ok()) {
+                app.run_or_alert("view.switchWindows", json!({"window": window}));
                 continue;
             }
             // Text selection belongs to the inline editor, not the worksheet clipboard/undo.

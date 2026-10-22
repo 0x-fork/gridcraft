@@ -166,10 +166,12 @@ pub struct Notice {
     pub action: Option<(String, String)>,
 }
 
-/// One open workbook, as View › Switch Windows and the macOS Window menu list it.
+/// One open window, as View › Switch Windows and the macOS Window menu list it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpenWindow {
-    /// The workbook's `DocState::uid`, the `doc` param of `view.switchWindows`.
+    /// The window's id, the `window` param of `view.switchWindows`.
+    pub window: u64,
+    /// Its workbook's `DocState::uid`.
     pub doc: u64,
     pub title: String,
     pub dirty: bool,
@@ -177,7 +179,8 @@ pub struct OpenWindow {
 }
 
 impl OpenWindow {
-    /// The title, with a bullet after it while the workbook has unsaved changes.
+    /// The title ("Book1", or "Book1:2" for a workbook's second window), with a bullet after it
+    /// while the workbook has unsaved changes.
     pub fn label(&self) -> String {
         if self.dirty { format!("{} •", self.title) } else { self.title.clone() }
     }
@@ -256,6 +259,7 @@ pub struct SheetApp {
     pub ui: UiState,
     /// The window chrome to draw (see [`Chrome`]).
     pub chrome: Chrome,
+    /// Scroll position per (window id, sheet index).
     pub views: HashMap<(u64, usize), SheetView>,
     pub editor: Option<editor::EditState>,
     pub text_box_editor: Option<text_box::EditState>,
@@ -410,7 +414,7 @@ impl SheetApp {
     fn run_command(&mut self, id: &str, params: Json) -> Result<Json, String> {
         let switches_window = id.starts_with("window.")
             || matches!(id, "view.newWindow" | "view.hideWindow" | "view.unhideWindow")
-            || (id == "view.switchWindows" && params.get("doc").is_some_and(|d| !d.is_null()));
+            || (id == "view.switchWindows" && ["window", "doc"].iter().any(|k| params.get(*k).is_some_and(|d| !d.is_null())));
         if id.starts_with("file.") || switches_window {
             self.settle_drafts()?;
         }
@@ -567,9 +571,9 @@ impl SheetApp {
         if id == "insert.recommendedCharts" && params.get("type").is_none() {
             return self.open_dialog("recommendedCharts", json!({}));
         }
-        // Switch Windows with no workbook named (key tip, command search) opens the View tab's
+        // Switch Windows with no window named (key tip, command search) opens the View tab's
         // list to choose from; programmatic callers of `run` get the list back.
-        if id == "view.switchWindows" && params.get("doc").is_none_or(Json::is_null) {
+        if id == "view.switchWindows" && ["window", "doc"].iter().all(|k| params.get(*k).is_none_or(Json::is_null)) {
             self.ui.ribbon_tab = "View".into();
             self.ui.ribbon_collapsed = false;
             self.open_switch_windows = true;
@@ -914,27 +918,36 @@ impl SheetApp {
         }
     }
 
-    /// The open workbooks in order, for the Switch Windows lists.
+    /// The open windows in order, for the Switch Windows lists.
     pub fn open_windows(&self) -> Vec<OpenWindow> {
-        let active = self.session.active_index();
+        let active = self.session.active_window();
         self.session
-            .documents()
+            .windows()
             .iter()
-            .enumerate()
-            .map(|(i, d)| OpenWindow { doc: d.uid, title: d.display_title(), dirty: d.is_dirty(), active: i == active })
+            .filter_map(|w| {
+                let d = self.session.documents().iter().find(|d| d.uid == w.doc_uid)?;
+                let title = self.session.window_title(w.id)?;
+                Some(OpenWindow { window: w.id, doc: d.uid, title, dirty: d.is_dirty(), active: active == Some(w.id) })
+            })
             .collect()
     }
 
+    /// The active workbook and sheet: what drafts, text boxes and picture targets belong to.
     pub fn view_key(&self) -> Option<(u64, usize)> {
         self.session.active().map(|d| (d.uid, d.wb.active_sheet))
     }
 
+    /// The active window and sheet: each window scrolls on its own.
+    fn scroll_key(&self) -> Option<(u64, usize)> {
+        Some((self.session.active_window()?, self.session.active()?.wb.active_sheet))
+    }
+
     pub fn view(&self) -> SheetView {
-        self.view_key().and_then(|k| self.views.get(&k).copied()).unwrap_or_else(|| self.saved_view())
+        self.scroll_key().and_then(|k| self.views.get(&k).copied()).unwrap_or_else(|| self.saved_view())
     }
 
     pub fn view_mut(&mut self) -> Option<&mut SheetView> {
-        let k = self.view_key()?;
+        let k = self.scroll_key()?;
         let saved = self.saved_view();
         Some(self.views.entry(k).or_insert(saved))
     }
@@ -956,10 +969,11 @@ impl SheetApp {
     /// cell to the engine so a save writes them (`sheetView topLeftCell`). Normal view only:
     /// Page Layout view scrolls over pages, not cells.
     pub fn store_view_state(&mut self) {
+        let window = self.session.active_window();
         let Some(d) = self.session.active_mut() else { return };
         let mut tops = Vec::new();
-        for (&(uid, si), v) in &self.views {
-            let Some(sh) = d.wb.sheets.get(si).filter(|sh| uid == d.uid && sh.view == gridcraft_engine::model::SheetViewMode::Normal) else {
+        for (&(w, si), v) in &self.views {
+            let Some(sh) = d.wb.sheets.get(si).filter(|sh| Some(w) == window && sh.view == gridcraft_engine::model::SheetViewMode::Normal) else {
                 continue;
             };
             let (fr, fc) = sh.freeze.unwrap_or((0, 0));
@@ -1005,6 +1019,7 @@ impl SheetApp {
             None => (current.clone(), false),
         };
         let mut ed = editor::EditState::new(d.uid, d.wb.active_sheet, at, text, replace, from_formula_bar);
+        ed.window = self.session.active_window();
         ed.locale = locale;
         if replace && self.ui.autocomplete && !ed.is_formula() {
             ed.completion = editor::column_completion(sh, at, &ed.text);
@@ -1015,27 +1030,36 @@ impl SheetApp {
 
     /// Commits the edit; `then` moves the selection (dr, dc) afterwards.
     ///
-    /// The draft goes into the workbook it was typed in. If another workbook is showing, that
-    /// workbook stays active afterwards; a draft its own workbook refuses (validation, a bad
-    /// formula) brings that workbook back to the front with the draft still open.
+    /// The draft goes into the window and workbook it was typed in. If another window is
+    /// showing, that window stays active afterwards; a draft its own workbook refuses
+    /// (validation, a bad formula) brings its window back to the front with the draft still open.
     pub fn commit_edit(&mut self, dr: i64, dc: i64, array: bool, fill_selection: bool) -> bool {
-        let Some(doc) = self.editor.as_ref().map(|ed| ed.doc) else { return true };
-        let shown = self.session.active().map(|d| d.uid);
-        if shown == Some(doc) {
+        let Some((doc, window)) = self.editor.as_ref().map(|ed| (ed.doc, ed.window)) else { return true };
+        if !self.draft_elsewhere() {
             return self.commit_edit_here(dr, dc, array, fill_selection);
         }
-        let Some(owner) = self.session.document_index(doc) else {
+        // Its window, or (when that window closed) its workbook's most recent one.
+        let Some(owner) = window.filter(|w| self.session.window(*w).is_some()).or_else(|| self.session.doc_window(doc)) else {
             self.cancel_edit();
             return true;
         };
-        let back = self.session.active_index();
-        self.session.set_active(owner);
+        let back = self.session.active_window();
+        self.session.activate_window(owner);
         if !self.commit_edit_here(dr, dc, array, fill_selection) {
-            // Refused: its workbook stays in front with the draft open and the reason shown.
+            // Refused: its window stays in front with the draft open and the reason shown.
             return false;
         }
-        self.session.set_active(back);
+        if let Some(back) = back {
+            self.session.activate_window(back);
+        }
         true
+    }
+
+    /// The cell draft belongs to a window or workbook other than the one showing.
+    fn draft_elsewhere(&self) -> bool {
+        self.editor.as_ref().is_some_and(|ed| {
+            self.session.active().map(|d| d.uid) != Some(ed.doc) || ed.window.is_some_and(|w| self.session.active_window() != Some(w))
+        })
     }
 
     /// Commits the cell and text-box drafts, as Enter would, before a command that can show
@@ -1360,10 +1384,10 @@ impl SheetApp {
         }
         let t0 = now_ms();
         text_box::before_ui(self, &ctx);
-        // Another workbook came forward without going through a command (which settles drafts
-        // first): the draft goes into its own workbook instead of floating over this one. If that
-        // workbook refuses it, it comes back to the front with the draft open.
-        if self.editor.as_ref().is_some_and(|ed| self.session.active().map(|d| d.uid) != Some(ed.doc)) {
+        // Another window came forward without going through a command (which settles drafts
+        // first): the draft goes into its own window instead of floating over this one. If its
+        // workbook refuses it, its window comes back to the front with the draft open.
+        if self.draft_elsewhere() {
             self.commit_edit(0, 0, false, false);
         }
         // The language the widgets translate with this frame (see `i18n::current`).

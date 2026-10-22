@@ -141,16 +141,16 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!(noundo "view.customViews", "Custom Views…", ["View", "Workbook Views"], None, "{save?: name, show?: name, delete?: name} → list", has_doc, custom_views),
         cmd!(noundo "view.split", "Split", ["View", "Window"], None, "{} (toggles a split at the active cell; shown as frozen panes in this version)", has_doc, split),
-        cmd!(noundo "view.newWindow", "New Window", ["View", "Window"], None, "{} opens a second window on the same workbook (a linked copy)", has_doc, new_window),
+        cmd!(noundo "view.newWindow", "New Window", ["View", "Window"], None, "{} → {window, doc, title}: opens another window on the active workbook (the same workbook: saving from either window saves it)", has_doc, new_window),
         cmd!(noundo "view.arrangeAll", "Arrange All", ["View", "Window"], None, "{}", has_doc, |_, _| ok()),
-        cmd!(noundo "view.hideWindow", "Hide", ["View", "Window"], None, "{}", has_doc, hide_window),
-        cmd!(noundo "view.unhideWindow", "Unhide…", ["View", "Window"], None, "{index?}", has_doc, unhide_window),
+        cmd!(noundo "view.hideWindow", "Hide", ["View", "Window"], None, "{window?, doc?} (the active window by default)", has_doc, hide_window),
+        cmd!(noundo "view.unhideWindow", "Unhide…", ["View", "Window"], None, "{window?, doc?, index?} (the most recently hidden window by default)", has_doc, unhide_window),
         cmd!(
             noundo "view.switchWindows",
             "Switch Windows",
             ["View", "Window"],
             None,
-            "{doc?} → open workbooks [{index, doc, title, dirty, active, hidden}]; with `doc` (a workbook's `doc` id from the list) makes that workbook active first",
+            "{window?, doc?} → open windows [{window, doc, index, title, dirty, active, hidden}]; with `window` (an id from the list), or `doc` (a workbook id: its most recent window), shows and activates that window first",
             always,
             switch_windows
         ),
@@ -790,54 +790,46 @@ fn split(s: &mut Session, _: &Json) -> Result<Json> {
 }
 
 fn new_window(s: &mut Session, _: &Json) -> Result<Json> {
-    let d = s.doc()?.clone();
-    let mut copy = crate::DocState::new((*d.wb).clone(), d.path.clone(), format!("{}:2", d.display_title()));
-    copy.selection = d.selection.clone();
-    let i = s.add_document(copy);
-    Ok(json!({"index": i}))
+    let id = s.new_window()?;
+    let doc = s.window(id).map(|w| w.doc_uid);
+    Ok(json!({"window": id, "doc": doc, "title": s.window_title(id)}))
 }
 
-fn hide_window(s: &mut Session, _: &Json) -> Result<Json> {
-    s.hidden_windows.push(s.active_index());
-    let n = s.documents().len();
-    if n > 1 {
-        let next = (0..n).find(|i| !s.hidden_windows.contains(i)).unwrap_or(0);
-        s.set_active(next);
-    }
+/// The window a window command names: `window` (an id), else `doc` (a workbook id: its most
+/// recent window), else the active window.
+pub(crate) fn window_param(s: &Session, cmd: &str, p: &Json) -> Result<u64> {
+    let t = crate::Target::from_json(p).map_err(|e| bad(cmd, e.to_string()))?;
+    s.target_window(t).map_err(|e| bad(cmd, e.to_string()))
+}
+
+fn hide_window(s: &mut Session, p: &Json) -> Result<Json> {
+    let id = window_param(s, "view.hideWindow", p)?;
+    s.hide_window(id);
     ok()
 }
 
 fn unhide_window(s: &mut Session, p: &Json) -> Result<Json> {
-    let i = u32_param(p, "index").map(|v| v as usize).or_else(|| s.hidden_windows.last().copied());
-    if let Some(i) = i {
-        s.hidden_windows.retain(|x| *x != i);
-        s.set_active(i);
+    let id = if p.get("window").is_some_and(|v| !v.is_null()) || p.get("doc").is_some_and(|v| !v.is_null()) {
+        Some(window_param(s, "view.unhideWindow", p)?)
+    } else if let Some(i) = u32_param(p, "index") {
+        // A workbook's position in the document list.
+        let uid = s.documents().get(i as usize).map(|d| d.uid).ok_or_else(|| bad("view.unhideWindow", "no such window"))?;
+        s.windows().iter().filter(|w| w.doc_uid == uid && w.hidden).map(|w| w.id).next_back().or_else(|| s.doc_window(uid))
+    } else {
+        s.last_hidden_window()
+    };
+    if let Some(id) = id {
+        s.unhide_window(id);
     }
     ok()
 }
 
 fn switch_windows(s: &mut Session, p: &Json) -> Result<Json> {
-    if let Some(doc) = p.get("doc").filter(|v| !v.is_null()) {
-        let i = doc.as_u64().and_then(|uid| s.document_index(uid)).ok_or_else(|| bad("view.switchWindows", "no open workbook has that `doc` id"))?;
-        s.hidden_windows.retain(|x| *x != i);
-        s.set_active(i);
+    if p.get("window").is_some_and(|v| !v.is_null()) || p.get("doc").is_some_and(|v| !v.is_null()) {
+        let id = window_param(s, "view.switchWindows", p)?;
+        s.unhide_window(id);
     }
-    Ok(Json::Array(
-        s.documents()
-            .iter()
-            .enumerate()
-            .map(|(i, d)| {
-                json!({
-                    "index": i,
-                    "doc": d.uid,
-                    "title": d.display_title(),
-                    "dirty": d.is_dirty(),
-                    "active": i == s.active_index(),
-                    "hidden": s.hidden_windows.contains(&i),
-                })
-            })
-            .collect(),
-    ))
+    Ok(s.window_list())
 }
 
 fn table_resize(s: &mut Session, p: &Json) -> Result<Json> {

@@ -1,6 +1,6 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** minor (Switch Windows lists the open workbooks; a cell being typed stays in its own workbook through New, Open and window switches; macOS Quit asks about unsaved workbooks) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-22 · **Change:** minor (New Window opens a second window on the same workbook, titled Name:1 / Name:2; Switch Windows lists the open windows; a cell being typed stays in its own window through New, Open and window switches; macOS Quit asks about unsaved workbooks) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Interaction, controls and feel, against Excel. Part of [target-app-parity.md](target-app-parity.md).
 **UI/UX fidelity: ~55% ready, 50–80 h** (estimated). Ribbon command coverage is measured
@@ -34,7 +34,7 @@ Sources: `crates/ui-egui/src` (ribbon, grid, editor, formula bar, dialogs, panes
 | Dark mode, system appearance | yes | yes | done (10-09) |
 | Page Layout view (paper view with rulers and header editing) | yes | yes (#329, 10-11): per-sheet view saved in XLSX, pages with margins and gaps on the print pagination, "Click to add data" pages, rulers (inches or centimetres), headers and footers drawn and edited in place with a Header & Footer tab | margins drag on the rulers (#792, with header and footer margins); header/footer pictures, Different First Page / Odd & Even missing (1–3 h) |
 | Multiple windows per workbook | yes | no (#162) | see [hardware-parity.md](hardware-parity.md) |
-| Switch Windows, unsaved workbooks on quit | yes | yes (10-22): View › Switch Windows and the macOS Window menu list the open workbooks (active one checked, unsaved ones marked •) and bring the chosen one forward (`view.switchWindows {doc}`); a cell being typed is entered into its own workbook before New, Open, Close, Save, Print and window switches, and a refused entry stays open and stops the command; quitting (window close, Cmd+Q, the macOS Quit item) asks Save / Don't Save / Cancel for each unsaved workbook | one OS window for all workbooks (#162) |
+| Switch Windows, New Window, unsaved workbooks on quit | yes | yes (10-22): View › New Window opens another window on the same workbook (no copy: saving from either saves it), each with its own selection, active sheet and scroll; a workbook with several windows titles them "Book1:1", "Book1:2"; File › Close closes one of them without asking and asks only for the last; View › Switch Windows and the macOS Window menu list the open windows (active one checked, unsaved ones marked •) and bring the chosen one forward (`view.switchWindows {window}`, or `{doc}` for a workbook's most recent window); a cell being typed is entered into its own window and workbook before New, Open, Close, Save, Print and window switches (also between two windows on one workbook), and a refused entry stays open and stops the command; quitting (window close, Cmd+Q, the macOS Quit item) asks Save / Don't Save / Cancel for each unsaved workbook | one OS window for all workbooks (#162) |
 
 ## Grid interaction
 
@@ -177,6 +177,7 @@ scrollbar bugs 2–4 · pixel/feel pass against observed Excel 7–12.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | minor | New Window opens a second window on the same workbook instead of a copy that saved over the original; windows keep their own selection, sheet and scroll; titles Name:1 / Name:2; Switch Windows, Hide and Unhide work by window; File › Close closes one window of several without asking |
 | 2026-10-22 | minor | New workbook no longer loses the first one: the cell being typed is entered into its own workbook before any File or window command (an entry the workbook refuses stays open and the command doesn't run; an untouched F2 draft changes nothing), the editor is tied to its workbook, View › Switch Windows and the macOS Window menu list the open workbooks, and the macOS Quit item asks about unsaved workbooks like the close button |
 | 2026-10-21 | minor | Background error checking, first part (#1994): a constant whose text would be a number if typed (signs, thousands, currency, percent, exponent, parenthesised negative) gets Excel's green corner triangle; the active cell then shows a warning button whose menu names the problem and offers Convert to Number for the selection (`formulas.convertToNumber`). Dates, times and fractions kept as text and formula results are not flagged, as in Excel |
 | 2026-10-21 | minor | Paste Special laid out as Excel's: Paste and Operation options each in two columns inside a frame, Skip blanks and Transpose side by side, Paste Link as a button that pastes references at once; labels translated (the generic form didn't translate them) and the window no longer runs past the screen |

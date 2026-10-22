@@ -22,6 +22,7 @@ pub mod pivot_calc;
 pub mod sample;
 pub mod selection;
 pub mod tables;
+pub mod windows;
 
 use std::sync::Arc;
 
@@ -38,6 +39,7 @@ pub use gridcraft_formula as formula;
 pub use gridcraft_model as model;
 pub use gridcraft_numfmt as numfmt;
 pub use selection::Selection;
+pub use windows::{Target, TargetGuard, WindowState, WindowView};
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
@@ -286,7 +288,15 @@ pub type TextWidth = Arc<dyn Fn(&str, &model::Font, bool) -> f32 + Send + Sync>;
 #[derive(Default)]
 pub struct Session {
     docs: Vec<DocState>,
+    /// Index in `docs` of the active window's workbook.
     active: usize,
+    /// Windows on the open workbooks ([`windows`]); every workbook has at least one.
+    windows: Vec<WindowState>,
+    active_window: Option<u64>,
+    /// Last window id handed out.
+    next_window: u64,
+    /// Window activation counter (most recently used order).
+    activation: u64,
     pub clipboard: Option<Clipboard>,
     pub prefs: Prefs,
     pub mode: Mode,
@@ -304,8 +314,6 @@ pub struct Session {
     pub hide_ruler: bool,
     /// Journal position where action recording started.
     pub recording: Option<usize>,
-    /// Windows hidden with View › Hide.
-    pub hidden_windows: Vec<usize>,
     /// Draw tab tool: "" (select), "pen" or "eraser"; pen colour and width.
     pub draw_tool: String,
     pub draw_color: String,
@@ -330,9 +338,15 @@ impl Session {
     pub fn active_index(&self) -> usize {
         self.active
     }
+    /// Makes the workbook at `i` active, in its most recently active window (unless the active
+    /// window already shows it).
     pub fn set_active(&mut self, i: usize) {
-        if i < self.docs.len() {
-            self.active = i;
+        let Some(uid) = self.docs.get(i).map(|d| d.uid) else { return };
+        if self.active == i && self.active_window.and_then(|w| self.window(w)).is_some_and(|w| w.doc_uid == uid) {
+            return;
+        }
+        if let Some(w) = self.doc_window(uid) {
+            self.activate_window(w);
         }
     }
     pub fn active(&self) -> Option<&DocState> {
@@ -351,16 +365,23 @@ impl Session {
     pub fn doc_mut(&mut self) -> Result<&mut DocState> {
         self.active_mut().ok_or(EngineError::NoDocument)
     }
+    /// Opens a workbook in a new window, which becomes the active one.
     pub fn add_document(&mut self, d: DocState) -> usize {
+        let uid = d.uid;
         self.docs.push(d);
-        self.active = self.docs.len() - 1;
-        self.active
+        let w = self.push_window(uid);
+        self.activate_window(w);
+        self.docs.len() - 1
     }
+    /// Closes a workbook and its windows; the most recently active remaining window comes forward.
     pub fn close_document(&mut self, i: usize) {
         if i < self.docs.len() {
-            self.docs.remove(i);
-            if self.active >= self.docs.len() {
-                self.active = self.docs.len().saturating_sub(1);
+            let d = self.docs.remove(i);
+            self.windows.retain(|w| w.doc_uid != d.uid);
+            if self.active_window.is_some_and(|w| self.window(w).is_none()) {
+                self.activate_recent();
+            } else if let Some(di) = self.active_window.and_then(|w| self.window(w)).and_then(|w| self.document_index(w.doc_uid)) {
+                self.active = di;
             }
         }
     }

@@ -2501,7 +2501,10 @@ fn every_command_survives_empty_params() {
     let mut s = Session::new();
     s.execute("file.new", json!({"sample": "sales"})).unwrap();
     for spec in crate::command_specs() {
-        if matches!(spec.id, "file.close" | "file.open" | "file.save" | "file.saveAs" | "file.exportCsv" | "file.exportHtml" | "insert.picture") {
+        if matches!(
+            spec.id,
+            "file.close" | "window.close" | "file.open" | "file.save" | "file.saveAs" | "file.exportCsv" | "file.exportHtml" | "insert.picture"
+        ) {
             continue;
         }
         let _ = s.execute(spec.id, json!({}));
@@ -4489,4 +4492,113 @@ fn switch_windows_lists_workbooks_by_stable_id_and_switches_to_one() {
     assert!(s.execute("view.switchWindows", json!({"doc": book3 + 1000})).is_err());
     assert!(s.execute("view.switchWindows", json!({"doc": "Book1"})).is_err());
     assert_eq!(s.doc().unwrap().uid, book1, "a bad id leaves the active workbook alone");
+}
+
+#[test]
+fn new_window_shares_the_workbook_and_closes_window_by_window() {
+    let mut s = s();
+    let book = s.doc().unwrap().uid;
+    assert_eq!(s.windows().len(), 1, "a new workbook opens in one window");
+    let first = s.active_window().unwrap();
+    assert_eq!(s.window_title(first).as_deref(), Some("Book1"));
+
+    let r = s.execute("view.newWindow", json!({})).unwrap();
+    let second = r["window"].as_u64().unwrap();
+    assert_eq!(s.documents().len(), 1, "no copy of the workbook");
+    assert_eq!((s.windows().len(), s.active_window()), (2, Some(second)));
+    assert_eq!(s.window_title(first).as_deref(), Some("Book1:1"));
+    assert_eq!(s.window_title(second).as_deref(), Some("Book1:2"));
+    assert!(!s.doc().unwrap().is_dirty());
+
+    // An edit in window 2 is in window 1's workbook, and saving from window 2 saves it.
+    s.execute("cell.set", json!({"cell": "A1", "input": "shared"})).unwrap();
+    let path = std::env::temp_dir().join(format!("gridcraft-windows-{}.xlsx", std::process::id()));
+    s.execute("file.save", json!({"path": path})).unwrap();
+    s.execute("window.activate", json!({"window": first})).unwrap();
+    assert_eq!((s.doc().unwrap().uid, v(&s, "A1")), (book, Value::text("shared")));
+    assert!(!s.doc().unwrap().is_dirty(), "saved from the other window");
+    assert_eq!(s.doc().unwrap().path.as_deref(), path.to_str());
+    let _ = std::fs::remove_file(&path);
+
+    // Closing one window keeps the workbook and renumbers the titles; the last one closes it.
+    s.execute("cell.set", json!({"cell": "A2", "input": "unsaved"})).unwrap();
+    let r = s.execute("file.close", json!({})).unwrap();
+    assert_eq!((r["closed"].as_bool(), r["document"].as_bool()), (Some(true), Some(false)), "no prompt for one of two windows");
+    assert_eq!((s.windows().len(), s.active_window()), (1, Some(second)));
+    assert_eq!(s.window_title(second).as_deref(), Some(s.doc().unwrap().display_title().as_str()));
+    let r = s.execute("window.close", json!({})).unwrap();
+    assert_eq!(r["closed"].as_bool(), Some(false), "the last window asks about unsaved changes");
+    assert_eq!(s.documents().len(), 1);
+    s.execute("window.close", json!({"force": true})).unwrap();
+    assert!(s.documents().is_empty() && s.windows().is_empty() && s.active_window().is_none());
+}
+
+#[test]
+fn switching_windows_swaps_their_views_without_dirtying_the_workbook() {
+    let mut s = s();
+    s.execute("home.insertSheet", json!({})).unwrap();
+    let path = std::env::temp_dir().join(format!("gridcraft-window-views-{}.xlsx", std::process::id()));
+    s.execute("file.save", json!({"path": path})).unwrap();
+    let _ = std::fs::remove_file(&path);
+    s.execute("sheet.activate", json!({"sheet": 0})).unwrap();
+    s.execute("selection.set", json!({"range": "B2:C3"})).unwrap();
+    let first = s.active_window().unwrap();
+    let second = s.execute("view.newWindow", json!({})).unwrap()["window"].as_u64().unwrap();
+    s.execute("sheet.activate", json!({"sheet": 1})).unwrap();
+    s.execute("selection.set", json!({"range": "D4"})).unwrap();
+    assert!(!s.doc().unwrap().is_dirty());
+
+    s.execute("window.activate", json!({"window": first})).unwrap();
+    let d = s.doc().unwrap();
+    assert_eq!((d.wb.active_sheet, d.selection.a1()), (0, "B2:C3".to_string()));
+    assert!(!d.is_dirty(), "a window's sheet and selection are not document changes");
+    s.execute("view.switchWindows", json!({"window": second})).unwrap();
+    let d = s.doc().unwrap();
+    assert_eq!((d.wb.active_sheet, d.selection.a1()), (1, "D4".to_string()));
+    assert!(!d.is_dirty());
+
+    // A routed command acts in its window and leaves the active one showing.
+    s.execute_in(crate::Target::Window(first), "cell.set", json!({"cell": "A1", "input": "in window 1"})).unwrap();
+    assert_eq!(s.active_window(), Some(second));
+    assert_eq!(s.doc().unwrap().wb.sheets[0].value(CellRef::parse("A1").unwrap()), Value::text("in window 1"));
+    assert_eq!(s.doc().unwrap().selection.a1(), "D4");
+}
+
+#[test]
+fn hide_unhide_and_switch_by_window_id() {
+    let mut s = s();
+    let book1 = s.doc().unwrap().uid;
+    let w1 = s.active_window().unwrap();
+    let w2 = s.execute("view.newWindow", json!({})).unwrap()["window"].as_u64().unwrap();
+    s.execute("file.new", json!({})).unwrap();
+    let w3 = s.active_window().unwrap();
+    s.execute("view.hideWindow", json!({})).unwrap();
+    assert_eq!(s.active_window(), Some(w2), "the most recent visible window comes forward");
+    let list = s.execute("window.list", json!({})).unwrap();
+    let rows = list.as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!((rows[0]["window"].as_u64(), rows[0]["title"].as_str(), rows[0]["doc"].as_u64()), (Some(w1), Some("Book1:1"), Some(book1)));
+    assert_eq!((rows[2]["title"].as_str(), rows[2]["hidden"].as_bool()), (Some("Book2"), Some(true)));
+    assert_eq!(rows[1]["active"].as_bool(), Some(true));
+    s.execute("view.unhideWindow", json!({})).unwrap();
+    assert_eq!(s.active_window(), Some(w3));
+    assert!(!s.window(w3).unwrap().hidden);
+    // A workbook id goes to that workbook's most recent window.
+    s.execute("view.switchWindows", json!({"doc": book1})).unwrap();
+    assert_eq!(s.active_window(), Some(w2));
+    assert!(s.execute("window.activate", json!({"window": 999})).is_err());
+    assert_eq!(s.active_window(), Some(w2));
+}
+
+#[test]
+fn open_replaces_an_untouched_blank_workbook_and_its_windows() {
+    let mut s = s();
+    s.execute("view.newWindow", json!({})).unwrap();
+    let path = std::env::temp_dir().join(format!("gridcraft-open-blank-{}.csv", std::process::id()));
+    std::fs::write(&path, "a,b\n1,2\n").unwrap();
+    s.execute("file.open", json!({"path": path})).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(s.documents().len(), 1);
+    assert_eq!(s.windows().len(), 1, "the blank workbook's windows closed with it");
+    assert_eq!(s.windows()[0].doc_uid, s.doc().unwrap().uid);
 }

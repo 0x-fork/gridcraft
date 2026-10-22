@@ -20,6 +20,9 @@ pub const REF_COLORS: [Color32; 8] = [
 pub struct EditState {
     /// The workbook (`DocState::uid`) the draft belongs to: it is drawn and committed only there.
     pub doc: u64,
+    /// The window it was typed in: switching to another window, even on the same workbook,
+    /// commits it there first (`None` until the app sets it).
+    pub window: Option<u64>,
     pub sheet: usize,
     /// Syntax of this edit, captured when it starts (prevents a language switch reinterpreting it).
     pub locale: gridcraft_engine::formula::FormulaLocale,
@@ -56,6 +59,7 @@ impl EditState {
         let original = (!enter_mode).then(|| text.clone());
         EditState {
             doc,
+            window: None,
             sheet,
             locale: Default::default(),
             cell,
