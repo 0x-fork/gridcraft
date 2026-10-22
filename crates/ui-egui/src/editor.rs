@@ -163,7 +163,7 @@ impl EditState {
     /// Ctrl+Shift+A, as in Excel: right after a function name, or after its `(`, inserts the
     /// argument names (optional ones without their brackets) and the closing parenthesis, and
     /// the `(` too when missing. Anywhere else nothing changes and it returns false.
-    pub fn insert_argument_names(&mut self) -> bool {
+    pub fn insert_argument_names(&mut self, language: crate::i18n::Language) -> bool {
         if !self.is_formula() {
             return false;
         }
@@ -183,7 +183,7 @@ impl EditState {
         if name.is_empty() || name.starts_with(|c: char| c.is_ascii_digit()) {
             return false;
         }
-        let Some(signature) = crate::formula_locale::signature(&name, self.locale) else { return false };
+        let Some(signature) = crate::formula_locale::signature(&name, self.locale, language) else { return false };
         let sep = self.locale.list_separator();
         let inner = signature.split_once('(').map(|(_, rest)| rest.trim_end().trim_end_matches(')')).unwrap_or("");
         let args: Vec<&str> = inner.split(sep).map(|a| a.trim().trim_start_matches('[').trim_end_matches(']')).filter(|a| !a.is_empty()).collect();

@@ -278,7 +278,7 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
         // as in Excel, so it never falls through to the text's select-all.
         if ui.input_mut(|i| i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, Key::A)) {
             let (text, caret) = (ed.text.clone(), ed.caret);
-            if ed.insert_argument_names()
+            if ed.insert_argument_names(app.ui.language)
                 && let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id)
             {
                 // The text edit records an undo point only once typing pauses: mark the text

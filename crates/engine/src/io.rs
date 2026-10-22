@@ -681,7 +681,7 @@ mod tests {
         wb.sheet_mut(0).unwrap().images.push(gridcraft_model::Image {
             id: 1,
             anchor: gridcraft_model::Anchor { cell: CellRef::new(0, 0), dx: 0.0, dy: 0.0, width: 72.0, height: 36.0, mode: Default::default() },
-            data: vec![1, 2, 3],
+            data: vec![1, 2, 3].into(),
             mime: "image/png".into(),
             alt: "a \"logo\"".into(),
         });
@@ -703,7 +703,7 @@ mod tests {
         sh.images.push(gridcraft_model::Image {
             id: 1,
             anchor: gridcraft_model::Anchor { cell: CellRef::new(3, 2), dx: 5.0, dy: 7.0, width: 10.0, height: 20.0, mode: Default::default() },
-            data: vec![1],
+            data: vec![1].into(),
             mime: "image/png".into(),
             alt: String::new(),
         });
@@ -729,7 +729,7 @@ mod tests {
                 height: 10.0,
                 mode: Default::default(),
             },
-            data: vec![1],
+            data: vec![1].into(),
             mime: "image/png".into(),
             alt: String::new(),
         });

@@ -790,6 +790,7 @@ fn cell_text_carriage_returns_survive_xlsx_roundtrip() {
             resolved: false,
             visible: false,
             dates: vec![],
+            note_box: None,
         },
     );
 

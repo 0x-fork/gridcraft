@@ -46,6 +46,7 @@ fn series(name: &str, values: &str) -> Series {
         kind: None,
         smooth: false,
         trendlines: Vec::new(),
+        quartiles: Default::default(),
     }
 }
 
