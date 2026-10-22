@@ -84,6 +84,11 @@ pub fn lookup(key: Key, physical: Option<Key>, m: Modifiers, mac: bool) -> Optio
         Semicolon if ctrl && s => Shortcut::Time,
         Quote if ctrl && s => Shortcut::ValueAbove,
         Quote if ctrl => Shortcut::FormulaAbove,
+        // Ctrl+[ / Ctrl+] (Excel): select precedent / dependent cells; Shift walks every level.
+        OpenBracket if ctrl && !s => run("formulas.selectPrecedents"),
+        OpenBracket if ctrl => Shortcut::Run("formulas.selectPrecedents", json!({"all": true})),
+        CloseBracket if ctrl && !s => run("formulas.selectDependents"),
+        CloseBracket if ctrl => Shortcut::Run("formulas.selectDependents", json!({"all": true})),
         // Windows Ctrl+; is in `ribbon::shortcut`; Excel for Mac uses Control+; and Command+;.
         Semicolon if mac && ctrl => Shortcut::Date,
         Semicolon if mac && cmd && !s => Shortcut::Time,

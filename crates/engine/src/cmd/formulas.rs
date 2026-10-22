@@ -1,6 +1,6 @@
 //! Formulas tab: AutoSum, Insert Function, names, auditing, calculation.
 
-use gridcraft_core::{CellRef, RangeRef};
+use gridcraft_core::{CellRef, RangeRef, Value};
 use gridcraft_model::{CalcMode, DefinedName, Formula};
 use serde_json::{Value as Json, json};
 
@@ -49,6 +49,8 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!(query "formulas.tracePrecedents", "Trace Precedents", ["Formulas", "Formula Auditing"], None, "{cell?} → ranges", has_doc, trace_precedents),
         cmd!(query "formulas.traceDependents", "Trace Dependents", ["Formulas", "Formula Auditing"], None, "{cell?} → cells", has_doc, trace_dependents),
+        cmd!(noundo "formulas.selectPrecedents", "Select Precedents", ["Formulas", "Formula Auditing"], Some("Ctrl+["), "{cell?, all?: true = every level (Ctrl+Shift+[)} → selects the precedent cells", has_doc, select_precedents),
+        cmd!(noundo "formulas.selectDependents", "Select Dependents", ["Formulas", "Formula Auditing"], Some("Ctrl+]"), "{cell?, all?: true = every level (Ctrl+Shift+])}", has_doc, select_dependents),
         cmd!(noundo "formulas.removeArrows", "Remove Arrows", ["Formulas", "Formula Auditing"], None, "{}", has_doc, |_, _| ok()),
         cmd!("formulas.showFormulas", "Show Formulas", ["Formulas", "Formula Auditing"], Some("Ctrl+`"), "{on?}", has_doc, show_formulas),
         cmd!(query "formulas.errorChecking", "Error Checking", ["Formulas", "Formula Auditing"], None, "{} → cells with errors", has_doc, error_checking),
@@ -477,6 +479,82 @@ fn trace_dependents(s: &mut Session, p: &Json) -> Result<Json> {
     deps.dedup();
     let v: Vec<Json> = deps.iter().map(|(si, c)| json!({"sheet": d.wb.sheet(*si).map(|s| s.name.clone()), "cell": c.a1()})).collect();
     Ok(Json::Array(v))
+}
+
+/// Excel's Ctrl+[ / Ctrl+]: select the precedent (or dependent) cells. When they all live on
+/// another sheet, jump there. `all` walks every level (Ctrl+Shift+[ / Ctrl+Shift+]).
+fn select_trace_cells(s: &mut Session, p: &Json, precedents: bool) -> Result<Json> {
+    use std::collections::BTreeSet;
+    let d = s.doc()?;
+    let at = cell_param(s, p, "cell")?.unwrap_or(d.selection.active);
+    let sheet = d.wb.active_sheet;
+    let all = bool_param(p, "all").unwrap_or(false);
+    // (sheet, a1) pairs to select; direct level keeps whole precedent ranges, transitive cells.
+    let mut found: BTreeSet<(usize, String)> = BTreeSet::new();
+    let mut seen: BTreeSet<(usize, CellRef)> = BTreeSet::new();
+    let mut frontier = vec![(sheet, at)];
+    seen.insert((sheet, at));
+    while let Some((ks, kc)) = frontier.pop() {
+        if precedents {
+            for a in d.calc.graph.precedents_of((ks, kc)) {
+                if all {
+                    // Walk only the stored cells inside the precedent area (sparse
+                    // range iterator, not the whole sheet): blanks are never selected
+                    // and only formula cells extend the frontier, so a formula late in
+                    // a large range is not skipped.
+                    let Some(sh) = d.wb.sheet(a.sheet) else { continue };
+                    for (c, cell) in sh.cells.iter_range(a.range) {
+                        if matches!(cell.value, Value::Empty) {
+                            continue;
+                        }
+                        if seen.insert((a.sheet, c)) {
+                            found.insert((a.sheet, c.a1()));
+                            if cell.formula.is_some() {
+                                frontier.push((a.sheet, c));
+                            }
+                        }
+                    }
+                } else {
+                    found.insert((a.sheet, a.range.a1()));
+                }
+            }
+        } else {
+            let mut deps = Vec::new();
+            d.calc.graph.dependents(ks, kc, &mut deps);
+            for k2 in deps {
+                if all {
+                    if seen.insert(k2) {
+                        found.insert((k2.0, k2.1.a1()));
+                        frontier.push(k2);
+                    }
+                } else {
+                    found.insert((k2.0, k2.1.a1()));
+                }
+            }
+        }
+        if !all {
+            break;
+        }
+    }
+    found.remove(&(sheet, at.a1()));
+    let name = if precedents { "precedent" } else { "dependent" };
+    let Some(si) = found.iter().find(|(si, _)| *si == sheet).or_else(|| found.first()).map(|(si, _)| *si) else {
+        return Err(bad("cell", format!("No {name} cells.")));
+    };
+    let list: Vec<String> = found.iter().filter(|(s, _)| *s == si).map(|(_, a)| a.clone()).collect();
+    let mut params = json!({ "range": list.join(",") });
+    if si != sheet {
+        params["sheet"] = json!(si);
+    }
+    s.execute("selection.set", params)
+}
+
+fn select_precedents(s: &mut Session, p: &Json) -> Result<Json> {
+    select_trace_cells(s, p, true)
+}
+
+fn select_dependents(s: &mut Session, p: &Json) -> Result<Json> {
+    select_trace_cells(s, p, false)
 }
 
 fn show_formulas(s: &mut Session, p: &Json) -> Result<Json> {
