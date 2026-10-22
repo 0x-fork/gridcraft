@@ -627,3 +627,37 @@ fn every_sequence_terminates_without_panicking() {
     }
     assert_eq!(SEQUENCES.len(), SEQUENCES.len(), "every sequence ran");
 }
+
+/// The font list's highlight is a position in the filtered rows (#1365): with "ar" typed the rows
+/// are Aptos Narrow, Arial, Candara, Garamond, and the highlight starts on the current font's
+/// row (index 3, clamped to the filtered list). Down twice lands on the second row, Arial. Clearing
+/// the filter brings the other fonts back.
+#[test]
+fn font_dropdown_highlight_follows_the_filtered_rows() {
+    let mut h = harness(blank());
+    sequence(&mut h, &[Key::H, Key::F, Key::F], false);
+    h.run_steps(3);
+    events(&mut h, [Event::Text("ar".into())]);
+    h.run_steps(3);
+    assert_eq!(h.query_all_by_label("Georgia").count(), 0, "typing must narrow the list");
+    key(&mut h, Key::ArrowDown);
+    key(&mut h, Key::ArrowDown);
+    key(&mut h, Key::Enter);
+    h.run_steps(3);
+    let d = h.state().session.active().unwrap();
+    let sh = d.wb.active().unwrap();
+    let name = d.wb.styles.get(sh.style_id(CellRef::parse("A1").unwrap())).font.name.clone();
+    assert_eq!(name, "Arial", "the highlight is the second filtered row, not a full-list index");
+
+    // Clearing the filter shows the whole list again.
+    let mut h = harness(blank());
+    sequence(&mut h, &[Key::H, Key::F, Key::F], false);
+    h.run_steps(3);
+    events(&mut h, [Event::Text("ar".into())]);
+    h.run_steps(3);
+    assert_eq!(h.query_all_by_label("Georgia").count(), 0);
+    key(&mut h, Key::Backspace);
+    key(&mut h, Key::Backspace);
+    h.run_steps(3);
+    assert!(h.query_all_by_label("Georgia").count() >= 1, "an emptied filter lists every font again");
+}
