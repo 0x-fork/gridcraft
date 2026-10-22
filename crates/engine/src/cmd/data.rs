@@ -1542,6 +1542,9 @@ mod tests {
         s.execute("home.hideRows", json!({"rows": "1"})).unwrap();
         s.execute("data.group", json!({"cols": "C"})).unwrap();
         assert!(s.execute("home.deleteRows", json!({"rows": "0"})).is_err());
+        s.execute("home.deleteRows", json!({"rows": "2"})).unwrap();
+        s.execute("home.deleteColumns", json!({"cols": "B"})).unwrap();
+        assert_eq!(v(&mut s, "B2"), json!(4.0));
     }
 
     #[test]
