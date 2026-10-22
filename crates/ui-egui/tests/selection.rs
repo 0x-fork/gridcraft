@@ -159,3 +159,20 @@ fn formula_point_drag_keeps_the_sheet_qualifier() {
     h.state_mut().session.execute("sheet.activate", json!({"sheet": "Sheet1"})).unwrap();
     assert_eq!(cells(&h), before);
 }
+
+#[test]
+fn formula_arrow_pointing_restarts_from_the_edited_cell_after_typing() {
+    let mut h = harness("B4");
+    h.state_mut().begin_edit(Some("=".into()), false);
+    h.run_steps(2);
+    h.key_press(egui::Key::ArrowUp);
+    h.run_steps(1);
+    h.key_press(egui::Key::ArrowUp);
+    h.run_steps(1);
+    assert_eq!(h.state().editor.as_ref().unwrap().text, "=B2");
+    frame(&mut h, Event::Text("+".into()));
+    h.run_steps(1);
+    h.key_press(egui::Key::ArrowUp);
+    h.run_steps(1);
+    assert_eq!(h.state().editor.as_ref().unwrap().text, "=B2+B3");
+}
