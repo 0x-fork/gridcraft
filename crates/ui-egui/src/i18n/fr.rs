@@ -421,7 +421,9 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Unhide…" => "Afficher…",
         "Select All Sheets" => "Sélectionner toutes les feuilles",
         "AutoSave" => "Enregistrement automatique",
-        "AutoSave: save after every change (workbooks saved to a file)" => "Enregistrement automatique : enregistrer après chaque modification (classeurs enregistrés dans un fichier)",
+        "AutoSave: save after every change (workbooks saved to a file)" => {
+            "Enregistrement automatique : enregistrer après chaque modification (classeurs enregistrés dans un fichier)"
+        }
         "Previous sheet" => "Feuille précédente",
         "Next sheet" => "Feuille suivante",
         "All sheets" => "Toutes les feuilles",

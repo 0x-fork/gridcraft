@@ -451,7 +451,9 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Unhide…" => "Mostrar…",
         "Select All Sheets" => "Seleccionar todas las hojas",
         "AutoSave" => "Autoguardado",
-        "AutoSave: save after every change (workbooks saved to a file)" => "Autoguardado: guardar después de cada cambio (libros guardados en un archivo)",
+        "AutoSave: save after every change (workbooks saved to a file)" => {
+            "Autoguardado: guardar después de cada cambio (libros guardados en un archivo)"
+        }
         "Previous sheet" => "Hoja anterior",
         "Next sheet" => "Hoja siguiente",
         "All sheets" => "Todas las hojas",

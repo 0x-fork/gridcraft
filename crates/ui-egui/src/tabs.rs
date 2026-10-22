@@ -202,7 +202,14 @@ pub fn sheet_tabs(app: &mut SheetApp, ui: &mut Ui) {
                                     }
                                     ui.separator();
                                     let protected = app.active_sheet_protected();
-                                    if ui.button(if protected { app.ui.language.tr("Unprotect Sheet…") } else { app.ui.language.tr("Protect Sheet…") }).clicked() {
+                                    if ui
+                                        .button(if protected {
+                                            app.ui.language.tr("Unprotect Sheet…")
+                                        } else {
+                                            app.ui.language.tr("Protect Sheet…")
+                                        })
+                                        .clicked()
+                                    {
                                         app.open_dialog("protectSheet", json!({}));
                                     }
                                     if ui.button(app.ui.language.tr("Select All Sheets")).clicked() {

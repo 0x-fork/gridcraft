@@ -433,7 +433,9 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Unhide…" => "Einblenden…",
         "Select All Sheets" => "Alle Blätter auswählen",
         "AutoSave" => "AutoSpeichern",
-        "AutoSave: save after every change (workbooks saved to a file)" => "AutoSpeichern: nach jeder Änderung speichern (Arbeitsmappen, die in einer Datei gespeichert sind)",
+        "AutoSave: save after every change (workbooks saved to a file)" => {
+            "AutoSpeichern: nach jeder Änderung speichern (Arbeitsmappen, die in einer Datei gespeichert sind)"
+        }
         "Previous sheet" => "Vorheriges Blatt",
         "Next sheet" => "Nächstes Blatt",
         "All sheets" => "Alle Blätter",

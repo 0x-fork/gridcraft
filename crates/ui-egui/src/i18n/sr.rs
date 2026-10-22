@@ -419,7 +419,9 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Unhide…" => "Прикажи…",
         "Select All Sheets" => "Изабери све листове",
         "AutoSave" => "Аутоматско чување",
-        "AutoSave: save after every change (workbooks saved to a file)" => "Аутоматско чување: сачувај после сваке измене (свеске сачуване у датотеку)",
+        "AutoSave: save after every change (workbooks saved to a file)" => {
+            "Аутоматско чување: сачувај после сваке измене (свеске сачуване у датотеку)"
+        }
         "Previous sheet" => "Претходни лист",
         "Next sheet" => "Следећи лист",
         "All sheets" => "Сви листови",

@@ -421,7 +421,9 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Unhide…" => "Показать…",
         "Select All Sheets" => "Выделить все листы",
         "AutoSave" => "Автосохранение",
-        "AutoSave: save after every change (workbooks saved to a file)" => "Автосохранение: сохранять после каждого изменения (книги, сохранённые в файл)",
+        "AutoSave: save after every change (workbooks saved to a file)" => {
+            "Автосохранение: сохранять после каждого изменения (книги, сохранённые в файл)"
+        }
         "Previous sheet" => "Предыдущий лист",
         "Next sheet" => "Следующий лист",
         "All sheets" => "Все листы",
