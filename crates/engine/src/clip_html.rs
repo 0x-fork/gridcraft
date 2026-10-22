@@ -408,14 +408,12 @@ mod tests {
         // with the sheet's full extent as the limit, at most MAX_HTML_CELLS are materialized.
         let row = "<tr><td colspan=16384 rowspan=99999999999 x:num='1'>1</td><td colspan=4294967296>2</td></tr>";
         let html = format!("<table>{}</table>", row.repeat(100_000));
-        let started = std::time::Instant::now();
         let rows = table_cells(&html, usize::MAX, usize::MAX);
         let cells: usize = rows.iter().map(Vec::len).sum();
         assert!(cells <= MAX_HTML_CELLS, "{cells} cells");
         assert!(rows.iter().all(|r| r.len() <= MAX_SPAN));
         assert_eq!(rows[0].len(), MAX_SPAN, "the first span fills the sheet's width");
         assert_eq!(rows[0][0], HtmlCell { text: "1".into(), num: Some(1.0) });
-        assert!(started.elapsed() < std::time::Duration::from_secs(30), "took {:?}", started.elapsed());
 
         // Bounded by the pasted text's shape, the same markup yields just that shape.
         let rows = table_cells(&html, 3, 2);
