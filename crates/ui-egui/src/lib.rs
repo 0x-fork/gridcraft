@@ -859,11 +859,14 @@ impl SheetApp {
         }
         let vba: Vec<&str> = msgs.iter().copied().filter(|m| m.to_lowercase().contains("macro") || m.contains("VBA")).collect();
         if !vba.is_empty() {
-            self.notice = Some(Notice {
-                text: "This workbook contains VBA macros. GridCraft keeps them intact when you save, but does not run them.".into(),
-                kind: NoticeKind::Warning,
-                action: Some(("What this means".into(), "macros".into())),
-            });
+            // The reader says "dropped" when the VBA project was missing or unreadable; never promise to keep it then.
+            let dropped = vba.iter().any(|m| m.contains("dropped"));
+            let text = if dropped {
+                "This workbook's VBA macros could not be loaded and were dropped, so they will not be in the saved file. Keep the original file."
+            } else {
+                "This workbook contains VBA macros. GridCraft keeps them when you save as .xlsm, but does not run them."
+            };
+            self.notice = Some(Notice { text: text.into(), kind: NoticeKind::Warning, action: Some(("What this means".into(), "macros".into())) });
         } else {
             let text = if msgs.len() == 1 {
                 msgs[0].to_string()

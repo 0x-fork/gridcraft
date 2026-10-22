@@ -1,7 +1,7 @@
-use gridcraft_core::{CellRef, DateSystem, Value};
+use gridcraft_core::{CellRef, DateSystem, MAX_COLS, Value};
 use gridcraft_model::{Sheet, Workbook};
 
-use crate::csv::{decode_text, sniff_delimiter};
+use crate::csv::{decode_text, parse_records, sniff_delimiter};
 use crate::{CsvOptions, Format, IoError, read_csv, sniff, write_csv, write_csv_limited};
 
 fn v(wb: &Workbook, r: u32, c: u32) -> Value {
@@ -110,14 +110,15 @@ fn writing() {
         Value::Array(_) => String::new(),
     };
     let out = String::from_utf8(write_csv(sh, b',', raw).unwrap()).unwrap();
-    assert_eq!(out, "\"a,b\",\"q\"\"t\",\r\n0.1,FALSE,\r\n#DIV/0!,,\"x\ny\"\r\n");
+    // The first cell is B2: the file starts at A1, so the leading empty row and column stay.
+    assert_eq!(out, ",,,\r\n,\"a,b\",\"q\"\"t\",\r\n,0.1,FALSE,\r\n,#DIV/0!,,\"x\ny\"\r\n");
     let semi = String::from_utf8(write_csv(sh, b';', raw).unwrap()).unwrap();
-    assert!(semi.starts_with("a,b;"));
+    assert!(semi.starts_with(";;;\r\n;a,b;"));
     assert!(write_csv(&Sheet::new("E"), b',', raw).unwrap().is_empty());
     // Round trip.
     let back = read_csv(out.as_bytes(), &CsvOptions::default()).unwrap();
-    assert_eq!(v(&back, 0, 0), Value::text("a,b"));
-    assert_eq!(v(&back, 2, 2), Value::text("x\ny"));
+    assert_eq!(v(&back, 1, 1), Value::text("a,b"));
+    assert_eq!(v(&back, 3, 3), Value::text("x\ny"));
 }
 
 #[test]
@@ -186,7 +187,47 @@ fn the_cap_counts_the_bytes_the_cells_hold_and_accepted_exports_keep_every_posit
     let err = write_csv_limited(&long, b',', 1000, text_of(&long)).unwrap_err();
     assert!(err.to_string().contains("stopped at row"), "{err}");
     assert!(write_csv_limited(&long, b',', 50 * 102, text_of(&long)).is_ok());
+    // Within one row the cap is checked before each field is written: a wide row of long and
+    // quote-heavy fields is refused at the field that crosses it, without asking for the rest.
+    let mut wide = Sheet::new("W");
+    for c in 0..10u32 {
+        wide.set_value(CellRef::new(0, c), Value::text("\"".repeat(100)));
+    }
+    let mut asked = 0;
+    let err = write_csv_limited(&wide, b',', 500, |c| {
+        asked += 1;
+        text_of(&wide)(c)
+    })
+    .unwrap_err();
+    assert!(err.to_string().contains("stopped at row 1"), "{err}");
+    assert_eq!(asked, 3, "each field is 202 bytes; the third passes 500");
+    // Exact boundary: a quoted field of 202 bytes plus CRLF fits in 204 and not in 203.
+    let mut one = Sheet::new("O");
+    one.set_value(CellRef::new(0, 0), Value::text("\"".repeat(100)));
+    assert_eq!(write_csv_limited(&one, b',', 204, text_of(&one)).unwrap().len(), 204);
+    assert!(write_csv_limited(&one, b',', 203, text_of(&one)).is_err());
     // A tab is one byte, like a comma.
     let tabs = write_csv_limited(&s, b'\t', 14, text_of(&s)).unwrap();
     assert_eq!(tabs.len(), 14);
+}
+
+#[test]
+fn parser_stops_collecting_fields_at_max_cols() {
+    let extra = 50;
+    // MAX_COLS + extra fields on the first row (the last one filled), then a short second row.
+    let mut text = ",".repeat((MAX_COLS + extra) as usize - 1);
+    text.push_str("end\nx,y\n");
+    let mut lens = vec![];
+    parse_records(&text, ',', '"', |rec| {
+        lens.push(rec.len());
+        true
+    });
+    assert_eq!(lens, vec![MAX_COLS as usize, 2]);
+    // An unterminated last row is capped the same way.
+    let mut lens = vec![];
+    parse_records(&",".repeat(MAX_COLS as usize + extra as usize), ',', '"', |rec| {
+        lens.push(rec.len());
+        true
+    });
+    assert_eq!(lens, vec![MAX_COLS as usize]);
 }

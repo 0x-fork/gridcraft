@@ -87,8 +87,9 @@ pub fn sniff_delimiter(text: &str, quote: char) -> u8 {
     best.0
 }
 
-/// Splits CSV text into records of fields.
-fn parse_records(text: &str, delim: char, quote: char, mut on_record: impl FnMut(Vec<String>) -> bool) {
+/// Splits CSV text into records of fields. A record keeps at most [`MAX_COLS`] fields; the rest are
+/// dropped as they are read, so a row of endless delimiters cannot allocate a string per field.
+pub(crate) fn parse_records(text: &str, delim: char, quote: char, mut on_record: impl FnMut(Vec<String>) -> bool) {
     let mut field = String::new();
     let mut record: Vec<String> = vec![];
     let mut in_q = false;
@@ -112,13 +113,19 @@ fn parse_records(text: &str, delim: char, quote: char, mut on_record: impl FnMut
             in_q = true;
             field_started_quoted = true;
         } else if c == delim {
-            record.push(std::mem::take(&mut field));
+            let f = std::mem::take(&mut field);
+            if record.len() < MAX_COLS as usize {
+                record.push(f);
+            }
             field_started_quoted = false;
         } else if c == '\r' || c == '\n' {
             if c == '\r' && chars.peek() == Some(&'\n') {
                 chars.next();
             }
-            record.push(std::mem::take(&mut field));
+            let f = std::mem::take(&mut field);
+            if record.len() < MAX_COLS as usize {
+                record.push(f);
+            }
             field_started_quoted = false;
             if !on_record(std::mem::take(&mut record)) {
                 return;
@@ -128,7 +135,9 @@ fn parse_records(text: &str, delim: char, quote: char, mut on_record: impl FnMut
         }
     }
     if !field.is_empty() || !record.is_empty() || field_started_quoted {
-        record.push(field);
+        if record.len() < MAX_COLS as usize {
+            record.push(field);
+        }
         on_record(record);
     }
 }
@@ -187,15 +196,16 @@ pub fn read_csv(bytes: &[u8], opts: &CsvOptions) -> Result<Workbook, IoError> {
     Ok(wb)
 }
 
-/// Writes the sheet's used range as CSV (CRLF line ends, UTF-8 without BOM). `cell_text` gives
+/// Writes the sheet as CSV from A1 to the end of its used range, so leading empty columns and rows
+/// stay as empty fields and every cell keeps its position (CRLF line ends, UTF-8 without BOM). `cell_text` gives
 /// each cell's field text: the caller decides how values look (Save As CSV writes them as
 /// displayed, number formats applied); quoting is done here.
 ///
-/// The output is capped at [`MAX_CSV_BYTES`]: two cells far apart make the used range, and so the
-/// file, as big as the whole rectangle between them (`A1` and `XFD1048576` are 16 GiB of commas).
-/// An export that would pass the cap is refused before anything is allocated, or as soon as the
-/// text written so far passes it, with [`IoError::TooLarge`]; accepted exports keep every field in
-/// its place.
+/// The output is capped at [`MAX_CSV_BYTES`]: a cell far from A1 makes the file as big as the whole
+/// rectangle between them (`A1` and `XFD1048576` are 16 GiB of commas).
+/// An export that would pass the cap is refused before anything is allocated, or at the first
+/// field or line end that takes it past the cap (a field is measured before it is written), with
+/// [`IoError::TooLarge`]; accepted exports keep every field in its place.
 pub fn write_csv(sheet: &Sheet, delimiter: u8, cell_text: impl FnMut(CellRef) -> String) -> Result<Vec<u8>, IoError> {
     write_csv_limited(sheet, delimiter, MAX_CSV_BYTES, cell_text)
 }
@@ -209,21 +219,33 @@ pub fn write_csv_limited(sheet: &Sheet, delimiter: u8, limit: usize, mut cell_te
         |what: String| IoError::TooLarge(format!("the CSV would be {what}, over the limit of {} MiB; export a smaller range", limit >> 20));
     // Every row has a delimiter between its fields and a CRLF, whatever the cells hold: a lower
     // bound on the output that needs no cell text.
-    let (rows, cols) = (u64::from(r.end.row - r.start.row) + 1, u64::from(r.end.col - r.start.col) + 1);
+    let (rows, cols) = (u64::from(r.end.row) + 1, u64::from(r.end.col) + 1);
     let per_row = (cols - 1).saturating_mul(delim.len_utf8() as u64).saturating_add(2);
     let least = rows.saturating_mul(per_row);
     if least > limit as u64 {
         return Err(too_large(format!("at least {} MiB ({rows} rows by {cols} columns)", least >> 20)));
     }
-    for row in r.start.row..=r.end.row {
-        for col in r.start.col..=r.end.col {
-            if col > r.start.col {
+    for row in 0..=r.end.row {
+        for col in 0..=r.end.col {
+            if col > 0 {
                 out.push(delim);
             }
             let t = cell_text(CellRef::new(row, col));
-            if t.contains(delim) || t.contains('"') || t.contains('\n') || t.contains('\r') {
+            let quoted = t.contains(delim) || t.contains('"') || t.contains('\n') || t.contains('\r');
+            // The exact size of the field as written (the delimiter was pushed above), so a row
+            // never grows past the cap unseen and no doubled-quote copy of the text is built.
+            let field_len = if quoted { t.len() + t.matches('"').count() + 2 } else { t.len() };
+            if out.len().saturating_add(field_len) > limit {
+                return Err(too_large(format!("more than {} MiB (stopped at row {})", limit >> 20, row + 1)));
+            }
+            if quoted {
                 out.push('"');
-                out.push_str(&t.replace('"', "\"\""));
+                for ch in t.chars() {
+                    if ch == '"' {
+                        out.push('"');
+                    }
+                    out.push(ch);
+                }
                 out.push('"');
             } else {
                 out.push_str(&t);

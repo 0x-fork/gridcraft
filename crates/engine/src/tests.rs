@@ -3903,3 +3903,31 @@ fn convert_to_number_turns_numbers_stored_as_text_into_numbers() {
     assert_eq!(s.execute("formulas.convertToNumber", json!({})).unwrap()["converted"], 1);
     assert_eq!(value(&mut s, "A1"), json!("123"));
 }
+
+#[test]
+fn saving_csv_keeps_leading_empty_columns_and_rows() {
+    let wb = gridcraft_xlsx::read_csv(b",x\r\n\r\n,,y\r\n", &gridcraft_xlsx::CsvOptions::default()).unwrap();
+    let out = crate::io::save_bytes(&wb, "a.csv").unwrap();
+    assert_eq!(String::from_utf8(out).unwrap(), ",x,\r\n,,\r\n,,y\r\n");
+}
+
+#[test]
+fn rotate_rejects_flip_param_instead_of_swapping_size() {
+    let mut s = s();
+    let id = s.execute("insert.shape", json!({"kind": "rectangle"})).unwrap()["shape"].clone();
+    let size = |s: &Session| {
+        let a = &s.doc().unwrap().wb.active().unwrap().shapes[0].anchor;
+        (a.width, a.height)
+    };
+    let (w, h) = size(&s);
+    assert_ne!(w, h);
+    let before = s.doc().unwrap().wb.clone();
+    for flip in ["horizontal", "vertical", "sideways"] {
+        let r = s.execute("arrange.rotate", json!({"kind": "shape", "id": id, "flip": flip}));
+        assert!(matches!(r, Err(crate::EngineError::BadParams { .. })), "flip {flip}: {r:?}");
+        assert_eq!(size(&s), (w, h));
+        assert!(std::sync::Arc::ptr_eq(&s.doc().unwrap().wb, &before));
+    }
+    s.execute("arrange.rotate", json!({"kind": "shape", "id": id})).unwrap();
+    assert_eq!(size(&s), (h, w));
+}
