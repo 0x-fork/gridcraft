@@ -281,7 +281,7 @@ fn render_tests(entries: &[Entry], probe: &Probe) -> String {
             "command" if UI_DIALOG_COMMANDS.iter().any(|(c, _)| *c == e.target) => {
                 let dialog = UI_DIALOG_COMMANDS.iter().find(|(c, _)| *c == e.target).map_or("", |(_, d)| d);
                 format!(
-                    "sequence(&mut h, {seq:?}, false);\n    assert_eq!(h.state().dialog.as_ref().map(|d| d.name.as_str()), Some({dialog:?}), \"{seq} must open the {dialog} dialog\");",
+                    "// The dialog previews chart types for the selected data, so the sheet needs some.\n    h.state_mut().session.execute(\"range.setValues\", serde_json::json!({{\"range\": \"A1\", \"values\": [[\"Fruit\", \"Sales\"], [\"Apples\", 5], [\"Pears\", 3]]}})).unwrap();\n    h.state_mut().session.execute(\"selection.set\", serde_json::json!({{\"range\": \"A1:B3\"}})).unwrap();\n    sequence(&mut h, {seq:?}, false);\n    assert_eq!(h.state().dialog.as_ref().map(|d| d.name.as_str()), Some({dialog:?}), \"{seq} must open the {dialog} dialog\");",
                     seq = e.seq,
                 )
             }

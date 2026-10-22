@@ -1283,6 +1283,12 @@ fn keytip_nq_() {
 #[test]
 fn keytip_nr_() {
     let mut h = harness(blank());
+    // The dialog previews chart types for the selected data, so the sheet needs some.
+    h.state_mut()
+        .session
+        .execute("range.setValues", serde_json::json!({"range": "A1", "values": [["Fruit", "Sales"], ["Apples", 5], ["Pears", 3]]}))
+        .unwrap();
+    h.state_mut().session.execute("selection.set", serde_json::json!({"range": "A1:B3"})).unwrap();
     sequence(&mut h, "NR", false);
     assert_eq!(h.state().dialog.as_ref().map(|d| d.name.as_str()), Some("recommendedCharts"), "NR must open the recommendedCharts dialog");
 }
