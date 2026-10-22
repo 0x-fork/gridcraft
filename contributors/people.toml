@@ -90,3 +90,6 @@ sync_github_name = false
 [people.Harrison-Booth]
 real_name = "Harrison Booth"
 sync_github_name = false
+
+[people.bilalmughal]
+sync_github_name = true

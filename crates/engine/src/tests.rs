@@ -342,6 +342,50 @@ fn redo_selects_the_redone_cell() {
 }
 
 #[test]
+fn bulk_formula_history_is_bounded_and_latest_edit_still_undoes() {
+    use std::sync::Arc;
+
+    use gridcraft_model::{Cell, Formula, Workbook};
+
+    let mut current = Arc::new(Workbook::new());
+    let mut history = Vec::new();
+    let budget = 64 * 1024;
+    for version in 0..5 {
+        let previous = current.clone();
+        let mut next = (*previous).clone();
+        let sheet = next.sheet_mut(0).unwrap();
+        for row in 0..128 {
+            sheet.cells.set(CellRef::new(row, 0), Cell::formula(Formula::new(&format!("=B{}+{}", row + 1, version))));
+        }
+        current = Arc::new(next);
+        crate::push_history_with_budget(&mut history, format!("edit {version}"), previous, &current, crate::Selection::default(), budget);
+    }
+    assert!(history.len() < 5, "bulk edits should evict old steps before reaching the count limit");
+    assert_eq!(history.last().unwrap().label, "edit 4");
+    assert!(history.len() == 1 || history.iter().map(|e| e.retained_bytes).sum::<usize>() <= budget);
+
+    let mut session = s();
+    let doc = session.doc_mut().unwrap();
+    doc.wb = current;
+    doc.undo = history;
+    session.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(session.doc().unwrap().wb.active().unwrap().cells.get(CellRef::new(0, 0)).unwrap().formula.as_ref().unwrap().text, "B1+3");
+    session.execute("edit.redo", json!({})).unwrap();
+    assert_eq!(session.doc().unwrap().wb.active().unwrap().cells.get(CellRef::new(0, 0)).unwrap().formula.as_ref().unwrap().text, "B1+4");
+}
+
+#[test]
+fn small_edits_keep_the_full_undo_depth() {
+    let mut session = s();
+    for number in 0..100 {
+        session.execute("cell.set", json!({"cell": "A1", "input": number.to_string()})).unwrap();
+    }
+    assert_eq!(session.doc().unwrap().undo.len(), 100);
+    session.execute("edit.undo", json!({"steps": 100})).unwrap();
+    assert_eq!(v(&session, "A1"), Value::Empty);
+}
+
+#[test]
 fn shape_text_edit_undo_redo_and_noop() {
     let mut s = s();
     let id = s.execute("insert.textBox", json!({"at": "C4", "width": 210, "height": 90, "text": "Original"})).unwrap()["shape"].clone();
@@ -1637,6 +1681,28 @@ fn slicer_filters_table() {
 
     // A bad value is rejected, not panicked.
     assert!(s.execute("slicer.toggle", json!({"value": "Nowhere"})).is_err());
+}
+
+#[test]
+fn accounting_format_takes_the_symbol_it_is_given() {
+    // The command documents `symbol`; it used to be dropped, so only `$` was ever reachable
+    // from the control channel (asking for lempiras, #1893, changed nothing).
+    let text = |s: &Session, a: &str| {
+        let d = s.doc().unwrap();
+        crate::display::cell_text(&d.wb, d.wb.active().unwrap(), CellRef::parse(a).unwrap())
+    };
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "1234.5"})).unwrap();
+    s.execute("home.accounting", json!({"range": "A1", "symbol": "L"})).unwrap();
+    assert_eq!(text(&s, "A1"), " L 1,234.50 ");
+    // Without a symbol it stays the default `$` format, character for character.
+    s.execute("home.accounting", json!({"range": "A1"})).unwrap();
+    assert_eq!(text(&s, "A1"), " $ 1,234.50 ");
+    // A quote or a backslash would end the format's quoted text, and a control character would
+    // reach it as-is, so those symbols are refused.
+    for bad in ["\"", "\\", "\n", "L\t"] {
+        assert!(s.execute("home.accounting", json!({"range": "A1", "symbol": bad})).is_err(), "{bad:?}");
+    }
 }
 
 #[test]
@@ -4326,4 +4392,70 @@ fn box_whisker_quartile_methods_survive_xlsx() {
     assert_eq!(series[1].quartiles, QuartileMethod::Exclusive);
     s.execute("chart.set", json!({"quartiles": "exclusive"})).unwrap();
     assert!(s.doc().unwrap().wb.active().unwrap().charts[0].series.iter().all(|s| s.quartiles == QuartileMethod::Exclusive));
+}
+
+#[test]
+fn journal_is_capped_by_serialized_size() {
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "5"})).unwrap();
+    // Large entries (like a `file.open` with its base64): the oldest go once the cap is passed.
+    let pad = "x".repeat(crate::JOURNAL_MAX_BYTES / 8);
+    for i in 0..12 {
+        s.execute("selection.set", json!({"range": "B2", "pad": pad, "n": i})).unwrap();
+    }
+    let bytes: usize = s.journal.iter().map(|e| serde_json::to_vec(e).unwrap().len()).sum();
+    assert!(bytes <= crate::JOURNAL_MAX_BYTES, "{bytes}");
+    assert!(s.journal.len() < 12, "{}", s.journal.len());
+    assert_eq!(s.journal.last().unwrap().1["n"], 11, "the newest entries stay");
+    // Small entries are kept as they were.
+    s.execute("cell.set", json!({"cell": "A2", "input": "=SUM(A1)"})).unwrap();
+    assert_eq!(s.journal.last().unwrap(), &("cell.set".to_string(), json!({"cell": "A2", "input": "=SUM(A1)"})));
+}
+
+#[test]
+fn recording_keeps_its_steps_when_the_journal_is_trimmed() {
+    let mut s = s();
+    for _ in 0..9_990 {
+        s.execute("selection.set", json!({"range": "A1"})).unwrap();
+    }
+    s.execute("automate.recordActions", json!({})).unwrap();
+    // The 10th entry past the start overflows the 10,000-entry cap and drops the oldest half.
+    for i in 0..20 {
+        s.execute("cell.set", json!({"cell": "B1", "input": format!("step{i}")})).unwrap();
+    }
+    let r = s.execute("automate.recordActions", json!({"stop": true, "name": "Steps"})).unwrap();
+    assert_eq!(r["steps"], 20, "{r}");
+    let script = s.doc().unwrap().wb.names.iter().find(|n| n.name == "_sc_scripts").map(|n| n.formula.clone()).unwrap();
+    assert!(script.contains("step0") && script.contains("step19") && !script.contains("selection.set"), "{script}");
+}
+
+#[test]
+fn html_export_draws_charts_as_inline_svg_with_their_text() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Month", "Sales"], ["Jan", 5], ["Feb", 7], ["Mar", 9]]})).unwrap();
+    s.execute("insert.chart", json!({"range": "A1:B4", "type": "column", "title": "Quarterly <Sales>", "at": "D2", "width": 300, "height": 200}))
+        .unwrap();
+    let html = crate::io::to_html(&s.doc().unwrap().wb, 0).unwrap();
+    assert!(html.contains("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"300\" height=\"200\""), "{html}");
+    assert!(html.contains(">Quarterly &lt;Sales&gt;</text>"), "the title is drawn as escaped text: {html}");
+    assert!(html.contains("position:absolute;left:"), "{html}");
+    assert!(html.contains("<rect "), "{html}");
+}
+
+#[test]
+fn html_export_draws_pie_wedges_as_svg_paths() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Region", "Share"], ["North", 60], ["South", 40]]})).unwrap();
+    s.execute("insert.chart", json!({"range": "A1:B3", "type": "pie", "title": "Share"})).unwrap();
+    let html = crate::io::to_html(&s.doc().unwrap().wb, 0).unwrap();
+    assert!(html.matches("<path d=\"M").count() >= 2, "one wedge per slice: {html}");
+    assert!(html.contains(">North</text>") && html.contains(">South</text>"), "the legend names the slices: {html}");
+}
+
+#[test]
+fn html_export_without_pictures_or_charts_has_no_fixed_geometry() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["a", "b"]]})).unwrap();
+    let html = crate::io::to_html(&s.doc().unwrap().wb, 0).unwrap();
+    assert!(!html.contains("<colgroup>") && !html.contains("table-layout") && !html.contains("<svg") && !html.contains("<img"), "{html}");
 }
