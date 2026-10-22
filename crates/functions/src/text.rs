@@ -5,8 +5,8 @@ use gridcraft_core::{CellError, Value, number_to_text};
 
 use crate::criteria::wildcard_find;
 use crate::util::{
-    A, MAX_CELLS, MAX_TEXT, R, S, arg, array_val, as_array, boolean, has, num, num_val, opt_bool, opt_int, opt_num, round_half_away, scalar, text,
-    text_val,
+    A, MAX_CELLS, MAX_TEXT, R, S, arg, array_val, as_array, boolean, has, int, num, num_val, opt_bool, opt_int, opt_num, round_half_away, scalar,
+    text, text_val,
 };
 use crate::{Arg, Ctx, FnSpec, VAR};
 
@@ -550,7 +550,7 @@ fn find_matches(text: &[char], delims: &[Vec<char>], insensitive: bool, from_end
 fn text_before_after(a: &[Arg], before: bool) -> R<Value> {
     let s = chars(&text(a, 0)?);
     let delims = delimiters(&arg(a, 1)?.value)?;
-    let inst = opt_int(a, 2, 1)?;
+    let inst = if has(a, 2) { int(a, 2)? } else { 1 };
     let mode = opt_int(a, 3, 0)?;
     let match_end = opt_bool(a, 4, false)?;
     if !(0..=1).contains(&mode) || inst == 0 || inst.unsigned_abs() as usize > s.len().max(1) {
