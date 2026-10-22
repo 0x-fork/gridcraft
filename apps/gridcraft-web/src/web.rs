@@ -20,6 +20,17 @@ pub fn start() {
             return;
         };
         let mut options = eframe::WebOptions::default();
+        if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_options.wgpu_setup {
+            let default_descriptor = std::sync::Arc::clone(&setup.device_descriptor);
+
+            setup.device_descriptor = std::sync::Arc::new(move |adapter| {
+                let mut descriptor = default_descriptor(adapter);
+
+                descriptor.required_limits = descriptor.required_limits.or_worse_values_from(&adapter.limits());
+
+                descriptor
+            });
+        }
         if query().contains("webgl")
             && let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup
         {
