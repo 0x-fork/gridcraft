@@ -79,6 +79,20 @@ fn pasted_currency_text_keeps_the_number_from_the_clipboard_html() {
 }
 
 #[test]
+fn pasting_html_with_huge_spans_reads_only_the_text_shape() {
+    // #2171: a web page's clipboard HTML with enormous colspan/rowspan crashed paste (OOM). The
+    // HTML is now read only as far as the tab-separated text reaches; its numbers still apply.
+    let mut s = s();
+    let row = "<tr><td colspan=16384 rowspan=1048576 x:num='5'>Rp5</td><td colspan=999999999999>x</td></tr>";
+    let html = format!("<table>{}</table>", row.repeat(100_000));
+    let r = s.execute("edit.paste", json!({"at": "B2", "text": "Rp5\tnext\nlast", "html": html})).unwrap();
+    assert_eq!(r, json!({"rows": 2, "cols": 2}));
+    assert_eq!(v(&s, "B2"), Value::number(5.0));
+    assert_eq!(v(&s, "C2"), Value::text("next"));
+    assert_eq!(v(&s, "B3"), Value::text("last"));
+}
+
+#[test]
 fn editing_a_name_renames_it_in_formulas() {
     // Name Manager › Edit…: `oldName` edits the name in place; formulas that use it follow.
     let mut s = s();
