@@ -717,6 +717,9 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     app.grid.cells_rect = Some(geo.mirror_rect(geo.cells));
     // The selection outline glides to a new selection. It stays on its cells when Animations is
     // off, when egui's animations are (the headless harness), and while a screenshot is on its way.
+    // A mouse button held down (a click or a drag selecting cells) moves it at once, as in Excel:
+    // a gliding outline trails the pointer and reads as lag.
+    let pointer_selecting = ui.input(|i| i.pointer.any_down());
     let outline = app.grid.glide.frame(crate::selection_glide::Frame {
         place,
         range: sel.current(),
@@ -724,7 +727,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
         view: geo.cells,
         now,
         frame_nr: ui.ctx().cumulative_frame_nr(),
-        animate: app.ui.animations && ui.ctx().global_style().animation_time > 0.0 && !app.shots.in_flight(),
+        animate: app.ui.animations && ui.ctx().global_style().animation_time > 0.0 && !app.shots.in_flight() && !pointer_selecting,
     });
     if app.grid.glide.is_gliding() {
         ui.ctx().request_repaint();
@@ -740,7 +743,11 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     } else {
         paint_panes(app, &painter, &geo, &wb, si, sh, &sel, outline, &mut cf, &t)
     };
-    // Objects above cells.
+    // Objects above cells. A hidden object can't stay selected: Delete or the Format pane would act
+    // on something the user can't see.
+    if crate::chartview::objects_hidden(&wb) {
+        app.selected_chart = None;
+    }
     let objects = crate::chartview::paint_objects(app, &painter.with_clip_rect(geo.cells), &geo, &wb, si, sh);
     paint_overlays(app, ui, &painter.with_clip_rect(geo.cells), &geo, &wb, si, sh, &sel);
     if sh.view == gridcraft_engine::model::SheetViewMode::PageBreakPreview {

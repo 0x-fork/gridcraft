@@ -109,6 +109,7 @@ otherwise. Number-format and border keys match the physical key (Ctrl+Shift+4, w
 | Ctrl+Shift+~ ! @ # $ % ^ | Control+Shift | General, Number, Time, Date, Currency, Percent, Scientific | **added** |
 | Ctrl+Shift+& / Ctrl+Shift+_ | Cmd+Option+0 / Cmd+Option+- (and Cmd+Option+arrows for one side) | outline border / remove borders | **added** |
 | Ctrl+2 / 3 / 4 / 5 | — | bold / italic / underline / strikethrough | **added** |
+| Ctrl+6 | Control+6 | hide / show objects (charts, pictures, shapes, slicers), saved as `workbookPr showObjects` | **added** |
 | Ctrl+Shift+: | Cmd+; | current time | **added** |
 | Ctrl+' / Ctrl+Shift+" | Control | formula / value from the cell above | **added** |
 | Ctrl+L | Cmd+L is Align Left, Cmd+E Center, Control+E Flash Fill | create table | **added** |
@@ -130,7 +131,7 @@ otherwise. Number-format and border keys match the physical key (Ctrl+Shift+4, w
 | F5, Shift+F5 (Mac), F7, Shift+F9, Ctrl+Alt+F9, F12, Ctrl+F4 | same | Go To, Find, Spelling, calculate sheet / all, Save As, close | **added** |
 | Shift+F10, Alt+Shift+F10, Ctrl+F1 | Shift+F10, Cmd+Option+R | context menu, Error Checking, ribbon | **added** |
 | F1, F3, F4 (repeat), F6 / Shift+F6, F8 / Shift+F8, F11, End mode | same | help, Paste Name, Repeat, pane cycling, extend/add mode, chart sheet | missing (no such feature yet) |
-| Ctrl+6, Ctrl+8, Ctrl+Q, Ctrl+Shift+A, Ctrl+A after a function name, Ctrl+Shift+U, Ctrl+Alt+P | same | objects, outline symbols, Quick Analysis, argument names, Function Arguments, formula bar height, tooltips | missing |
+| Ctrl+8, Ctrl+Q, Ctrl+Shift+A, Ctrl+A after a function name, Ctrl+Shift+U, Ctrl+Alt+P | same | outline symbols, Quick Analysis, argument names, Function Arguments, formula bar height, tooltips | missing |
 | Ctrl+Shift+Page Up / Down, Ctrl+Alt+5, Ctrl+Shift+F1, Ctrl+F5–F10, Alt+F8 / F11 / F12 | same | group sheets, shape cycling, full screen, window keys, macros, VBA, Power Query | missing |
 | — | Cmd+= (calculate), Cmd+T (references while editing; F4 works), Shift+F7, Cmd+Shift+L | Mac-only extras | missing (Cmd+= is egui's zoom key; no thesaurus or Modify Cell Style) |
 
@@ -167,13 +168,15 @@ scrollbar bugs 2–4 · pixel/feel pass against observed Excel 7–12.
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-13 | minor | Dragging a sheet tab with Ctrl held (Cmd or Option on macOS) drops a copy of the sheet where the tab is released, with the copy cursor (#971) |
 | 2026-10-19 | minor | Ctrl+Enter (`range.fill`) gives each cell what typing the input there gives: a General cell gets the automatic number format (`5%`, `$5`, `3/4/2026`, `=TODAY()`) even when it already held a value, and a cell with its own format, a formatted row or column, or Text keeps it. Cells that held a value used to keep General (`5%` showed 0.05), and empty cells took the active cell's format |
+| 2026-10-19 | trivial | While a mouse button is held (a click or a drag selecting cells) the selection outline is drawn on its cells at once instead of gliding after the pointer, which read as lag; keyboard moves still glide |
 | 2026-10-18 | minor | Keytip letters typed with left Alt held continue the sequence (Alt+H, O, A / Alt+H, O, I ran nothing before: Alt+letter cancelled keytips); other Alt combinations, AltGr and macOS Option are unchanged (#1846) |
 | 2026-10-16 | minor | Right-drag on the fill handle opens the fill menu on release: Copy Cells, Fill Series, Fill Formatting Only, Fill Without Formatting, Series…; Esc cancels the drag or closes the menu without filling |
 | 2026-10-16 | minor | With the active cell in a Table whose header row is scrolled out of view, the column headings show the header names and their filter buttons in place of the letters (#1423) |
+| 2026-10-16 | minor | Ctrl+6 hides every object (charts, pictures, shapes, slicers) and shows them again; hidden objects are not drawn, take no clicks and drop their selection, and the setting is saved with the workbook (`workbookPr showObjects`) |
 | 2026-10-15 | minor | Number-format named colors use their RGB values; indexed `[Color1]`–`[Color56]` resolve through the shared legacy palette in grid and PDF (#1452) |
 | 2026-10-14 | minor | Spill-child formula bar uses the anchor formula with disabled theme text and blocks formula-bar edit entry; selection and recalculation restore ordinary behavior |
+| 2026-10-13 | minor | Dragging a sheet tab with Ctrl held (Cmd or Option on macOS) drops a copy of the sheet where the tab is released, with the copy cursor (#971) |
 | 2026-10-13 | trivial | More Colors… and Recent Colors (#928) |
 | 2026-10-13 | minor | Grid drags keep their own cursor over selection borders, fill handles and outside the grid; hover resumes on release (#936) |
 | 2026-10-12 | minor | The File view's recent list tells when each workbook was last changed, read off the UI thread |

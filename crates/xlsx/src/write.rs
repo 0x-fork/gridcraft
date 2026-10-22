@@ -5,7 +5,7 @@ use std::fmt::Write as _;
 
 use gridcraft_core::RangeRef;
 use gridcraft_formula::quote_sheet;
-use gridcraft_model::{CalcMode, CalcSettings, Style, Visibility, Workbook};
+use gridcraft_model::{CalcMode, CalcSettings, PhoneticString, ShowObjects, Style, Visibility, Workbook};
 
 use crate::package::ZipOut;
 use crate::xml::{esc, esc_attr};
@@ -134,6 +134,20 @@ impl Out {
             self.overrides.push((format!("/{name}"), ct.to_string()));
         }
         self.parts.push((name.to_string(), data));
+    }
+    /// The `xl/media` file name (`imageN.ext`) holding `data`. A picture used on several sheets,
+    /// or twice on one, is written once and every drawing points to that part, as in Excel.
+    pub fn image_part(&mut self, ext: &str, data: &[u8]) -> String {
+        let existing = self.parts.iter().find(|(name, bytes)| {
+            name.strip_prefix("xl/media/image").is_some_and(|rest| rest.ends_with(&format!(".{ext}"))) && bytes.as_slice() == data
+        });
+        if let Some((name, _)) = existing {
+            return name.trim_start_matches("xl/media/").to_string();
+        }
+        self.images += 1;
+        let file = format!("image{}.{ext}", self.images);
+        self.part(&format!("xl/media/{file}"), None, data.to_vec());
+        file
     }
     pub fn default_type(&mut self, ext: &str, ct: &str) {
         self.defaults.entry(ext.to_string()).or_insert_with(|| ct.to_string());
@@ -314,8 +328,20 @@ pub fn write_xlsx(wb: &Workbook, kind: XlsxKind) -> Result<Vec<u8>, IoError> {
     }
 
     let mut w = format!("{XML_DECL}<workbook xmlns=\"{NS_MAIN}\" xmlns:r=\"{NS_REL}\">");
-    w.push_str(&crate::passthrough::workbook_elements(wb, "fileVersion"));
-    w.push_str(if wb.date_system == gridcraft_core::DateSystem::D1904 { "<workbookPr date1904=\"1\"/>" } else { "<workbookPr/>" });
+    // A workbook read from a file keeps its <fileVersion> as it was: Excel trusts the saved values
+    // only when appName is "xl" (#799). One without names GridCraft (#1699), and Excel recalculates it.
+    let file_version = crate::passthrough::workbook_elements(wb, "fileVersion");
+    w.push_str(if file_version.is_empty() { "<fileVersion appName=\"gridcraft\"/>" } else { &file_version });
+    w.push_str("<workbookPr");
+    match wb.show_objects {
+        ShowObjects::All => {}
+        ShowObjects::Placeholders => w.push_str(" showObjects=\"placeholders\""),
+        ShowObjects::None => w.push_str(" showObjects=\"none\""),
+    }
+    if wb.date_system == gridcraft_core::DateSystem::D1904 {
+        w.push_str(" date1904=\"1\"");
+    }
+    w.push_str("/>");
     if wb.protected_structure {
         let pw = wb.structure_password.as_ref().map(|h| crate::sheet_write::password_attrs(h, "workbook")).unwrap_or_default();
         let _ = write!(w, "<workbookProtection{pw} lockStructure=\"1\"/>");
@@ -373,9 +399,12 @@ pub fn write_xlsx(wb: &Workbook, kind: XlsxKind) -> Result<Vec<u8>, IoError> {
         crate::theme::write_theme(&wb.theme).into_bytes(),
     );
     wb_rels.add("theme", "theme/theme1.xml");
+    // Phonetic (furigana) data is kept per string text: the table below holds each text once, so
+    // the runs of the entry with that text are written next to it (`Workbook::phonetics`).
+    let phonetics: HashMap<&str, &PhoneticString> = wb.phonetics.iter().map(|p| (p.text.as_str(), p)).collect();
     let mut sst = format!("{XML_DECL}<sst xmlns=\"{NS_MAIN}\" count=\"{}\" uniqueCount=\"{}\">", out.sst.count, out.sst.list.len());
     for t in &out.sst.list {
-        let _ = write!(sst, "<si>{}</si>", crate::xml::t_el(t));
+        let _ = write!(sst, "<si>{}</si>", crate::xml::si_body(t, phonetics.get(t.as_str()).copied()));
     }
     sst.push_str("</sst>");
     out.part("xl/sharedStrings.xml", Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"), sst.into_bytes());
@@ -404,7 +433,7 @@ pub fn write_xlsx(wb: &Workbook, kind: XlsxKind) -> Result<Vec<u8>, IoError> {
     // A macro-free package can't hold a VBA project (Excel refuses such a file).
     if let Some(data) = wb.vba_project.as_ref().filter(|_| kind.is_macro_enabled()) {
         wb_rels.add("vbaProject", "vbaProject.bin");
-        out.part("xl/vbaProject.bin", Some(CT_VBA), data.clone());
+        out.part("xl/vbaProject.bin", Some(CT_VBA), data.to_vec());
     }
     out.part("xl/_rels/workbook.xml.rels", None, wb_rels.xml().into_bytes());
 

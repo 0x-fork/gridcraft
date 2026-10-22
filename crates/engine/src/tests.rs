@@ -1099,6 +1099,31 @@ fn case_sensitive_sort_puts_lowercase_first() {
 }
 
 #[test]
+fn sort_with_a_sheet_prefix_sorts_the_named_sheet() {
+    let col = |s: &Session, sheet: &str| -> Vec<Value> {
+        let wb = &s.doc().unwrap().wb;
+        let sh = wb.sheet(wb.sheet_index(sheet).unwrap()).unwrap();
+        (1..=3).map(|r| sh.value(CellRef::new(r, 0))).collect()
+    };
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Name", "Qty"], ["a", 3], ["b", 1], ["c", 2]]})).unwrap();
+    s.execute("home.insertSheet", json!({"name": "Prices"})).unwrap();
+    s.execute("range.setValues", json!({"range": "Prices!A1", "values": [["Item", "Price"], ["p1", 10], ["p2", 30], ["p3", 20]]})).unwrap();
+    s.execute("sheet.activate", json!({"sheet": "Sheet1"})).unwrap();
+    let r = s.execute("data.sort", json!({"range": "Prices!A1:B4", "header": true, "keys": [{"column": "B", "order": "desc"}]})).unwrap();
+    assert_eq!(r["sorted"], "A2:B4");
+    assert_eq!(col(&s, "Prices"), ["p2", "p3", "p1"].map(Value::from));
+    assert_eq!(col(&s, "Sheet1"), ["a", "b", "c"].map(Value::from));
+    s.execute("data.sortAscending", json!({"range": "Prices!A2:B4", "column": "B"})).unwrap();
+    assert_eq!(col(&s, "Prices"), ["p1", "p3", "p2"].map(Value::from));
+    assert_eq!(col(&s, "Sheet1"), ["a", "b", "c"].map(Value::from));
+    // The selection belongs to the active sheet, so another sheet needs its range.
+    assert!(s.execute("data.sort", json!({"sheet": "Prices", "keys": [{"column": "B"}]})).is_err());
+    assert!(s.execute("data.sort", json!({"range": "Nowhere!A1:B4", "keys": [{"column": "B"}]})).is_err());
+    assert_eq!(col(&s, "Sheet1"), ["a", "b", "c"].map(Value::from));
+}
+
+#[test]
 fn remove_duplicates_compares_shown_text() {
     let mut s = s();
     s.execute("range.setValues", json!({"range": "A1", "values": [["Date", "Price"], ["2006-03-08", 1.01], ["2006-03-08", 1.02]]})).unwrap();
@@ -1108,6 +1133,93 @@ fn remove_duplicates_compares_shown_text() {
     assert_eq!(r["removed"], 0);
     let r = s.execute("data.removeDuplicates", json!({"range": "B1:B3", "header": true})).unwrap();
     assert_eq!(r["removed"], 1);
+}
+
+#[test]
+fn remove_duplicates_with_a_sheet_prefix_works_on_the_named_sheet() {
+    let col = |s: &Session, sheet: &str| -> Vec<Value> {
+        let wb = &s.doc().unwrap().wb;
+        let sh = wb.sheet(wb.sheet_index(sheet).unwrap()).unwrap();
+        (1..=3).map(|r| sh.value(CellRef::new(r, 0))).collect()
+    };
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Name"], ["a"], ["a"], ["a"]]})).unwrap();
+    s.execute("home.insertSheet", json!({"name": "Prices"})).unwrap();
+    s.execute("range.setValues", json!({"range": "Prices!A1", "values": [["Item"], ["p1"], ["p1"], ["p2"]]})).unwrap();
+    s.execute("sheet.activate", json!({"sheet": "Sheet1"})).unwrap();
+    let r = s.execute("data.removeDuplicates", json!({"range": "Prices!A1:A4", "header": true})).unwrap();
+    assert_eq!(r["removed"], 1);
+    assert_eq!(col(&s, "Prices"), [Value::from("p1"), Value::from("p2"), Value::Empty]);
+    assert_eq!(col(&s, "Sheet1"), ["a", "a", "a"].map(Value::from));
+    // The selection belongs to the active sheet, so another sheet needs its range.
+    assert!(s.execute("data.removeDuplicates", json!({"sheet": "Prices", "header": true})).is_err());
+    assert!(s.execute("data.removeDuplicates", json!({"sheet": "Sheet1", "range": "Prices!A1:A4", "header": true})).is_err());
+    assert!(s.execute("data.removeDuplicates", json!({"range": "Nowhere!A1:A4", "header": true})).is_err());
+    assert_eq!(col(&s, "Sheet1"), ["a", "a", "a"].map(Value::from));
+}
+
+#[test]
+fn filter_with_a_sheet_prefix_toggles_the_named_sheet() {
+    let sheet = |s: &Session, name: &str| -> gridcraft_model::Sheet {
+        let wb = &s.doc().unwrap().wb;
+        wb.sheet(wb.sheet_index(name).unwrap()).unwrap().clone()
+    };
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Name", "Qty"], ["a", 3], ["b", 1]]})).unwrap();
+    s.execute("home.insertSheet", json!({"name": "Prices"})).unwrap();
+    s.execute("range.setValues", json!({"range": "Prices!A1", "values": [["Item", "Price"], ["p1", 10], ["p2", 30]]})).unwrap();
+    s.execute("sheet.activate", json!({"sheet": "Sheet1"})).unwrap();
+    let r = s.execute("data.filter", json!({"range": "Prices!A1:B3"})).unwrap();
+    assert_eq!(r["range"], "A1:B3");
+    assert_eq!(sheet(&s, "Prices").autofilter.map(|a| a.range.a1()), Some("A1:B3".to_string()));
+    assert!(sheet(&s, "Sheet1").autofilter.is_none());
+    s.execute("data.filter", json!({"range": "Prices!A1:B3"})).unwrap();
+    assert!(sheet(&s, "Prices").autofilter.is_none());
+    assert!(sheet(&s, "Sheet1").autofilter.is_none());
+    assert!(s.execute("data.filter", json!({"sheet": "Prices"})).is_err());
+}
+
+#[test]
+fn filter_with_a_sheet_prefix_toggles_the_table_at_the_range() {
+    let mut s = s();
+    s.execute("home.insertSheet", json!({"name": "Prices"})).unwrap();
+    s.execute("range.setValues", json!({"range": "Prices!A1", "values": [["Item", "Price"], ["p1", 10], ["p2", 30]]})).unwrap();
+    s.execute("insert.table", json!({"range": "A1:B3", "header": true})).unwrap();
+    s.execute("sheet.activate", json!({"sheet": "Sheet1"})).unwrap();
+    // The active cell is outside the table's cells, so only `range` can find the table.
+    s.execute("selection.set", json!({"range": "E10"})).unwrap();
+    let prices = |s: &Session| {
+        let wb = &s.doc().unwrap().wb;
+        wb.sheet(wb.sheet_index("Prices").unwrap()).unwrap().clone()
+    };
+    assert!(prices(&s).tables[0].filter_button);
+    s.execute("data.filter", json!({"range": "Prices!A2:B3"})).unwrap();
+    assert!(!prices(&s).tables[0].filter_button);
+    assert!(prices(&s).autofilter.is_none());
+    assert!(s.doc().unwrap().wb.active().unwrap().autofilter.is_none());
+}
+
+#[test]
+fn subtotal_with_a_sheet_prefix_works_on_the_named_sheet() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Name", "Qty"], ["x", 1], ["x", 2], ["y", 3]]})).unwrap();
+    s.execute("home.insertSheet", json!({"name": "Prices"})).unwrap();
+    s.execute("range.setValues", json!({"range": "Prices!A1", "values": [["Item", "Qty"], ["a", 1], ["a", 2], ["b", 4]]})).unwrap();
+    s.execute("sheet.activate", json!({"sheet": "Sheet1"})).unwrap();
+    let r = s.execute("data.subtotal", json!({"range": "Prices!A1:B4", "groupBy": "A", "columns": ["B"]})).unwrap();
+    assert_eq!(r["groups"], 2);
+    let wb = &s.doc().unwrap().wb;
+    let prices = wb.sheet(wb.sheet_index("Prices").unwrap()).unwrap();
+    let col = |sh: &gridcraft_model::Sheet, c: u32| -> Vec<Value> { (0..7).map(|r| sh.value(CellRef::new(r, c))).collect() };
+    assert_eq!(col(prices, 0), ["Item", "a", "a", "a Total", "b", "b Total", "Grand Total"].map(Value::from));
+    assert_eq!(col(prices, 1)[1..], [1.0, 2.0, 3.0, 4.0, 4.0, 7.0].map(Value::from));
+    assert!(wb.styles.get(prices.style_id(CellRef::new(3, 0))).font.bold);
+    assert_eq!(prices.rows.get(&1).map(|l| l.outline), Some(1));
+    let sheet1 = wb.sheet(wb.sheet_index("Sheet1").unwrap()).unwrap();
+    assert_eq!(col(sheet1, 0)[..4], ["Name", "x", "x", "y"].map(Value::from));
+    assert!(sheet1.value(CellRef::new(4, 0)).is_empty());
+    assert!(sheet1.rows.values().all(|l| l.outline == 0));
+    assert!(s.execute("data.group", json!({"sheet": "Prices"})).is_err());
 }
 
 #[test]
@@ -2640,7 +2752,7 @@ fn add_image(s: &mut Session, cell: &str, mode: gridcraft_model::AnchorMode) -> 
     wb.sheet_mut(0).unwrap().images.push(gridcraft_model::Image {
         id,
         anchor: gridcraft_model::Anchor { cell: CellRef::parse(cell).unwrap(), dx: 0.0, dy: 0.0, width: 40.0, height: 40.0, mode },
-        data: tiny_png(),
+        data: tiny_png().into(),
         mime: "image/png".into(),
         alt: String::new(),
     });
@@ -2649,6 +2761,35 @@ fn add_image(s: &mut Session, cell: &str, mode: gridcraft_model::AnchorMode) -> 
 
 fn image_cell(s: &Session, id: u32) -> Option<CellRef> {
     s.doc().unwrap().wb.active().unwrap().images.iter().find(|i| i.id == id).map(|i| i.anchor.cell)
+}
+
+/// Every undo step holds a copy of the workbook. A picture's bytes and the VBA project are shared
+/// between those copies instead of copied into each: a 20 MB picture used to cost another 20 MB
+/// for every cell typed on its sheet, up to 100 steps (2 GB).
+#[test]
+fn undo_steps_share_picture_and_macro_bytes() {
+    let mut s = s();
+    s.execute("insert.picture", json!({"base64": crate::io::base64_encode(&tiny_png()), "at": "C3"})).unwrap();
+    std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().wb).vba_project = Some(b"vba".to_vec().into());
+    for i in 1..=3 {
+        s.execute("cell.set", json!({"cell": format!("A{i}"), "input": i.to_string()})).unwrap();
+    }
+    let d = s.doc().unwrap();
+    let live = &d.wb.active().unwrap().images[0].data;
+    let vba = d.wb.vba_project.as_ref().unwrap();
+    assert_eq!(**live, tiny_png());
+    assert!(d.undo.len() >= 3);
+    for step in d.undo.iter().filter(|h| !h.wb.active().unwrap().images.is_empty()) {
+        assert!(std::sync::Arc::ptr_eq(&step.wb.active().unwrap().images[0].data, live), "{}", step.label);
+    }
+    for step in d.undo.iter().rev().take(3) {
+        assert!(std::sync::Arc::ptr_eq(step.wb.vba_project.as_ref().unwrap(), vba), "{}", step.label);
+    }
+    // Undo and redo still give the picture back as it was.
+    s.execute("edit.undo", json!({"steps": 3})).unwrap();
+    assert_eq!(*s.doc().unwrap().wb.active().unwrap().images[0].data, tiny_png());
+    s.execute("edit.redo", json!({})).unwrap();
+    assert_eq!(*s.doc().unwrap().wb.active().unwrap().images[0].data, tiny_png());
 }
 
 /// Issue #5: images anchored in cells follow their row when the sheet is sorted.
@@ -3153,6 +3294,91 @@ fn row_height_and_column_width_take_a_list_of_areas() {
     assert_eq!(s.doc().unwrap().wb.active().unwrap().col_width(1), 120.0, "a bad list changes nothing");
 }
 
+/// Programmatic callers lay out a sheet that isn't the active one: `sheet` (or a `Sheet!` prefix on
+/// `rows`, `cols` or `cell`) picks it, instead of being ignored in favour of the active sheet.
+#[test]
+fn line_sizes_and_freeze_panes_take_a_sheet() {
+    let mut s = s();
+    s.execute("home.insertSheet", json!({"name": "Data"})).unwrap();
+    s.execute("sheet.activate", json!({"sheet": "Sheet1"})).unwrap();
+    let sheet = |s: &Session, i: usize| s.doc().unwrap().wb.sheets[i].clone();
+    let before = sheet(&s, 0);
+
+    s.execute("view.freezePanes", json!({"sheet": "Data", "cell": "A2"})).unwrap();
+    s.execute("home.columnWidth", json!({"sheet": "Data", "cols": "A:A", "width": 150})).unwrap();
+    s.execute("home.columnWidth", json!({"cols": "Data!B:B,D:D", "chars": 20})).unwrap();
+    // A null `sheet` is no `sheet`, as everywhere else: the prefix decides.
+    s.execute("home.columnWidth", json!({"sheet": null, "cols": "Data!C:C", "chars": 20})).unwrap();
+    s.execute("home.rowHeight", json!({"sheet": 1, "rows": "1:1", "height": 40})).unwrap();
+    s.execute("home.hideColumns", json!({"sheet": "Data", "cols": "E:E"})).unwrap();
+    s.execute("home.defaultWidth", json!({"sheet": "Data", "width": 80})).unwrap();
+    let data = sheet(&s, 1);
+    assert_eq!(data.freeze, Some((1, 0)));
+    assert_eq!((data.col_width(0), data.col_width(1), data.col_width(2), data.col_width(3)), (150.0, 145.0, 145.0, 145.0));
+    assert_eq!(data.row_height(0), 40.0);
+    assert!(data.cols.get(&4).is_some_and(|c| c.hidden));
+    assert_eq!(data.default_col_width, 80.0);
+    assert_eq!(sheet(&s, 0), before, "the active sheet is untouched");
+    assert_eq!(s.doc().unwrap().wb.active_sheet, 0);
+
+    s.execute("view.freezePanes", json!({"cell": "Data!B3"})).unwrap();
+    assert_eq!(sheet(&s, 1).freeze, Some((2, 1)));
+    s.execute("view.unfreezePanes", json!({"sheet": "Data"})).unwrap();
+    s.execute("view.freezeTopRow", json!({"sheet": "Data"})).unwrap();
+    assert_eq!(sheet(&s, 1).freeze, Some((1, 0)));
+
+    // The selection belongs to the active sheet: another sheet needs explicit lines or a cell, and
+    // a prefix can't contradict `sheet`.
+    assert!(s.execute("home.columnWidth", json!({"sheet": "Data", "width": 10})).is_err());
+    s.execute("view.unfreezePanes", json!({"sheet": "Data"})).unwrap();
+    assert!(s.execute("view.freezePanes", json!({"sheet": "Data"})).is_err());
+    assert!(s.execute("home.columnWidth", json!({"sheet": "Sheet1", "cols": "Data!B:B", "width": 10})).is_err());
+    assert!(s.execute("home.rowHeight", json!({"rows": "Nope!1:1", "height": 10})).is_err());
+    assert_eq!(sheet(&s, 0), before);
+}
+
+#[test]
+fn row_height_and_column_width_take_pixels_or_excel_units() {
+    // `height` and `width` are pixels at 96 dpi (the model's unit); `points` and `chars` are
+    // Excel's units, those of its Row Height and Column Width dialogs. A row is saved in points.
+    let mut s = s();
+    s.execute("home.rowHeight", json!({"rows": "1:1", "points": 30})).unwrap();
+    s.execute("home.rowHeight", json!({"rows": "2:2", "height": 30})).unwrap();
+    s.execute("home.rowHeight", json!({"rows": "3:3", "points": 409.5})).unwrap();
+    s.execute("home.columnWidth", json!({"cols": "A:A", "chars": 8.43})).unwrap();
+    s.execute("home.columnWidth", json!({"cols": "B:B", "width": 100})).unwrap();
+    let sheet = s.doc().unwrap().wb.active().unwrap();
+    assert_eq!([sheet.row_height(0), sheet.row_height(1), sheet.row_height(2)], [40.0, 30.0, 546.0]);
+    assert_eq!([sheet.col_width(0), sheet.col_width(1)], [64.0, 100.0]);
+    let bytes = gridcraft_xlsx::write_xlsx(&s.doc().unwrap().wb).unwrap();
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut xml = String::new();
+    std::io::Read::read_to_string(&mut zip.by_name("xl/worksheets/sheet1.xml").unwrap(), &mut xml).unwrap();
+    for row in [r#"<row r="1" ht="30" customHeight="1""#, r#"<row r="2" ht="22.5" customHeight="1""#, r#"<row r="3" ht="409.5" customHeight="1""#] {
+        assert!(xml.contains(row), "{row} missing from {xml}");
+    }
+
+    // Out of range, the message gives the limit in the unit that was passed.
+    for (id, params, message) in [
+        ("home.rowHeight", json!({"height": 547}), "Row height must be between 0 and 546 pixels (409.5 points)."),
+        ("home.rowHeight", json!({"points": 410}), "Row height must be between 0 and 409.5 points."),
+        ("home.columnWidth", json!({"width": 1801}), "Column width must be between 0 and 1800 pixels."),
+        ("home.columnWidth", json!({"chars": 256}), "Column width must be between 0 and 255 characters."),
+    ] {
+        assert_eq!(s.execute(id, params).unwrap_err().to_string(), message);
+    }
+
+    // The parameter docs agents read (`list_commands`) name the unit.
+    for (id, unit) in [
+        ("home.rowHeight", "height: 20 (pixels) | points: 15"),
+        ("home.columnWidth", "width: 64 (pixels) | chars: 8.43"),
+        ("home.defaultWidth", "width: 64 (pixels)"),
+    ] {
+        let params = s.commands().into_iter().find(|c| c.id == id).map(|c| c.params).unwrap_or_default();
+        assert!(params.contains(unit), "{id}: {params}");
+    }
+}
+
 #[test]
 fn copying_areas_that_share_rows_or_columns_pastes_them_as_one_block() {
     // Issue #348: Excel slides lined-up areas together; formulas travel as their values.
@@ -3398,4 +3624,144 @@ fn csv_as_text_keeps_identifier_columns_as_written() {
     }
     let saved = s.execute("file.saveBytes", json!({"format": "csv"})).unwrap();
     assert_eq!(crate::io::base64_decode(saved["base64"].as_str().unwrap()).unwrap(), csv.replace('\n', "\r\n").as_bytes());
+}
+
+/// Open a workbook by path, and `CELL("filename")` names the file it came from, as Excel does;
+/// Save As makes the new file the one it names. The sheet-name formula of #1489 depends on it.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn cell_filename_follows_the_file_the_workbook_lives_in() {
+    #[allow(clippy::disallowed_methods)] // native-only test: a unique temp dir name
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let dir = std::env::temp_dir().join(format!("gridcraft-cellname-{}-{nonce}", std::process::id()));
+    std::fs::create_dir(&dir).unwrap();
+    let name = "=CELL(\"filename\",A1)";
+    let sheet_of = "=MID(CELL(\"filename\",A1),FIND(\"]\",CELL(\"filename\",A1))+1,31)";
+
+    // A new workbook has no file: empty, and the sheet-name formula cannot work yet.
+    let mut fresh = s();
+    fresh.execute("cell.set", json!({"cell": "A1", "input": name})).unwrap();
+    fresh.execute("cell.set", json!({"cell": "A2", "input": sheet_of})).unwrap();
+    assert_eq!(v(&fresh, "A1"), Value::from(""));
+    assert_eq!(v(&fresh, "A2"), Value::Error(gridcraft_core::CellError::Value));
+
+    // Saved: it names the file. `CELL` is volatile, so the cells holding it answer from the next
+    // recalculation (F9), the same as every other volatile function; the save itself is not one.
+    let first = dir.join("book one.xlsx");
+    fresh.execute("file.saveAs", json!({"path": first})).unwrap();
+    let sheet = fresh.doc().unwrap().wb.active().unwrap().name.clone();
+    // Saving did not leave the workbook looking modified.
+    assert!(!fresh.doc().unwrap().is_dirty());
+    fresh.execute("formulas.calculateNow", json!({})).unwrap();
+    assert_eq!(v(&fresh, "A1"), Value::from(dir.join(format!("[book one.xlsx]{sheet}")).to_string_lossy().into_owned().as_str()));
+    assert_eq!(v(&fresh, "A2"), Value::from(sheet.as_str()));
+
+    // Opened from that path in another session: the same answer, from the file alone.
+    let mut opened = s();
+    opened.execute("file.open", json!({"path": first})).unwrap();
+    opened.take_ui_requests();
+    assert_eq!(v(&opened, "A2"), Value::from(sheet.as_str()));
+
+    // Save As into another folder: it follows the new file, not the old one.
+    let other = dir.join("sub");
+    std::fs::create_dir(&other).unwrap();
+    opened.execute("file.saveAs", json!({"path": other.join("book two.xlsx")})).unwrap();
+    assert!(!opened.doc().unwrap().is_dirty());
+    opened.execute("formulas.calculateNow", json!({})).unwrap();
+    assert_eq!(v(&opened, "A1"), Value::from(other.join(format!("[book two.xlsx]{sheet}")).to_string_lossy().into_owned().as_str()));
+
+    // Opened from bytes there is no folder, only a name — still splittable on the `]`.
+    let saved = opened.execute("file.saveBytes", json!({"format": "xlsx"})).unwrap();
+    let mut from_bytes = s();
+    from_bytes.execute("file.open", json!({"name": "from bytes.xlsx", "base64": saved["base64"]})).unwrap();
+    from_bytes.take_ui_requests();
+    assert_eq!(v(&from_bytes, "A1"), Value::from(format!("[from bytes.xlsx]{sheet}").as_str()));
+    assert_eq!(v(&from_bytes, "A2"), Value::from(sheet.as_str()));
+
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// Protect Sheet's Sort and Use AutoFilter tick boxes are obeyed. They were read from the file and
+/// written back but never consulted, so a protected sheet could still be sorted and filtered.
+///
+/// Sorting locked cells stays refused whichever way the box is set, which is Excel's rule too
+/// ("users cannot sort ranges that contain locked cells on a protected worksheet"), so the box
+/// decides for a range that has been unlocked. An AutoFilter changes no cell's contents, so there
+/// the box is the only thing that decides.
+#[test]
+fn a_protected_sheet_allows_sorting_and_filtering_only_when_it_says_so() {
+    let allow = |s: &mut Session, f: fn(&mut gridcraft_model::SheetProtection)| {
+        let d = s.doc_mut().unwrap();
+        let mut wb = (*d.wb).clone();
+        if let Some(p) = wb.sheet_mut(0).and_then(|sh| sh.protection.as_mut()) {
+            f(p);
+        }
+        d.wb = std::sync::Arc::new(wb);
+    };
+    // Three rows under a header, and the cells unlocked so that the tick box is what decides.
+    let book = || {
+        let mut s = s();
+        for (c, v) in [("A1", "Head"), ("A2", "2"), ("A3", "1")] {
+            s.execute("cell.set", json!({"cell": c, "input": v})).unwrap();
+        }
+        s.execute("home.lockCell", json!({"range": "A1:A3", "on": false})).unwrap();
+        s
+    };
+    let order = |s: &Session| (v(s, "A2"), v(s, "A3"));
+
+    // Unprotected: both work, so the guard has not made the ordinary case stricter.
+    let mut s = book();
+    s.execute("data.sortAscending", json!({})).unwrap();
+    assert_eq!(order(&s), (Value::Number(1.0), Value::Number(2.0)));
+    s.execute("data.filter", json!({})).unwrap();
+
+    // Protected with nothing ticked, which is what Excel's dialog opens with: both refused.
+    let mut s = book();
+    s.execute("review.protectSheet", json!({})).unwrap();
+    for (cmd, args) in [
+        ("data.sortAscending", json!({})),
+        ("data.sortDescending", json!({})),
+        // Sort… needs a key to be a sort at all: with none it does nothing either way.
+        ("data.sort", json!({"keys": [{"column": "A", "order": "asc"}]})),
+        ("data.filter", json!({})),
+        ("data.filterBy", json!({})),
+    ] {
+        let e = s.execute(cmd, args).expect_err(cmd).to_string();
+        assert!(e.contains("protected sheet"), "{cmd}: {e}");
+    }
+    // Refused, not half-applied: the rows are where they were.
+    assert_eq!(order(&s), (Value::Number(2.0), Value::Number(1.0)));
+    assert!(s.doc().unwrap().wb.sheet(0).unwrap().autofilter.is_none());
+
+    // Sort ticked: sorting works on the unlocked range; filtering is still refused.
+    let mut s = book();
+    s.execute("review.protectSheet", json!({})).unwrap();
+    allow(&mut s, |p| p.sort = true);
+    s.execute("data.sortAscending", json!({})).unwrap();
+    assert_eq!(order(&s), (Value::Number(1.0), Value::Number(2.0)), "sorted under the header");
+    assert!(s.execute("data.filter", json!({})).is_err(), "Use AutoFilter is still off");
+
+    // Use AutoFilter ticked: the filter goes on, and sorting is refused.
+    let mut s = book();
+    s.execute("review.protectSheet", json!({})).unwrap();
+    allow(&mut s, |p| p.autofilter = true);
+    s.execute("data.filter", json!({})).unwrap();
+    assert!(s.doc().unwrap().wb.sheet(0).unwrap().autofilter.is_some(), "the AutoFilter is on");
+    assert!(s.execute("data.sortAscending", json!({})).is_err(), "Sort is still off");
+    // Unprotecting gives sorting back.
+    s.execute("review.unprotectSheet", json!({})).unwrap();
+    s.execute("data.sortAscending", json!({})).unwrap();
+
+    // Locked cells: ticking Sort does not let them be reordered, as in Excel.
+    let mut s = {
+        let mut t = super::tests::s();
+        for (c, v) in [("A1", "Head"), ("A2", "2"), ("A3", "1")] {
+            t.execute("cell.set", json!({"cell": c, "input": v})).unwrap();
+        }
+        t
+    };
+    s.execute("review.protectSheet", json!({})).unwrap();
+    allow(&mut s, |p| p.sort = true);
+    assert!(s.execute("data.sortAscending", json!({})).is_err(), "locked cells cannot be sorted");
+    assert_eq!(order(&s), (Value::Number(2.0), Value::Number(1.0)));
 }

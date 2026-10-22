@@ -63,7 +63,7 @@ pub fn specs() -> Vec<CommandSpec> {
 fn lines(s: &Session, p: &Json, axis: Axis) -> Result<(u32, u32)> {
     let key = if axis == Axis::Rows { "rows" } else { "cols" };
     let r = match str_param(p, key).or_else(|| str_param(p, "range")) {
-        Some(t) => RangeRef::parse(t).ok_or_else(|| bad(key, format!("not a range: {t}")))?,
+        Some(t) => parse_lines(t).ok_or_else(|| bad(key, format!("not a range: {t}")))?,
         None => s.doc()?.selection.current(),
     };
     let (a, b) = if axis == Axis::Rows { (r.start.row, r.end.row) } else { (r.start.col, r.end.col) };
@@ -306,7 +306,7 @@ fn delete_areas(s: &Session, p: &Json, axis: Axis) -> Result<Vec<(u32, u32)>> {
     } else if let Some(t) = str_param(p, key).or_else(|| str_param(p, "range")) {
         t.split(',')
             .map(|part| {
-                let r = RangeRef::parse(part).ok_or_else(|| bad(key, format!("not a range: {part}")))?;
+                let r = parse_lines(part).ok_or_else(|| bad(key, format!("not a range: {part}")))?;
                 Ok(if axis == Axis::Rows { (r.start.row, r.end.row) } else { (r.start.col, r.end.col) })
             })
             .collect::<Result<_>>()?

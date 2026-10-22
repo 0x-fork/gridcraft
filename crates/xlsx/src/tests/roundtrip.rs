@@ -326,7 +326,7 @@ fn sample() -> Workbook {
         id: 10,
         // A non-default anchor mode, to prove it survives an xlsx round-trip.
         anchor: Anchor { cell: at("C10"), dx: 5.0, dy: 4.0, width: 120.0, height: 80.0, mode: AnchorMode::MoveOnly },
-        data: png,
+        data: png.into(),
         mime: "image/png".into(),
         alt: "Logo \"x\"".into(),
     });
@@ -681,6 +681,51 @@ fn iterative_calculation_settings_roundtrip() {
 }
 
 #[test]
+fn show_objects_roundtrip() {
+    let saved = |wb: &Workbook| {
+        let bytes = write_xlsx(wb).unwrap();
+        let mut pkg = Package::open(&bytes).unwrap();
+        let book = pkg.read_xml("xl/workbook.xml").unwrap().unwrap();
+        let attr = book.child("workbookPr").and_then(|p| p.attr("showObjects")).map(str::to_string);
+        (attr, read_xlsx(&bytes).unwrap().0.show_objects)
+    };
+    // Default: nothing written, All read back.
+    let mut wb = Workbook::new();
+    assert_eq!(saved(&wb), (None, ShowObjects::All));
+    // Beside date1904, which shares the element.
+    wb.date_system = DateSystem::D1904;
+    for (show, attr) in [(ShowObjects::None, "none"), (ShowObjects::Placeholders, "placeholders")] {
+        wb.show_objects = show;
+        assert_eq!(saved(&wb), (Some(attr.to_string()), show));
+        assert_eq!(read_xlsx(&write_xlsx(&wb).unwrap()).unwrap().0.date_system, DateSystem::D1904);
+    }
+    // A file written elsewhere: the attribute among the others Excel writes, or absent.
+    let book = |pr: &str| {
+        let wbx = format!(
+            r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">{pr}<sheets><sheet name="A" sheetId="1" r:id="rId1"/></sheets></workbook>"#
+        );
+        let rels = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#;
+        let ws = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>"#;
+        let bytes = super::make_zip(&[
+            ("[Content_Types].xml", super::CT.as_bytes()),
+            ("_rels/.rels", super::ROOT_RELS.as_bytes()),
+            ("xl/workbook.xml", wbx.as_bytes()),
+            ("xl/_rels/workbook.xml.rels", rels.as_bytes()),
+            ("xl/worksheets/sheet1.xml", ws.as_bytes()),
+        ]);
+        read_xlsx(&bytes).unwrap().0
+    };
+    let hidden = book(r#"<workbookPr showObjects="none" defaultThemeVersion="166925"/>"#);
+    assert_eq!(hidden.show_objects, ShowObjects::None);
+    assert_eq!(saved(&hidden).0.as_deref(), Some("none"));
+    for pr in [r#"<workbookPr defaultThemeVersion="166925"/>"#, "", r#"<workbookPr showObjects="bogus"/>"#] {
+        let wb = book(pr);
+        assert_eq!(wb.show_objects, ShowObjects::All, "{pr}");
+        assert_eq!(saved(&wb).0, None, "{pr}: a file without the attribute stays without it");
+    }
+}
+
+#[test]
 fn empty_workbook_roundtrip() {
     let wb = Workbook::new();
     let bytes = write_xlsx(&wb).unwrap();
@@ -738,7 +783,7 @@ fn vba_project_roundtrip() {
     // carries the macro-enabled content type plus the vbaProject relationship.
     let vba = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1 fake OLE2 vbaProject".to_vec();
     let mut wb = Workbook::new();
-    wb.vba_project = Some(vba.clone());
+    wb.vba_project = Some(vba.clone().into());
     let bytes = write_xlsx(&wb).unwrap();
     assert_eq!(write_xlsx(&wb).unwrap(), bytes, "output is deterministic");
 
@@ -757,7 +802,7 @@ fn vba_project_roundtrip() {
     assert!(rels.contains("relationships/vbaProject"), "vbaProject relationship: {rels}");
 
     let (back, rep) = read_xlsx(&bytes).unwrap();
-    assert_eq!(back.vba_project.as_deref(), Some(vba.as_slice()), "vbaProject survives the read");
+    assert_eq!(back.vba_project.as_deref(), Some(&vba), "vbaProject survives the read");
     assert!(rep.warnings.iter().any(|w| w.contains("not executed")), "{:?}", rep.warnings);
 
     // A workbook without macros stays macro-free and free of VBA warnings.

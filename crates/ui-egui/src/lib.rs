@@ -14,6 +14,7 @@ pub mod control;
 pub mod credits;
 pub mod dialogs;
 pub mod editor;
+mod floating_pictures;
 pub mod fonts;
 pub mod formula_bar;
 mod formula_locale;
@@ -1135,9 +1136,16 @@ impl SheetApp {
 
     /// Per-frame logic (control channel, screenshots). Call before `ui`.
     pub fn logic(&mut self, ctx: &egui::Context) {
+        if self.session.text_width.is_none() {
+            let ctx = ctx.clone();
+            self.session.text_width = Some(std::sync::Arc::new(move |text, font, exact| theme::cell_text_width(&ctx, text, font, exact)));
+        }
         // A keytip control request lives one frame: the ribbon consumes it during `ui`, and
         // anything that never reached a control (collapsed ribbon, tab switch) is dropped.
         self.ui.keytip_invoke = None;
+        // Floating pictures' textures go with their workbook, even when no sheet is painted.
+        let open: Vec<u64> = self.session.documents().iter().map(|d| d.uid).collect();
+        floating_pictures::forget_closed(ctx, &open);
         if self.fonts_han.is_some_and(|han| han != theme::HanOrder::of(self.ui.language)) {
             self.fonts_ready = false;
             self.fonts_set = false;

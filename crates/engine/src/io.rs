@@ -235,6 +235,12 @@ pub fn source_dir(path: &str) -> Option<std::path::PathBuf> {
     std::path::absolute(path).ok()?.parent().map(std::path::Path::to_path_buf)
 }
 
+/// The file at `path` as `CELL("filename")` reports it: absolute, so the folder is the one the
+/// user sees. A workbook that arrived as bytes has no path and keeps only its name.
+pub fn source_path(path: &str) -> Option<std::path::PathBuf> {
+    std::path::absolute(path).ok()
+}
+
 /// Save As CSV/Text writes "the text and values as they are displayed in cells" with "all
 /// characters in each cell" (Microsoft Support, *Excel formatting and features that are not
 /// transferred to other file formats*): number formats applied, never column-width `#####`.
@@ -673,7 +679,7 @@ mod tests {
     #[test]
     fn macros_are_saved_only_into_xlsm() {
         let mut wb = Workbook::new();
-        wb.vba_project = Some(b"vba".to_vec());
+        wb.vba_project = Some(b"vba".to_vec().into());
         let has_macros = |path: &str| {
             let bytes = save_bytes(&wb, path).unwrap();
             gridcraft_xlsx::read_xlsx(&bytes).unwrap().0.vba_project.is_some()

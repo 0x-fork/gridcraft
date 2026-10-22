@@ -246,6 +246,11 @@ pub(crate) fn target_ranges(s: &Session, p: &Json) -> Result<Vec<RangeRef>> {
     Ok(s.doc()?.selection.ranges.clone())
 }
 
+/// A `rows`/`cols` parameter: `3:5` and `B:C`, or a single `3` or `B`.
+pub(crate) fn parse_lines(t: &str) -> Option<RangeRef> {
+    RangeRef::parse(t).or_else(|| if t.contains(':') { None } else { RangeRef::parse(&format!("{t}:{t}")) })
+}
+
 pub(crate) fn target_range(s: &Session, p: &Json) -> Result<RangeRef> {
     Ok(target_ranges(s, p)?.first().copied().unwrap_or_default())
 }
@@ -384,6 +389,18 @@ fn check_protection(old: &Workbook, new: &Workbook, unlocked: &[(String, String)
                 return Err(EngineError::Other(m));
             }
         }
+    }
+    Ok(())
+}
+
+/// Refuses an action a protected sheet does not allow, by the tick box for it in Review ▸ Protect
+/// Sheet. `what` names the action in the message. An unprotected sheet allows everything.
+///
+/// Cell edits are guarded separately, by whether the cell is locked (`locked_cell_error`): these
+/// permissions are the ones that are not about one cell's contents.
+pub(crate) fn refuse_unless_allowed(s: &Session, sheet: usize, what: &str, pick: fn(&gridcraft_model::SheetProtection) -> bool) -> Result<()> {
+    if s.doc()?.wb.sheet(sheet).is_some_and(|sh| sh.protection.as_ref().is_some_and(|pr| !pick(pr))) {
+        return Err(EngineError::Other(format!("{what} isn't allowed on this protected sheet (Review › Unprotect Sheet).")));
     }
     Ok(())
 }
