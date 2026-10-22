@@ -120,12 +120,13 @@ pub struct GridState {
     pub context_menu_frame: u64,
     /// After a right-drag of the fill handle: the source, the dragged range and where to open the menu.
     pub fill_menu: Option<(RangeRef, RangeRef, Pos2)>,
+    /// The right-clicked chart, picture, shape or slicer: where to open its menu, its kind and id.
+    pub object_menu: Option<(Pos2, &'static str, u32)>,
     pub marching_phase: f32,
     /// The selection outline on its way to a new selection.
     pub glide: crate::selection_glide::SelectionGlide,
     pub last_click: Option<(CellRef, f64)>,
     pub hover_cell: Option<CellRef>,
-    pub autosave: bool,
     pub last_autosave: f64,
     pub last_border: String,
     pub last_fill: String,
@@ -182,15 +183,6 @@ impl WheelZoom {
             w.glide = None;
         }
         w
-    }
-}
-
-impl GridState {
-    pub fn autosave(&self) -> bool {
-        self.autosave
-    }
-    pub fn toggle_autosave(&mut self) {
-        self.autosave = !self.autosave;
     }
 }
 
@@ -795,7 +787,12 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     header_menu(app, ui, previous_popups.2 == app.grid.header_menu);
     context_menu(app, ui);
     fill_menu(app, ui, previous_popups.3 == app.grid.fill_menu);
+    object_menu(app, ui);
+    error_check_tag(app, ui, &geo, sh);
     let track_x = if rtl { (available.left(), rect.left()) } else { (rect.right(), available.right()) };
+    // The track starts below the column headings and frozen rows; the bar's column beside them
+    // takes its colour too instead of showing a light square in dark mode.
+    ui.painter().rect_filled(Rect::from_min_max(pos2(track_x.0, rect.top()), pos2(track_x.1, rect.bottom())), 0.0, t.tab_bar);
     vertical_scrollbar(app, ui, sh, &geo, track_x, max_y, &t);
     if app.session.clipboard.is_some() {
         // By the clock, not per frame: a gliding outline repaints more often than the ants step.
@@ -1388,6 +1385,15 @@ pub(crate) fn paint_quadrant(
                 Stroke::NONE,
             ));
         }
+        // Background error checking: a number stored as text gets Excel's green corner (#1994).
+        if !sh.show_formulas && sh.cell(*c).and_then(gridcraft_engine::cmd::formulas::number_stored_as_text).is_some() {
+            let s = 6.0 * z.max(0.7);
+            p.add(egui::Shape::convex_polygon(
+                vec![rect.left_top(), pos2(rect.left() + s, rect.top()), pos2(rect.left(), rect.top() + s)],
+                t.error_check_green,
+                Stroke::NONE,
+            ));
+        }
     }
     // Sparklines.
     for sp in &sh.sparklines {
@@ -1792,7 +1798,7 @@ pub(crate) fn paint_headers(
     quads: &[((u32, u32), (u32, u32), Rect)],
     headings: &[TableHeading],
 ) {
-    let font = theme::ui_font((11.5 * (geo.z / DISPLAY_SCALE).max(0.75)).min(16.0));
+    let font = theme::ui_font(heading_font_size(geo.z));
     // The headers' own area: inside the outline bands.
     let r = Rect::from_min_max(pos2(geo.head_left(), geo.head_top()), geo.rect.max);
     let top = Rect::from_min_max(pos2(geo.cells.left(), r.top()), pos2(r.right(), geo.cells.top()));
@@ -2088,10 +2094,12 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
         }
         return;
     }
-    // Objects (charts, pictures, shapes, slicers) take clicks first.
-    if resp.drag_started() || primary_clicked {
+    // Objects (charts, pictures, shapes, slicers) take clicks first. Only the primary button moves
+    // them: a right-click that wobbles into a drag still opens the object's menu (#2067).
+    let primary_drag = resp.drag_started_by(egui::PointerButton::Primary);
+    if primary_drag || primary_clicked {
         // A drag is recognised only after the pointer has moved, so grab the object where the press began.
-        let at = if resp.drag_started() { pointer.press_origin().or(pos) } else { pos };
+        let at = if primary_drag { pointer.press_origin().or(pos) } else { pos };
         if let Some(p) = at
             && let Some((kind, id, rect)) = crate::chartview::hit(app, geo, sh, p)
         {
@@ -2106,7 +2114,7 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
             if kind == "chart" && resp.double_clicked() {
                 app.grid.pane = Some("formatChart".into());
             }
-            if resp.drag_started() {
+            if primary_drag {
                 let a = object_anchor(sh, kind, id);
                 let resize = (p - rect.right_bottom()).length() < OBJECT_RESIZE_RADIUS;
                 if let Some(a) = a {
@@ -2114,9 +2122,20 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                 }
             }
             return;
-        } else if primary_clicked || resp.drag_started() {
+        } else {
             app.selected_chart = None;
         }
+    }
+    // A right-click on a chart, picture, shape or slicer opens the object's menu, not the cell's
+    // under it; a right press that wobbles into a drag counts too (#2067).
+    let secondary_drag = resp.drag_started_by(egui::PointerButton::Secondary);
+    if (resp.secondary_clicked() || secondary_drag)
+        && let Some(p) = if secondary_drag { pointer.press_origin().map(|p| geo.mirror_pos(p)).or(pos) } else { pos }
+        && let Some((kind, id, _)) = crate::chartview::hit(app, geo, sh, p)
+    {
+        app.selected_chart = Some(id);
+        app.grid.object_menu = Some((geo.mirror_pos(p), kind, id));
+        return;
     }
 
     // A double-click is also a click: handle header AutoFit before resize setup returns.
@@ -3004,10 +3023,21 @@ fn in_cell_editor(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet, 
     let st = wb.styles.get(sh.style_id(cell)).clone();
     let size = st.font.size * 96.0 / 72.0 * geo.z;
     let font = FontId::new(size, theme::cell_family(&st.font.name, st.font.bold, st.font.italic));
-    let text_w = ui.painter().layout_no_wrap(ed.text.clone(), font.clone(), Color32::BLACK).size().x;
     let lines = ed.text.lines().count().max(1) as f32 + if ed.text.ends_with('\n') { 1.0 } else { 0.0 };
-    let w = (text_w + 14.0).max(rect.width()).min(geo.cells.right() - rect.left());
-    let h = (size * 1.3 * lines + 4.0).max(rect.height());
+    // Wrap Text: the editor keeps the column's width and wraps, growing down as Excel's does.
+    // Otherwise it widens to the text's one-line width.
+    let wrap = st.align.wrap;
+    let (w, h) = if wrap {
+        // The field wraps at the width it is given (the editor's less its 2 px inset a side): its
+        // frame is `Frame::NONE`, so no text margin is taken off.
+        let wrapped = ui.painter().layout(ed.text.clone(), font.clone(), Color32::BLACK, (rect.width() - 4.0).max(1.0));
+        (rect.width(), (wrapped.size().y.max(size * 1.3 * lines) + 4.0).max(rect.height()))
+    } else {
+        let text_w = ui.painter().layout_no_wrap(ed.text.clone(), font.clone(), Color32::BLACK).size().x;
+        // Excel keeps the cell's height for one line and only grows for extra lines.
+        let h = if lines > 1.0 { (size * 1.3 * lines + 4.0).max(rect.height()) } else { rect.height() };
+        ((text_w + 14.0).max(rect.width()).min(geo.cells.right() - rect.left()), h)
+    };
     // Grows to the left on a right-to-left sheet.
     let erect = geo.mirror_rect(Rect::from_min_size(rect.min, vec2(w, h)));
     let fill = match st.fill.pattern {
@@ -3029,7 +3059,7 @@ fn in_cell_editor(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet, 
     // The theme's caret is meant for the UI chrome and vanishes on some fills (and, in the dark
     // theme, on the white paper): pick black or white against the fill, like Excel.
     child.visuals_mut().text_cursor.stroke.color = ink_on(fill);
-    crate::formula_bar::editor_widget(app, &mut child, id, font, false, erect.width() - 4.0);
+    crate::formula_bar::editor_widget(app, &mut child, id, font, wrap, erect.width() - 4.0);
 }
 
 /// Test the popup itself, not whether the pointer is over any part of the app.
@@ -3291,6 +3321,92 @@ fn fill_menu(app: &mut SheetApp, ui: &mut egui::Ui, was_open: bool) {
     if close || popup_dismissed(&response.response, was_open) {
         app.grid.fill_menu = None;
     }
+}
+
+/// The right-click menu of a chart, picture, shape or slicer.
+fn object_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
+    let Some((at, kind, id)) = app.grid.object_menu else { return };
+    let mut close = false;
+    let resp = egui::Area::new(egui::Id::new("object_context")).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
+        egui::Frame::popup(ui.style()).show(ui, |ui| {
+            ui.set_min_width(200.0);
+            let mut items = vec![("Delete", "object.delete")];
+            if kind == "chart" {
+                items.extend([("-", ""), ("Select Data…", "ui:selectData"), ("Format Chart Area…", "ui:formatChart")]);
+            }
+            let lang = crate::i18n::current(ui.ctx());
+            for (label, action) in items {
+                if label == "-" {
+                    ui.separator();
+                    continue;
+                }
+                if ui.add(egui::Button::new(lang.tr(label)).frame(false).min_size(vec2(190.0, 20.0))).clicked() {
+                    close = true;
+                    match action {
+                        "ui:selectData" => app.open_dialog("selectData", json!({"chart": id})),
+                        "ui:formatChart" => app.grid.pane = Some("formatChart".into()),
+                        _ => {
+                            app.run_or_alert("object.delete", json!({"kind": kind, "id": id}));
+                            app.selected_chart = None;
+                        }
+                    }
+                }
+            }
+        });
+    });
+    if close
+        || ui.input(|i| i.key_pressed(egui::Key::Escape))
+        || (ui.input(|i| i.pointer.any_pressed())
+            && !resp.response.contains_pointer()
+            && !resp.response.hovered()
+            && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| !resp.response.rect.contains(p)))
+    {
+        app.grid.object_menu = None;
+    }
+}
+
+/// The warning button beside an active cell holding a number stored as text, as in Excel: its
+/// menu names the problem and offers Convert to Number for the selection (#1994).
+fn error_check_tag(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet) {
+    if app.editor.is_some() || app.dialog.is_some() || sh.show_formulas || app.grid.drag != Drag::None {
+        return;
+    }
+    let Some(active) = app.session.active().map(|d| d.selection.active) else { return };
+    if sh.cell(active).and_then(gridcraft_engine::cmd::formulas::number_stored_as_text).is_none() {
+        return;
+    }
+    let cell = geo.cell_rect(sh, active);
+    let size = vec2(18.0, 18.0);
+    // Left of the cell, or right of it when that would cover the row headings.
+    let left = if cell.left() - size.x - 2.0 >= geo.cells.left() { cell.left() - size.x - 2.0 } else { cell.right() + 2.0 };
+    let tag = geo.mirror_rect(Rect::from_min_size(pos2(left, cell.top()), size));
+    if !geo.cells.intersects(tag) {
+        return;
+    }
+    let lang = crate::i18n::current(ui.ctx());
+    let resp = ui.interact(tag, egui::Id::new("gridcraft.error_check_tag"), Sense::click()).on_hover_text(lang.tr("Number Stored as Text"));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, lang.tr("Error checking options")));
+    let t = Tokens::get(ui.ctx());
+    let p = ui.painter();
+    p.rect_filled(tag, 3.0, if resp.hovered() { t.hover } else { t.window });
+    p.rect_stroke(tag, 3.0, Stroke::new(1.0, t.separator), egui::StrokeKind::Inside);
+    // A warning sign: an amber diamond with an exclamation mark.
+    let c = tag.center();
+    let r = 6.0;
+    p.add(egui::Shape::convex_polygon(
+        vec![pos2(c.x, c.y - r), pos2(c.x + r, c.y), pos2(c.x, c.y + r), pos2(c.x - r, c.y)],
+        t.warning_fill,
+        Stroke::NONE,
+    ));
+    p.text(c, egui::Align2::CENTER_CENTER, "!", egui::FontId::proportional(10.0), t.warning_ink);
+    egui::Popup::menu(&resp).show(|ui| {
+        ui.label(egui::RichText::new(lang.tr("Number Stored as Text")).strong());
+        ui.separator();
+        if ui.button(lang.tr("Convert to Number")).clicked() {
+            app.run_or_alert("formulas.convertToNumber", json!({}));
+            ui.close();
+        }
+    });
 }
 
 /// Used by `EditState` users to keep the active cell visible while pointing.
@@ -3728,6 +3844,12 @@ fn painted_halign(h: HAlign, rtl: bool) -> HAlign {
     }
 }
 
+/// Row and column heading labels grow with the zoom as the cells do, as in Excel (at 400% the
+/// labels are four times their 100% size), and never get smaller than a readable 8.5 points.
+pub(crate) fn heading_font_size(zoom: f32) -> f32 {
+    (11.5 * (zoom / DISPLAY_SCALE)).max(8.5)
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -3743,6 +3865,15 @@ mod tests {
         for h in [HAlign::Center, HAlign::Justify, HAlign::Fill] {
             assert_eq!(painted_halign(h, true), h);
         }
+    }
+
+    #[test]
+    fn heading_labels_scale_with_the_zoom_without_a_cap() {
+        use super::{DISPLAY_SCALE, heading_font_size};
+        let at = |percent: f32| heading_font_size(percent / 100.0 * DISPLAY_SCALE);
+        assert!((at(400.0) / at(100.0) - 4.0).abs() < 1e-4, "four times as large at 400%");
+        assert!(at(200.0) > at(100.0) && at(400.0) > at(200.0));
+        assert_eq!(at(10.0), 8.5, "never below a readable size");
     }
     use super::*;
 

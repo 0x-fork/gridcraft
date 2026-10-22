@@ -256,7 +256,7 @@ impl<'h> Evaluator<'h> {
     }
 
     fn name(&mut self, n: &str) -> Ev {
-        if let Some((_, v)) = self.env.iter().rev().find(|(k, _)| k.eq_ignore_ascii_case(n)) {
+        if let Some((_, v)) = self.env.iter().rev().find(|(k, _)| gridcraft_formula::same_name(k, n)) {
             return v.clone();
         }
         let wb = self.host.workbook();
@@ -772,7 +772,7 @@ impl<'h> Evaluator<'h> {
                 Ev::L(Arc::new(Lambda { params, body: body.clone(), env: self.env.clone() }))
             }
             "ISOMITTED" => {
-                let r = matches!(args.first(), Some(Expr::Name(n)) if self.env.iter().rev().find(|(k, _)| k.eq_ignore_ascii_case(n)).is_some_and(|(_, v)| matches!(v, Ev::V(Value::Empty))));
+                let r = matches!(args.first(), Some(Expr::Name(n)) if self.env.iter().rev().find(|(k, _)| gridcraft_formula::same_name(k, n)).is_some_and(|(_, v)| matches!(v, Ev::V(Value::Empty))));
                 Ev::V(Value::Bool(r))
             }
             "MAP" | "REDUCE" | "SCAN" | "BYROW" | "BYCOL" | "MAKEARRAY" => self.higher_order(name, args),
@@ -975,7 +975,7 @@ impl<'h> Evaluator<'h> {
     /// that name.
     fn function_by_name(&self, e: &Expr) -> Option<String> {
         let Expr::Name(n) = e else { return None };
-        if self.env.iter().any(|(k, _)| k.eq_ignore_ascii_case(n)) || self.host.workbook().name(n, self.sheet).is_some() {
+        if self.env.iter().any(|(k, _)| gridcraft_formula::same_name(k, n)) || self.host.workbook().name(n, self.sheet).is_some() {
             return None;
         }
         let u = n.to_ascii_uppercase();

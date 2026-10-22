@@ -34,6 +34,27 @@ pub fn parse_name(src: &str) -> Result<Expr, ParseError> {
     parse_top(src, crate::FormulaLocale::En, true)
 }
 
+/// Most closing parentheses [`parse_closing_parens`] adds.
+const MAX_CLOSED_PARENS: usize = 8;
+
+/// Parses formula text as typed into a cell with `parse`, closing up to eight missing `)` at the
+/// end as Excel does (`SUM(1,2` enters `SUM(1,2)`). When no number of `)` makes it parse, the
+/// error describes the text as typed: `1+` is "unexpected end of formula", not "unexpected `)`".
+pub fn parse_closing_parens<T>(src: &str, parse: impl Fn(&str) -> Result<T, ParseError>) -> Result<T, ParseError> {
+    let typed = match parse(src) {
+        Ok(parsed) => return Ok(parsed),
+        Err(e) => e,
+    };
+    let mut text = src.to_string();
+    for _ in 0..MAX_CLOSED_PARENS {
+        text.push(')');
+        if let Ok(parsed) = parse(&text) {
+            return Ok(parsed);
+        }
+    }
+    Err(typed)
+}
+
 pub(crate) fn parse_syntax(src: &str, locale: crate::FormulaLocale) -> Result<Expr, ParseError> {
     parse_top(src, locale, false)
 }

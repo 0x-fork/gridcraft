@@ -49,13 +49,33 @@ pub fn parse_number_text_in(s: &str, sys: DateSystem) -> Option<f64> {
     parse_numeric(s.trim(), sys).map(|(n, _)| n)
 }
 
+/// Text that Excel's "Number Stored as Text" check flags: it would be a number if typed (signs,
+/// thousands separators, currency, percent, exponent, a parenthesised negative). Dates, times and
+/// fractions kept as text are not flagged, as in Excel.
+pub fn number_stored_as_text(s: &str) -> Option<f64> {
+    let t = s.trim();
+    match t.strip_prefix('(').and_then(|x| x.strip_suffix(')')) {
+        Some(inner) => parse_plain(inner.trim()).map(|(n, _)| -n),
+        None => parse_plain(t).map(|(n, _)| n),
+    }
+}
+
 fn parse_numeric(t: &str, sys: DateSystem) -> Option<(f64, Option<&'static str>)> {
+    // Parenthesised negatives: (100) = -100. Each level negates, so ((100)) = 100. Stripped in a
+    // loop, not by recursion: runtime text (e.g. from REPT) can nest thousands deep (#2180).
+    let mut t = t;
+    let mut neg = false;
+    while let Some(inner) = t.strip_prefix('(').and_then(|x| x.strip_suffix(')')) {
+        t = inner.trim();
+        neg = !neg;
+    }
+    let (n, f) = parse_unparenthesised(t, sys)?;
+    Some((if neg { -n } else { n }, f))
+}
+
+fn parse_unparenthesised(t: &str, sys: DateSystem) -> Option<(f64, Option<&'static str>)> {
     if t.is_empty() {
         return None;
-    }
-    // Parenthesised negatives: (100) = -100.
-    if let Some(inner) = t.strip_prefix('(').and_then(|x| x.strip_suffix(')')) {
-        return parse_numeric(inner.trim(), sys).map(|(n, f)| (-n, f));
     }
     if let Some(r) = parse_plain(t) {
         return Some(r);
@@ -353,6 +373,24 @@ mod tests {
     }
 
     #[test]
+    fn deeply_nested_parentheses_do_not_overflow() {
+        // #2180: coercion used to recurse once per parenthesis and overflow the stack.
+        let depth = 100_000;
+        let s = format!("{}1{}", "(".repeat(depth), ")".repeat(depth));
+        assert_eq!(parse_number_text(&s), Some(1.0));
+        let odd = format!("{}1{}", "(".repeat(depth + 1), ")".repeat(depth + 1));
+        assert_eq!(parse_number_text(&odd), Some(-1.0));
+        let unbalanced = format!("{}1{}", "(".repeat(depth), ")".repeat(depth - 1));
+        assert_eq!(parse_number_text(&unbalanced), None);
+        assert_eq!(p(&s).value, Value::Number(1.0));
+        // Existing results are unchanged.
+        assert_eq!(parse_number_text("(100)"), Some(-100.0));
+        assert_eq!(parse_number_text("((100))"), Some(100.0));
+        assert_eq!(parse_number_text("( $1,200.50 )"), Some(-1200.5));
+        assert_eq!(parse_number_text("()"), None);
+    }
+
+    #[test]
     fn texts_and_specials() {
         assert_eq!(p("hello").value, Value::text("hello"));
         assert_eq!(p("'123").value, Value::text("123"));
@@ -397,5 +435,16 @@ mod tests {
         // The 1904 system starts after it.
         assert_eq!(parse_input("2/29/1900", DateSystem::D1904).value, Value::text("2/29/1900"));
         assert_eq!(parse_input("2/29/1904", DateSystem::D1904).value, Value::Number(59.0));
+    }
+
+    #[test]
+    fn numbers_stored_as_text() {
+        for (text, n) in [("123", 123.0), (" 42 ", 42.0), ("-1,000.5", -1000.5), ("$3", 3.0), ("50%", 0.5), ("1E3", 1000.0), ("(100)", -100.0)] {
+            assert_eq!(number_stored_as_text(text), Some(n), "{text}");
+        }
+        // Dates, times, fractions, words and blanks are not flagged.
+        for text in ["3/4/2026", "10:30", "1 1/2", "abc", "12abc", "", "  ", "TRUE", "#N/A", "((1))"] {
+            assert_eq!(number_stored_as_text(text), None, "{text}");
+        }
     }
 }

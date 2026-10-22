@@ -183,15 +183,8 @@ pub(crate) fn input_to_cell(input: &str, sheet: usize, at: CellRef, wb: &mut gri
 /// Parses a formula as it is typed (without the `=`). Excel closes missing parentheses for you,
 /// and refuses a formula that still doesn't parse.
 pub(crate) fn parse_typed_formula(body: &str) -> Result<gridcraft_formula::Expr> {
-    let mut text = body.to_string();
-    let mut parsed = gridcraft_formula::parse(&text);
-    for _ in 0..8 {
-        if parsed.is_ok() {
-            break;
-        }
-        text.push(')');
-        parsed = gridcraft_formula::parse(&text);
-    }
+    // Excel closes missing parentheses for you.
+    let parsed = gridcraft_formula::parse_closing_parens(body, gridcraft_formula::parse);
     parsed.map_err(|e| EngineError::Other(format!("There's a problem with this formula: {e}")))
 }
 

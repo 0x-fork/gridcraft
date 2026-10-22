@@ -1210,3 +1210,35 @@ fn doc_props_keep_boundary_whitespace() {
     let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
     assert_eq!(back.props, wb.props);
 }
+
+/// Japanese paper sizes survive an XLSX save and reopen. IDs 12/13 are the JIS B4/B5; the
+/// Japanese postcards and envelopes have their own IDs, and `B4 (ISO)` keeps ISO B4. The ISO B5/B6
+/// names only exist in the engine: ECMA-376 has no `paperSize` id for them (only ISO B4), so they
+/// are not part of the round-trip.
+#[test]
+fn japanese_paper_sizes_round_trip() {
+    for paper in [
+        "B4",
+        "B5",
+        "B6",
+        "B4 (ISO)",
+        "A6",
+        "Japanese Postcard",
+        "Japanese Double Postcard",
+        "Japanese Envelope #3",
+        "Japanese Envelope #4",
+        "Japanese Envelope Kaku #2",
+        "Japanese Envelope Kaku #3",
+    ] {
+        let mut wb = Workbook::new();
+        wb.sheet_mut(0).unwrap().print.paper = paper.into();
+        let (back, report) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+        assert!(report.warnings.is_empty(), "{paper}: {:?}", report.warnings);
+        assert_eq!(back.sheet(0).unwrap().print.paper, paper);
+    }
+    // An alias is written as the file's own name and read back as that name.
+    let mut wb = Workbook::new();
+    wb.sheet_mut(0).unwrap().print.paper = "B5 (JIS)".into();
+    let (back, _) = read_xlsx(&write_xlsx(&wb).unwrap()).unwrap();
+    assert_eq!(back.sheet(0).unwrap().print.paper, "B5");
+}

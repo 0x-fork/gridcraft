@@ -182,7 +182,9 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
     let mut action: Option<(i64, i64, bool, bool)> = None;
     let mut arrow = false;
     let mut cancel = false;
-    if has_focus && mine {
+    // A message box over the editor (a data validation alert, a formula error) gets Enter and Esc;
+    // the editor used to take them, so the first Esc cancelled the edit behind the message.
+    if has_focus && mine && app.message.is_none() {
         let (enter, tab, esc, alt_enter, cmd_enter, ctrl_shift_enter, shift) = ui.input_mut(|i| {
             let m = i.modifiers;
             let alt_enter =
@@ -297,7 +299,13 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
         ui.fonts_mut(|f| f.layout_job(job))
     };
     let chars_before = ed.text.chars().count();
-    let edit = if multiline || ed.text.contains('\n') { TextEdit::multiline(&mut ed.text) } else { TextEdit::singleline(&mut ed.text) };
+    // The in-cell editor is as tall as its lines (a multiline field reserves four rows).
+    let in_cell = id == egui::Id::new("gridcraft.cell_editor");
+    let edit = if multiline || ed.text.contains('\n') {
+        TextEdit::multiline(&mut ed.text).desired_rows(if in_cell { 1 } else { 4 })
+    } else {
+        TextEdit::singleline(&mut ed.text)
+    };
     let mut output = edit
         .id(id)
         .frame(egui::Frame::NONE)
@@ -339,6 +347,8 @@ pub fn editor_widget(app: &mut SheetApp, ui: &mut egui::Ui, id: egui::Id, font: 
         }
         ed.point = None;
         ed.point_anchor = None;
+        // Typing ends the pointing: the next arrow starts again from the edited cell, as in Excel.
+        ed.point_cell = None;
         let names: Vec<String> = function_names()
             .iter()
             .map(|name| {

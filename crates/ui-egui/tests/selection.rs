@@ -286,3 +286,20 @@ fn formula_modifier_shift_click_then_arrow_moves_from_the_clicked_endpoint() {
         assert_eq!(h.state().editor.as_ref().unwrap().point_cell, CellRef::parse("G7"));
     }
 }
+
+#[test]
+fn formula_arrow_pointing_restarts_from_the_edited_cell_after_typing() {
+    let mut h = harness("B4");
+    h.state_mut().begin_edit(Some("=".into()), false);
+    h.run_steps(2);
+    h.key_press(egui::Key::ArrowUp);
+    h.run_steps(1);
+    h.key_press(egui::Key::ArrowUp);
+    h.run_steps(1);
+    assert_eq!(h.state().editor.as_ref().unwrap().text, "=B2");
+    frame(&mut h, Event::Text("+".into()));
+    h.run_steps(1);
+    h.key_press(egui::Key::ArrowUp);
+    h.run_steps(1);
+    assert_eq!(h.state().editor.as_ref().unwrap().text, "=B2+B3");
+}

@@ -435,6 +435,8 @@ fn palette(ui: &mut Ui, theme_colors: &[u32; 12], none_label: &str, more_colors:
 
 pub fn message_box(app: &mut SheetApp, ctx: &egui::Context) {
     let Some((title, msg)) = app.message.clone() else { return };
+    let title = app.ui.language.tr(&title).to_owned();
+    let msg = app.ui.language.tr_error(&msg);
     let mut close = false;
     egui::Modal::new(egui::Id::new("message_box")).show(ctx, |ui| {
         ui.set_width(380.0);
@@ -456,6 +458,11 @@ pub fn message_box(app: &mut SheetApp, ctx: &egui::Context) {
     });
     if close {
         app.message = None;
+        // Back to the entry the message was about (a validation alert, a formula error), so it can
+        // be fixed from the keyboard without clicking the cell again.
+        if let Some(ed) = &mut app.editor {
+            ed.request_focus = true;
+        }
     }
 }
 
@@ -465,6 +472,7 @@ pub fn toast(app: &mut SheetApp, ctx: &egui::Context) {
         app.toast = None;
         return;
     }
+    let msg = app.ui.language.tr_error(&msg);
     let Some(rect) = app.grid.rect else { return };
     egui::Area::new(egui::Id::new("toast")).fixed_pos(pos2(rect.center().x - 160.0, rect.bottom() - 48.0)).order(egui::Order::Tooltip).show(
         ctx,

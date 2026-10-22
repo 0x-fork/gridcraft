@@ -84,6 +84,12 @@ impl Language {
         Self::from_tag(code)
     }
 
+    /// Every code `app.language.set` takes, quoted and joined (`"en"|"es"|…`), for command docs
+    /// and errors.
+    pub fn code_list(separator: &str) -> String {
+        Self::ALL.iter().map(|l| format!("\"{}\"", l.code())).collect::<Vec<_>>().join(separator)
+    }
+
     fn from_tag(tag: &str) -> Option<Self> {
         match tag.trim().split(['-', '_']).next()?.to_ascii_lowercase().as_str() {
             "en" => Some(Self::En),
@@ -139,6 +145,15 @@ impl Language {
             Self::Tr => tr::translate(text),
         };
         translated.unwrap_or_else(|| text.rsplit_once('|').map_or(text, |(_, label)| label))
+    }
+
+    pub(crate) fn tr_error(self, message: &str) -> String {
+        let message = if message.starts_with("command `") { crate::clean_error(message) } else { message.to_owned() };
+
+        let translated = self.tr(&message);
+        let fallback = message.rsplit_once('|').map_or(message.as_str(), |(_, label)| label);
+
+        if translated == fallback { message } else { translated.to_owned() }
     }
 
     /// A worksheet function's description in this language, looked up by the English text of the
@@ -674,6 +689,10 @@ mod tests {
         assert_eq!(Language::Ko.tr("Data"), "데이터");
         assert_eq!(Language::Ru.tr("Data"), "Данные");
         assert_eq!(Language::PtBr.tr("Data"), "Dados");
+        assert_eq!(Language::PtBr.tr_error("Select a chart first."), "Selecione um gráfico primeiro.");
+        assert_eq!(Language::PtBr.tr_error("Sheet|Unknown failure"), "Sheet|Unknown failure");
+        assert_eq!(Language::PtBr.tr_error("command `chart`: Select a chart first."), "Selecione um gráfico primeiro.");
+        assert_eq!(Language::PtBr.tr_error("Printer Office: permission denied"), "Printer Office: permission denied");
         assert_eq!(Language::Es.tr("Data"), "Datos");
         assert_eq!(Language::Es.tr("Freeze Panes"), "Inmovilizar paneles");
         assert_eq!(Language::Es.tr("Sheet1!A1"), "Sheet1!A1");
@@ -856,6 +875,10 @@ mod tests {
         app.run("app.language.set", serde_json::json!({"code": "ja"})).unwrap();
         assert_eq!(app.ui.language, Language::Ja, "`code` is an alias for `language`");
         assert!(app.run("app.language.set", serde_json::json!({})).is_err(), "no language is an error, not a dialog");
+        let unknown = app.run("app.language.set", serde_json::json!({"language": "xx"})).unwrap_err().to_string();
+        for l in Language::ALL {
+            assert!(unknown.contains(&format!("\"{}\"", l.code())), "the error lists {:?}: {unknown}", l.code());
+        }
         app.run("app.language.english", serde_json::json!({})).unwrap();
         assert_eq!(app.ui.language, Language::En);
         for l in Language::ALL {

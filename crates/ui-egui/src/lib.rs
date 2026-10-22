@@ -61,6 +61,9 @@ pub struct UiState {
     /// Enable AutoComplete for cell values (File ▸ Options ▸ Editing): typed text is completed
     /// from the one matching entry in the same column.
     pub autocomplete: bool,
+    /// AutoSave (the title-bar switch): save saved-to-file .xlsx workbooks shortly after every
+    /// change. A preference like the rest of this struct — it stays on across restarts (#1901).
+    pub autosave: bool,
     pub recent: Vec<String>,
     /// One-shot keytip request for a ribbon control: set when a keytip action resolves to
     /// [`keytips::Action::Control`], consumed (and cleared) by the control's render site.
@@ -104,6 +107,7 @@ impl Default for UiState {
             status_bar: true,
             animations: true,
             autocomplete: true,
+            autosave: false,
             recent: vec![],
             keytip_invoke: None,
             language: i18n::Language::En,
@@ -663,9 +667,7 @@ impl SheetApp {
                         self.ui.language = l;
                         Ok(json!({"language": l}))
                     }
-                    None => Err(format!(
-                        "unknown language {code:?} (use \"en\", \"es\", \"zh\", \"ja\", \"ko\", \"ru\", \"pt\", \"de\", \"cs\", \"fr\" or \"tr\")"
-                    )),
+                    None => Err(format!("unknown language {code:?} (use one of {})", i18n::Language::code_list(", "))),
                 }
             }
             "app.language.english" => {
@@ -1087,7 +1089,7 @@ impl SheetApp {
         else {
             return;
         };
-        let text = printing::feedback(&message, |label| self.ui.language.tr(label).to_owned());
+        let text = printing::feedback(&message, self.ui.language, |label| self.ui.language.tr(label).to_owned());
         if matches!(message, printing::Feedback::Submitted(_)) {
             self.toast = Some((text, now_ms()));
         } else {
@@ -1250,6 +1252,12 @@ impl SheetApp {
         }
     }
 
+    /// Flip AutoSave (title-bar switch / Options ▸ Save). Persisted with the other UI
+    /// preferences, so it stays as the user left it across restarts (#1901).
+    pub fn toggle_autosave(&mut self) {
+        self.ui.autosave = !self.ui.autosave;
+    }
+
     /// Lays out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
@@ -1313,7 +1321,7 @@ impl SheetApp {
         }
         self.perf.last = now;
         // AutoSave: save workbooks that have a file shortly after they change.
-        if self.grid.autosave
+        if self.ui.autosave
             && self.editor.is_none()
             && self.text_box_editor.is_none()
             && now - self.grid.last_autosave > 2000.0
@@ -1341,6 +1349,7 @@ impl SheetApp {
             && self.name_box.is_none()
             && !ctx.text_edit_focused()
             && self.grid.context_menu.is_none()
+            && self.grid.object_menu.is_none()
             && self.grid.header_menu.is_none()
             && self.grid.fill_menu.is_none()
             && self.grid.filter_menu.is_none()

@@ -260,6 +260,21 @@ fn evaluate_refuses_what_entry_refuses_and_says_why() {
 }
 
 #[test]
+fn an_incomplete_formula_is_refused_with_an_error_about_what_was_typed() {
+    // #2030: `=1+` said "unexpected `)`", although no `)` was typed: entry closes missing
+    // parentheses and reported the error of its last retry.
+    let mut s = s();
+    for (input, msg) in [("=1+", "unexpected end of formula"), ("=SUM(1,+", "unexpected end of formula")] {
+        let e = s.execute("cell.set", json!({"cell": "A1", "input": input})).unwrap_err().to_string();
+        assert!(e.contains("problem with this formula") && e.contains(msg), "{input}: {e}");
+        assert!(!e.contains('`'), "{input}: {e}");
+    }
+    // Missing closing parentheses are still added.
+    s.execute("cell.set", json!({"cell": "A1", "input": "=SUM(1,(2+3"})).unwrap();
+    assert_eq!(v(&s, "A1"), Value::Number(6.0));
+}
+
+#[test]
 fn undo_redo() {
     let mut s = s();
     s.execute("cell.set", json!({"cell": "A1", "input": "1"})).unwrap();
@@ -3764,4 +3779,33 @@ fn a_protected_sheet_allows_sorting_and_filtering_only_when_it_says_so() {
     allow(&mut s, |p| p.sort = true);
     assert!(s.execute("data.sortAscending", json!({})).is_err(), "locked cells cannot be sorted");
     assert_eq!(order(&s), (Value::Number(2.0), Value::Number(1.0)));
+}
+
+#[test]
+fn convert_to_number_turns_numbers_stored_as_text_into_numbers() {
+    let mut s = s();
+    let value = |s: &mut Session, cell: &str| s.execute("cell.get", json!({"cell": cell})).unwrap()["value"].clone();
+    for (cell, input) in [("A1", "'123"), ("A2", "'1,000.5"), ("A3", "'abc"), ("A4", "'3/4/2026"), ("A5", "=\"7\"")] {
+        s.execute("cell.set", json!({"cell": cell, "input": input})).unwrap();
+    }
+    s.execute("home.bold", json!({"range": "A1", "on": true})).unwrap();
+    let r = s.execute("formulas.convertToNumber", json!({"range": "A1:A5"})).unwrap();
+    assert_eq!(r["converted"], 2);
+    assert_eq!(value(&mut s, "A1"), json!(123.0));
+    assert_eq!(value(&mut s, "A2"), json!(1000.5));
+    // Words, date text and a formula's text result stay as they are.
+    assert_eq!(value(&mut s, "A3"), json!("abc"));
+    assert_eq!(value(&mut s, "A4"), json!("3/4/2026"));
+    assert_eq!(value(&mut s, "A5"), json!("7"));
+    assert_eq!(s.execute("cell.get", json!({"cell": "A1"})).unwrap()["style"]["font"]["bold"], true, "the format is kept");
+    // SUM now counts them; undo brings the text back in one step.
+    s.execute("cell.set", json!({"cell": "B1", "input": "=SUM(A1:A2)"})).unwrap();
+    assert_eq!(value(&mut s, "B1"), json!(1123.5));
+    s.execute("edit.undo", json!({})).unwrap();
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(value(&mut s, "A1"), json!("123"));
+    // With no range it works on the selection.
+    s.execute("selection.set", json!({"range": "A2"})).unwrap();
+    assert_eq!(s.execute("formulas.convertToNumber", json!({})).unwrap()["converted"], 1);
+    assert_eq!(value(&mut s, "A1"), json!("123"));
 }

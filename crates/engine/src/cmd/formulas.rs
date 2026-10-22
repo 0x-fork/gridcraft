@@ -49,8 +49,19 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!(query "formulas.tracePrecedents", "Trace Precedents", ["Formulas", "Formula Auditing"], None, "{cell?} → ranges", has_doc, trace_precedents),
         cmd!(query "formulas.traceDependents", "Trace Dependents", ["Formulas", "Formula Auditing"], None, "{cell?} → cells", has_doc, trace_dependents),
+        cmd!(noundo "formulas.selectPrecedents", "Select Precedents", ["Formulas", "Formula Auditing"], Some("Ctrl+["), "{cell?, all?: true = every level (Ctrl+Shift+[)} → selects the precedent cells", has_doc, select_precedents),
+        cmd!(noundo "formulas.selectDependents", "Select Dependents", ["Formulas", "Formula Auditing"], Some("Ctrl+]"), "{cell?, all?: true = every level (Ctrl+Shift+])}", has_doc, select_dependents),
         cmd!(noundo "formulas.removeArrows", "Remove Arrows", ["Formulas", "Formula Auditing"], None, "{}", has_doc, |_, _| ok()),
         cmd!("formulas.showFormulas", "Show Formulas", ["Formulas", "Formula Auditing"], Some("Ctrl+`"), "{on?}", has_doc, show_formulas),
+        cmd!(
+            "formulas.convertToNumber",
+            "Convert to Number",
+            [],
+            None,
+            "{range?} → {converted} (numbers stored as text in the range or selection become numbers)",
+            has_doc,
+            convert_to_number
+        ),
         cmd!(query "formulas.errorChecking", "Error Checking", ["Formulas", "Formula Auditing"], None, "{} → cells with errors", has_doc, error_checking),
         cmd!(query "formulas.evaluateFormula", "Evaluate Formula", ["Formulas", "Formula Auditing"], None, "{cell?, formula?} → steps", has_doc, evaluate_formula),
         cmd!(query "formulas.evaluate", "Evaluate", [], None, "{formula: \"=SUM(A1:A3)\", cell?} → value without changing the sheet; a formula that couldn't be entered in a cell is an error", has_doc, evaluate),
@@ -482,6 +493,82 @@ fn trace_dependents(s: &mut Session, p: &Json) -> Result<Json> {
     Ok(Json::Array(v))
 }
 
+/// Excel's Ctrl+[ / Ctrl+]: select the precedent (or dependent) cells. When they all live on
+/// another sheet, jump there. `all` walks every level (Ctrl+Shift+[ / Ctrl+Shift+]).
+fn select_trace_cells(s: &mut Session, p: &Json, precedents: bool) -> Result<Json> {
+    use std::collections::BTreeSet;
+    let d = s.doc()?;
+    let at = cell_param(s, p, "cell")?.unwrap_or(d.selection.active);
+    let sheet = d.wb.active_sheet;
+    let all = bool_param(p, "all").unwrap_or(false);
+    // (sheet, a1) pairs to select; direct level keeps whole precedent ranges, transitive cells.
+    let mut found: BTreeSet<(usize, String)> = BTreeSet::new();
+    let mut seen: BTreeSet<(usize, CellRef)> = BTreeSet::new();
+    let mut frontier = vec![(sheet, at)];
+    seen.insert((sheet, at));
+    while let Some((ks, kc)) = frontier.pop() {
+        if precedents {
+            for a in d.calc.graph.precedents_of((ks, kc)) {
+                if all {
+                    // Walk only the stored cells inside the precedent area (sparse
+                    // range iterator, not the whole sheet): blanks are never selected
+                    // and only formula cells extend the frontier, so a formula late in
+                    // a large range is not skipped.
+                    let Some(sh) = d.wb.sheet(a.sheet) else { continue };
+                    for (c, cell) in sh.cells.iter_range(a.range) {
+                        if matches!(cell.value, Value::Empty) {
+                            continue;
+                        }
+                        if seen.insert((a.sheet, c)) {
+                            found.insert((a.sheet, c.a1()));
+                            if cell.formula.is_some() {
+                                frontier.push((a.sheet, c));
+                            }
+                        }
+                    }
+                } else {
+                    found.insert((a.sheet, a.range.a1()));
+                }
+            }
+        } else {
+            let mut deps = Vec::new();
+            d.calc.graph.dependents(ks, kc, &mut deps);
+            for k2 in deps {
+                if all {
+                    if seen.insert(k2) {
+                        found.insert((k2.0, k2.1.a1()));
+                        frontier.push(k2);
+                    }
+                } else {
+                    found.insert((k2.0, k2.1.a1()));
+                }
+            }
+        }
+        if !all {
+            break;
+        }
+    }
+    found.remove(&(sheet, at.a1()));
+    let name = if precedents { "precedent" } else { "dependent" };
+    let Some(si) = found.iter().find(|(si, _)| *si == sheet).or_else(|| found.first()).map(|(si, _)| *si) else {
+        return Err(bad("cell", format!("No {name} cells.")));
+    };
+    let list: Vec<String> = found.iter().filter(|(s, _)| *s == si).map(|(_, a)| a.clone()).collect();
+    let mut params = json!({ "range": list.join(",") });
+    if si != sheet {
+        params["sheet"] = json!(si);
+    }
+    s.execute("selection.set", params)
+}
+
+fn select_precedents(s: &mut Session, p: &Json) -> Result<Json> {
+    select_trace_cells(s, p, true)
+}
+
+fn select_dependents(s: &mut Session, p: &Json) -> Result<Json> {
+    select_trace_cells(s, p, false)
+}
+
 fn show_formulas(s: &mut Session, p: &Json) -> Result<Json> {
     let sheet = s.doc()?.wb.active_sheet;
     let cur = s.doc()?.wb.sheet(sheet).is_some_and(|sh| sh.show_formulas);
@@ -489,6 +576,40 @@ fn show_formulas(s: &mut Session, p: &Json) -> Result<Json> {
     edit(s, |cx| {
         cx.sheet_mut(sheet)?.show_formulas = on;
         Ok(json!({"on": on}))
+    })
+}
+
+/// The number a cell's text stands for when Excel's background check flags it as a number stored
+/// as text: a constant (not a formula's result) that would be a number if typed.
+pub fn number_stored_as_text(cell: &gridcraft_model::Cell) -> Option<f64> {
+    match &cell.value {
+        Value::Text(t) if cell.formula.is_none() => gridcraft_core::parse::number_stored_as_text(t),
+        _ => None,
+    }
+}
+
+/// Convert to Number: each number stored as text in the range becomes that number, keeping the
+/// cell's format.
+fn convert_to_number(s: &mut Session, p: &Json) -> Result<Json> {
+    let sheet = target_sheet(s, p)?;
+    let ranges = target_ranges(s, p)?;
+    edit(s, |cx| {
+        let mut converted = 0;
+        for r in &ranges {
+            let Some(r) = cx.wb.sheet(sheet).and_then(|sh| sh.used_range()).and_then(|u| r.intersection(&u)) else { continue };
+            let found: Vec<(CellRef, f64)> = cx
+                .wb
+                .sheet(sheet)
+                .map(|sh| sh.cells.iter_range(r).filter_map(|(c, x)| number_stored_as_text(x).map(|n| (c, n))).collect())
+                .unwrap_or_default();
+            let sh = cx.sheet_mut(sheet)?;
+            for (c, n) in &found {
+                sh.set_value(*c, Value::number(*n));
+            }
+            cx.changed.extend(found.iter().map(|(c, _)| (sheet, *c)));
+            converted += found.len();
+        }
+        Ok(json!({"converted": converted}))
     })
 }
 
@@ -531,13 +652,15 @@ fn evaluate_formula(s: &mut Session, p: &Json) -> Result<Json> {
     let mut steps = Vec::new();
     let mut nodes = Vec::new();
     expr.walk(&mut |e| {
+        // Borrowed, not cloned: copying every operator of a long chain A1+A2+… copies the
+        // rest of the chain each time (quadratic memory).
         if matches!(e, gridcraft_formula::Expr::Call(..) | gridcraft_formula::Expr::Binary(..) | gridcraft_formula::Expr::Ref(_)) {
-            nodes.push(e.clone());
+            nodes.push(e);
         }
     });
     for e in nodes.into_iter().rev().take(200) {
-        let v = gridcraft_calc::recalc::evaluate_expr(&d.wb, sheet, at, &e);
-        steps.push(json!({"expression": gridcraft_formula::print(&e), "value": crate::cmd::inspect::value_json(&v)}));
+        let v = gridcraft_calc::recalc::evaluate_expr(&d.wb, sheet, at, e);
+        steps.push(json!({"expression": gridcraft_formula::print(e), "value": crate::cmd::inspect::value_json(&v)}));
     }
     let result = gridcraft_calc::recalc::evaluate_expr(&d.wb, sheet, at, &expr);
     Ok(json!({"formula": format!("={text}"), "steps": steps, "result": crate::cmd::inspect::value_json(&result)}))

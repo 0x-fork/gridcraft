@@ -591,6 +591,27 @@ fn let_lambda() {
 }
 
 #[test]
+fn let_lambda_names_ignore_case_in_any_script() {
+    let mut t = T::new();
+    t.set("A1", "=LET(dług,100,DŁUG*2)");
+    assert_eq!(t.num("A1"), 200.0);
+    t.set("A2", "=LAMBDA(λ,ISOMITTED(Λ))()");
+    assert_eq!(t.get("A2"), Value::Bool(true));
+    t.set("A3", "=LAMBDA(ćma,ĆMA+1)(1)");
+    assert_eq!(t.num("A3"), 2.0);
+    t.set("A4", "=LET(ŻAR,LAMBDA(x,x*3),żar(2))");
+    assert_eq!(t.num("A4"), 6.0);
+    t.set("A5", "=LET(λ,LAMBDA(x,x+1),SUM(MAP({1,2},Λ)))");
+    assert_eq!(t.num("A5"), 5.0);
+    // `ß` upper-cases to `SS`, yet `ẞ` is its capital.
+    t.set("A6", "=LET(ß,100,ẞ*2)");
+    assert_eq!(t.num("A6"), 200.0);
+    // Dotless ı is a different name from i.
+    t.set("A7", "=LET(i,1,ı,2,i)");
+    assert_eq!(t.num("A7"), 1.0);
+}
+
+#[test]
 fn functions_given_by_name() {
     let mut t = T::new();
     for (i, (k, v)) in [("a", 1), ("b", -2), ("a", 3)].iter().enumerate() {
@@ -718,6 +739,41 @@ fn long_operator_chains() {
     assert_eq!(t.num("B1"), 1000.0);
     t.set("B2", &format!("=5{}", "+1-1".repeat(600)));
     assert_eq!(t.num("B2"), 5.0);
+}
+
+#[test]
+fn flat_chains_as_long_as_excel_allows() {
+    // Values observed in Excel (#916): a flat chain has no operand limit below the 8,192-character
+    // formula limit, which `=1+1+…` with 4,096 operands meets exactly. On a 1 MiB stack, as on
+    // the Windows main thread.
+    std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(|| {
+            let chain = |op: &str, item: &str, n: usize| format!("={}", vec![item; n].join(op));
+            let mut t = T::new();
+            for r in 1..=1500 {
+                t.set(&format!("A{r}"), "1");
+            }
+            t.set("B1", &chain("+", "1", 401));
+            t.set("B2", &chain("+", "1", 4096));
+            t.set("B3", &chain("-", "1", 2000));
+            t.set("B4", &chain("*", "1", 4096));
+            t.set("B5", &chain("/", "2", 4096));
+            t.set("B6", &chain("^", "1", 4096));
+            t.set("B7", &chain("+", "1%", 2000));
+            t.set("B8", "=1=1=1");
+            t.set("B9", &format!("={}", (1..=1500).map(|r| format!("A{r}")).collect::<Vec<_>>().join("+")));
+            t.set("B10", &chain("&", "1", 2000));
+            for (at, want) in [("B1", 401.0), ("B2", 4096.0), ("B3", -1998.0), ("B4", 1.0), ("B5", 0.0), ("B6", 1.0), ("B9", 1500.0)] {
+                assert_eq!(t.num(at), want, "{at}");
+            }
+            assert!((t.num("B7") - 20.0).abs() < 1e-9);
+            assert_eq!(t.get("B8"), Value::Bool(false));
+            assert_eq!(t.get("B10"), Value::text("1".repeat(2000)));
+        })
+        .expect("spawn")
+        .join()
+        .expect("long chains must not overflow the stack");
 }
 
 #[test]

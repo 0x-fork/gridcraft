@@ -53,14 +53,14 @@ pub fn title_bar(app: &mut SheetApp, ui: &mut Ui) {
             ui.add_space(TITLE_LEFT_PAD);
             // AutoSave toggle (saves after each change when the workbook has a file).
             ui.label(egui::RichText::new(app.ui.language.tr("AutoSave")).font(theme::ui_font(12.5)).color(t.text_dim));
-            let on = app.grid.autosave();
+            let on = app.ui.autosave;
             let (r, resp) = ui.allocate_exact_size(vec2(30.0, 16.0), Sense::click());
             ui.painter().rect_filled(r, 8.0, if on { t.accent } else { Color32::TRANSPARENT });
             ui.painter().rect_stroke(r, 8.0, Stroke::new(1.0, if on { t.accent } else { t.text_dim }), StrokeKind::Inside);
             let knob = if on { pos2(r.right() - 8.0, r.center().y) } else { pos2(r.left() + 8.0, r.center().y) };
             ui.painter().circle_filled(knob, 5.0, if on { Color32::WHITE } else { t.text_dim });
             if resp.on_hover_text(app.ui.language.tr("AutoSave: save after every change (workbooks saved to a file)")).clicked() {
-                app.grid.toggle_autosave();
+                app.toggle_autosave();
             }
             ui.add_space(6.0);
             let __k = icon_button(ui, Icon::Home, t.text_dim, "Home", vec2(26.0, ch));
@@ -1714,7 +1714,29 @@ fn page_layout(app: &mut SheetApp, ui: &mut Ui) {
     let s = big_button(ui, Icon::Paper, "Size", "Paper Size", true);
     control_keytip(app, ui, &s, "pageLayout.size");
     egui::Popup::menu(&s).show(|ui| {
-        for p in ["Letter", "Legal", "Tabloid", "Executive", "A3", "A4", "A5"] {
+        // B4/B5/B6 are the JIS sizes Japanese Excel uses; the ISO ones stay selectable by name.
+        for p in [
+            "Letter",
+            "Legal",
+            "Tabloid",
+            "Executive",
+            "A3",
+            "A4",
+            "A5",
+            "A6",
+            "B4",
+            "B5",
+            "B6",
+            "Japanese Postcard",
+            "Japanese Double Postcard",
+            "Japanese Envelope #3",
+            "Japanese Envelope #4",
+            "Japanese Envelope Kaku #2",
+            "Japanese Envelope Kaku #3",
+            "B4 (ISO)",
+            "B5 (ISO)",
+            "B6 (ISO)",
+        ] {
             if ui.button(p).clicked() {
                 act(app, "pageLayout.size", json!({"paper": p}));
             }
