@@ -14,6 +14,7 @@ Sources: `crates/ui-egui/src` (ribbon, grid, editor, formula bar, dialogs, panes
 
 | Element | Excel | GridCraft | Status |
 |---|---|---|---|
+| 2026-10-14 | minor | Dialogs (Find and Replace, Go To, Format Cells, Sort and the rest) move by their title bar instead of staying pinned to the centre (#1250) |
 | Title bar, Quick Access Toolbar, AutoSave toggle | yes | yes | done; macOS window controls misaligned (#170), Dock icon size (#169) |
 | Ribbon: tabs, groups, split buttons, galleries, contextual tabs | yes | yes (Table Design, Chart Design, Format, PivotTable, Header & Footer tabs); Fill Color, Font Color and the Format Cells colour pickers end with Recent Colors and More Colors… (#928) | done; missing contextual tabs for pictures, shapes, sparklines, slicers |
 | Ribbon collapse, simplified ribbon, customize ribbon/QAT | yes | partial | customization missing (File ▸ Options is the one missing File command) |
@@ -57,6 +58,7 @@ this logic, with one undo step.
 | Point mode (click/drag/arrow references), reference colouring, F4 | done |
 | AutoComplete in columns, function autocomplete and argument tips | done; cell helpers clip to the worksheet and hide when the editor scrolls out (#200) |
 | Header resize and double-click AutoFit | done (#42, #88 for header dividers) |
+| Data › Advanced Filter | dialog offers in-place or copy-to filtering, list and optional criteria ranges, and unique records; Alt+A,Q opens it (#1622). The engine's copy-to path clears only the result footprint and rejects worksheet overflow (#1031). |
 | Outline symbols for grouped rows / columns (band beside the headers, brackets, − / +, level buttons 1…n+1) | done (#373): clicks run `data.hideDetail` / `data.showDetail` / `data.showLevels`, frozen panes and right-to-left sheets included; summary rows/columns are always below/right (the "Summary rows below detail" setting isn't modelled), no "Show outline symbols" option yet, and a block of cells still groups rows without the Rows / Columns dialog |
 | Reorder selected whole columns by dragging their headers | done (10-11) |
 | Freeze panes, split panes | freeze done; split to verify |
@@ -148,7 +150,8 @@ Format Cells, Insert Function/Formula Builder, Find and Replace, Go To and Go To
 Name Manager, Data Validation, Paste Special, Conditional Formatting manager, Page Setup, Goal
 Seek, Scenario Manager, Data Analysis, Forecast Sheet and others exist. Missing or partial: Options,
 Solver, Power Query editor, Insert Object, Equation editor, Protect/Allow Edit Ranges,
-Workbook Links, Accessibility checker.
+Workbook Links, Accessibility checker. Like Excel's, every dialog opens centred and moves by its
+title bar, keeping its place while it is open (#1250).
 
 ## Accessibility
 
@@ -173,6 +176,7 @@ scrollbar bugs 2–4 · pixel/feel pass against observed Excel 7–12.
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-21 | minor | Background error checking, first part (#1994): a constant whose text would be a number if typed (signs, thousands, currency, percent, exponent, parenthesised negative) gets Excel's green corner triangle; the active cell then shows a warning button whose menu names the problem and offers Convert to Number for the selection (`formulas.convertToNumber`). Dates, times and fractions kept as text and formula results are not flagged, as in Excel |
+| 2026-10-21 | minor | Paste Special laid out as Excel's: Paste and Operation options each in two columns inside a frame, Skip blanks and Transpose side by side, Paste Link as a button that pastes references at once; labels translated (the generic form didn't translate them) and the window no longer runs past the screen |
 | 2026-10-20 | minor | Esc and Enter close a message over the cell editor, such as a data validation alert, and the entry stays open to fix, with the keyboard back in it. Before, the editor took them (the first Esc cancelled the edit behind the alert and only the second closed it), and after the message typing went nowhere until the cell was clicked |
 | 2026-10-19 | minor | Ctrl+Enter (`range.fill`) gives each cell what typing the input there gives: a General cell gets the automatic number format (`5%`, `$5`, `3/4/2026`, `=TODAY()`) even when it already held a value, and a cell with its own format, a formatted row or column, or Text keeps it. Cells that held a value used to keep General (`5%` showed 0.05), and empty cells took the active cell's format |
 | 2026-10-19 | trivial | While a mouse button is held (a click or a drag selecting cells) the selection outline is drawn on its cells at once instead of gliding after the pointer, which read as lag; keyboard moves still glide |
@@ -182,6 +186,8 @@ scrollbar bugs 2–4 · pixel/feel pass against observed Excel 7–12.
 | 2026-10-16 | minor | With the active cell in a Table whose header row is scrolled out of view, the column headings show the header names and their filter buttons in place of the letters (#1423) |
 | 2026-10-16 | minor | Ctrl+6 hides every object (charts, pictures, shapes, slicers) and shows them again; hidden objects are not drawn, take no clicks and drop their selection, and the setting is saved with the workbook (`workbookPr showObjects`) |
 | 2026-10-16 | minor | Ctrl+Shift+A (Control+Shift+A on a Mac) after a function name, or after its `(`, inserts the argument names and the closing parenthesis, as in Excel; one Undo in the editor takes them back |
+| 2026-10-16 | minor | Advanced Filter ribbon dialog, optional criteria for unique-only extraction (#1622); safe copy-to output (#1031) |
+| 2026-10-16 | minor | Remove Duplicates shows an editable Range field initialized from the selection and passes it to the engine on OK (#1388). Live range-picking outside the dialog remains unsupported |
 | 2026-10-15 | minor | Number-format named colors use their RGB values; indexed `[Color1]`–`[Color56]` resolve through the shared legacy palette in grid and PDF (#1452) |
 | 2026-10-14 | minor | Spill-child formula bar uses the anchor formula with disabled theme text and blocks formula-bar edit entry; selection and recalculation restore ordinary behavior |
 | 2026-10-13 | minor | Dragging a sheet tab with Ctrl held (Cmd or Option on macOS) drops a copy of the sheet where the tab is released, with the copy cursor (#971) |

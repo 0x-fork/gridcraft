@@ -78,7 +78,7 @@ values) is still dropped.
 
 | Format | Excel | GridCraft | Notes |
 |---|---|---|---|
-| PDF | Save As / Export | yes (own PDF 1.7 writer) | Only the 14 standard PDF fonts, no embedding: **non-Latin text (CJK, Arabic, Devanagari, Thai) does not export**; web build exports without a file prompt (#141) |
+| PDF | Save As / Export | yes (own PDF 1.7 writer; CLI `convert` output) | Printed cell hyperlinks export as clickable HTTP(S)/mailto links or destinations within printed pages (#954); unsafe schemes and destinations outside the print range are omitted. Only the 14 standard PDF fonts, no embedding: **non-Latin text (CJK, Arabic, Devanagari, Thai) does not export**; web build exports without a file prompt (#141) |
 | XPS | Windows | no | Low priority |
 | Print | yes | yes (via PDF, system dialog on desktop; PR #143 for web) | |
 | Images of ranges/charts (Copy as Picture) | yes | chart raster in `crates/chart` | No range-to-image command |
@@ -125,6 +125,7 @@ refresh. Counted under features (Get & Transform, ~10% ready), not here.
 | 2026-10-15 | minor | XLSX save keeps legacy `INDEX`/`MATCH` formulas scalar instead of marking them as dynamic arrays (#1505) |
 | 2026-10-14 | trivial | Formula parser: text longer than Excel's 8,192 characters, and postfix chains (`1%%%…`, `f(1)(1)…`) past the 256-level nesting limit, are parse errors (the cell keeps its formula text and cached value) instead of trees deep enough to overflow the stack when a hostile file is opened, saved or dropped |
 | 2026-10-14 | minor | XLSX formulas read with dynamic-array metadata (`cm`) keep it on save, so Excel does not recalculate them with implicit intersection |
+| 2026-10-14 | minor | PDF export writes clickable annotations for safe cell URLs and destinations on printed pages; CLI `convert` accepts `.pdf` output (#954) |
 | 2026-10-13 | trivial | XLSX export keeps a picture shared by several sheets as one media part (#985) |
 | 2026-10-12 | trivial | XLSX chart sheets are kept on save (#727) |
 | 2026-10-12 | trivial | CSV and TSV export is capped at 512 MiB and refuses a larger used range with an error (#528) |

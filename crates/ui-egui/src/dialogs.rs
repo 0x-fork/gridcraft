@@ -51,13 +51,28 @@ impl Dialog {
         &self.name
     }
 
-    /// Sets a form value. In Zoom, a Magnification choice is also the percentage `view.zoom` stores.
+    /// Sets a form value. In Zoom, a Magnification choice is also the percentage `view.zoom`
+    /// stores, a typed percentage selects Custom, and Fit selection makes OK run
+    /// `view.zoomToSelection` (its view size was captured when the dialog opened).
     pub(crate) fn set_value(&mut self, key: &str, value: Json) {
-        if self.name == "zoom"
-            && key == "preset"
-            && let Some(p) = value.as_str().and_then(|s| s.parse::<f64>().ok())
-        {
-            self.values.insert("percent".into(), json!(p));
+        if self.name == "zoom" {
+            match key {
+                "preset" => match value.as_str() {
+                    Some("fit") => self.command = Some("view.zoomToSelection"),
+                    Some(s) => {
+                        self.command = Some("view.zoom");
+                        if let Ok(p) = s.parse::<f64>() {
+                            self.values.insert("percent".into(), json!(p));
+                        }
+                    }
+                    None => {}
+                },
+                "percent" => {
+                    self.command = Some("view.zoom");
+                    self.values.insert("preset".into(), json!(zoom_preset(value.as_f64().unwrap_or(0.0))));
+                }
+                _ => {}
+            }
         }
         self.values.insert(key.into(), value);
     }
@@ -405,7 +420,11 @@ impl Dialog {
                     Text { key: "header", label: "Header (&L left, &C center, &R right; &P page, &N pages, &D date, &A sheet):" },
                     Text { key: "footer", label: "Footer:" },
                 ],
-                json!({"header": "", "footer": "&CPage &P of &N"}),
+                {
+                    let sheet = app.session.active().and_then(|d| d.wb.active());
+                    let (header, footer) = sheet.map(|s| (s.print.header.clone(), s.print.footer.clone())).unwrap_or_default();
+                    json!({"header": header, "footer": footer})
+                },
             ),
             "pageSetup" => {
                 // Opens on the active sheet's saved margins, so OK without edits rewrites them unchanged.
@@ -446,9 +465,33 @@ impl Dialog {
                 "removeDuplicates",
                 "Remove Duplicates",
                 "data.removeDuplicates",
-                vec![Check { key: "header", label: "My data has headers" }, Text { key: "columnsText", label: "Columns (blank = all, e.g. A,C):" }],
-                json!({"header": true}),
+                vec![
+                    Text { key: "range", label: "Range:" },
+                    Check { key: "header", label: "My data has headers" },
+                    Text { key: "columnsText", label: "Columns (blank = all, e.g. A,C):" },
+                ],
+                json!({"range": remove_duplicates_range(app, &sel), "header": true}),
             ),
+            "advancedFilter" => {
+                let list = app
+                    .session
+                    .active()
+                    .and_then(|d| d.wb.active().map(|sh| gridcraft_engine::selection::current_region(sh, d.selection.active).a1()))
+                    .unwrap_or(sel.clone());
+                let mut d = Dialog::form(
+                    "advancedFilter",
+                    "Advanced Filter",
+                    "data.advancedFilter",
+                    vec![],
+                    json!({"action": "inPlace", "range": list, "criteria": "", "copyTo": "", "unique": false}),
+                );
+                for key in ["action", "range", "criteria", "copyTo", "unique"] {
+                    if let Some(value) = params.get(key) {
+                        d.set_value(key, value.clone());
+                    }
+                }
+                d
+            }
             "goalSeek" => Dialog::custom("goalSeek", "Goal Seek", json!({"set": active, "to": "0", "changing": ""})),
             "forecastSheet" => Dialog::form(
                 "forecastSheet",
@@ -534,20 +577,19 @@ impl Dialog {
                 ],
                 json!({"groupBy": "A", "function": "sum"}),
             ),
-            "zoom" => Dialog::form(
-                "zoom",
-                "Zoom",
-                "view.zoom",
-                vec![
-                    Choice {
-                        key: "preset",
-                        label: "Magnification",
-                        options: vec![("200", "200%"), ("100", "100%"), ("75", "75%"), ("50", "50%"), ("25", "25%")],
-                    },
-                    Number { key: "percent", label: "Custom (%):" },
-                ],
-                json!({"percent": app.session.active().and_then(|d| d.wb.active().map(|s| s.zoom)).unwrap_or(100)}),
-            ),
+            "zoom" => {
+                // The current zoom is pre-selected (Custom when it matches no preset). Fit
+                // selection needs the grid's size, so it is captured here for `view.zoomToSelection`.
+                let zoom = app.session.active().and_then(|d| d.wb.active().map(|s| s.zoom)).unwrap_or(100);
+                let view = app.grid.cells_rect.unwrap_or(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(1200.0, 700.0)));
+                Dialog::form(
+                    "zoom",
+                    "Zoom",
+                    "view.zoom",
+                    vec![],
+                    json!({"percent": zoom, "preset": zoom_preset(zoom as f64), "viewWidth": view.width(), "viewHeight": view.height()}),
+                )
+            }
             "defineName" => {
                 // Name Manager › Edit… passes the name being edited (`oldName`, `oldScope`) and
                 // its current fields; New… and Define Name start from the selection.
@@ -680,7 +722,11 @@ impl Dialog {
                 }],
                 json!({"kind": "blanks"}),
             ),
-            "sort" => Dialog::custom("sort", "Sort", json!({"header": true, "levels": [{"column": "A", "order": "asc"}]})),
+            "sort" => {
+                // Seed "Sort by" from the column the user is actually in (#1906).
+                let col = app.session.active().map(|d| gridcraft_engine::core::col_to_letters(d.selection.active.col)).unwrap_or_else(|| "A".into());
+                Dialog::custom("sort", "Sort", json!({"header": true, "levels": [{"column": col, "order": "asc"}]}))
+            }
             "nameManager" => Dialog::custom("nameManager", "Name Manager", json!({})),
             "manageRules" => Dialog::custom("manageRules", "Conditional Formatting Rules Manager", json!({})),
             "commandSearch" => Dialog::custom("commandSearch", "Search Commands", json!({})),
@@ -841,6 +887,22 @@ fn validation_defaults(app: &SheetApp) -> Json {
     v
 }
 
+/// The range Remove Duplicates starts with. A block selection is used as given; with only the
+/// cursor placed, the table's data rows or the current region, as the command picks when it gets
+/// no range (a single-cell range would remove nothing).
+fn remove_duplicates_range(app: &SheetApp, sel: &str) -> String {
+    let Some(d) = app.session.active() else { return sel.to_string() };
+    let Some(sh) = d.wb.active() else { return sel.to_string() };
+    if !d.selection.current().is_single() {
+        return sel.to_string();
+    }
+    let range = match sh.table_at(d.selection.active) {
+        Some(t) => t.data_range().map(|dr| gridcraft_engine::core::RangeRef::new(t.range.start, dr.end)).unwrap_or(t.range),
+        None => gridcraft_engine::selection::current_region(sh, d.selection.active),
+    };
+    range.a1()
+}
+
 fn abs(r: &gridcraft_engine::core::RangeRef) -> String {
     let a = |c: gridcraft_engine::core::CellRef| format!("${}${}", gridcraft_engine::core::col_to_letters(c.col), c.row + 1);
     if r.is_single() { a(r.start) } else { format!("{}:{}", a(r.start), a(r.end)) }
@@ -950,10 +1012,44 @@ fn data_validation_form(ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, o
     ok_cancel(ui, confirm, open);
 }
 
+fn advanced_filter_form(ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, open: &mut bool) {
+    use Field::*;
+    let copy = d.values.get("action").and_then(Json::as_str) == Some("copy");
+    d.fields = vec![
+        Choice {
+            key: "action",
+            label: "Action",
+            options: vec![("inPlace", "Show matching rows in place"), ("copy", "Copy matching rows elsewhere")],
+        },
+        Text { key: "range", label: "List range:" },
+        Text { key: "criteria", label: "Criteria range (optional):" },
+    ];
+    if copy {
+        d.fields.push(Text { key: "copyTo", label: "Copy to:" });
+    }
+    d.fields.push(Check { key: "unique", label: "Unique rows only" });
+    form_fields(ui, d);
+    // Constrain the button row: the shared right-to-left layout otherwise
+    // consumes the window's remaining height instead of fitting the buttons.
+    ui.allocate_ui(vec2(ui.available_width(), ui.spacing().interact_size.y + 8.0), |ui| ok_cancel(ui, confirm, open));
+}
+
 /// Builds the command params from form values for dialogs that need translation.
-fn build_params(d: &Dialog) -> Json {
+/// The parameters OK sends to the dialog's command: its field values, reshaped per dialog.
+pub(crate) fn build_params(d: &Dialog) -> Json {
     let mut v = Json::Object(d.values.clone());
     match d.name.as_str() {
+        "advancedFilter" => {
+            if let Some(m) = v.as_object_mut() {
+                m.remove("action");
+                if d.values.get("action").and_then(Json::as_str) != Some("copy") {
+                    m.remove("copyTo");
+                }
+                if m.get("criteria").and_then(Json::as_str).is_some_and(|s| s.trim().is_empty()) {
+                    m.remove("criteria");
+                }
+            }
+        }
         "dataValidation" => {
             let kind = d.values.get("type").and_then(Json::as_str).unwrap_or("any");
             let operator = d.values.get("operator").and_then(Json::as_str).unwrap_or("between");
@@ -993,13 +1089,6 @@ fn build_params(d: &Dialog) -> Json {
                 if m.remove("removePassword").and_then(|x| x.as_bool()) == Some(true) {
                     m.insert("password".into(), json!(""));
                 }
-            }
-        }
-        "zoom" => {
-            if let Some(p) = d.values.get("preset").and_then(Json::as_str)
-                && d.values.get("percent").is_none()
-            {
-                v["percent"] = json!(p.parse::<f64>().unwrap_or(100.0));
             }
         }
         "cfQuick" => {
@@ -1045,6 +1134,8 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
         "recommendedCharts" => 600.0,
         "analysisToolPak" => 420.0,
         "solver" => 460.0,
+        "zoom" => 220.0,
+        "pasteSpecial" => 480.0,
         _ => 380.0,
     };
     let window = egui::Window::new(app.ui.language.tr(&d.title))
@@ -1052,17 +1143,25 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
         .collapsible(false)
         .resizable(false)
         .default_width(width)
-        .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, -40.0))
+        // A default position, not an anchor: egui anchors can't be dragged, and dialogs move by their title bar.
+        .pivot(egui::Align2::CENTER_CENTER)
+        .default_pos(ctx.content_rect().center() + vec2(0.0, -40.0))
         .open(&mut win_open);
-    let window = if d.name == "insertPicture" { window.default_height(240.0) } else { window };
+    let window = match d.name.as_str() {
+        "insertPicture" => window.default_height(240.0),
+        "advancedFilter" => window.default_height(0.0),
+        _ => window,
+    };
     window.show(ctx, |ui| {
             ui.set_min_width(width - 20.0);
             match d.name.as_str() {
                 "formatCells" => format_cells(app, ui, &mut d, &mut confirm),
                 "dataValidation" => data_validation_form(ui, &mut d, &mut confirm, &mut open),
+                "advancedFilter" => advanced_filter_form(ui, &mut d, &mut confirm, &mut open),
                 "insertFunction" => insert_function(app, ui, &mut d, &mut confirm),
                 "find" => find(app, ui, &mut d),
                 "goTo" => go_to(app, ui, &mut d, &mut confirm),
+                "zoom" => zoom(ui, &mut d, &mut confirm, &mut open),
                 "sort" => sort(app, ui, &mut d, &mut confirm),
                 "nameManager" => name_manager(app, ui, &mut d, &mut open),
                 "manageRules" => manage_rules(app, ui),
@@ -1070,6 +1169,7 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
                 "selectData" => select_data(app, ui, &mut d, &mut confirm, &mut open),
                 "commandSearch" => command_search(app, ui, &mut d, &mut confirm),
                 "goalSeek" => goal_seek(app, ui, &mut d, &mut confirm),
+                "pasteSpecial" => paste_special(app, ui, &mut d, &mut confirm, &mut open),
                 "analysisToolPak" => analysis_toolpak(app, ui, &mut d, &mut confirm, &mut open),
                 "solver" => solver(ui, &mut d, &mut confirm, &mut open),
                 "solverResults" => solver_results(app, ui, &mut d, &mut open),
@@ -1318,6 +1418,79 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
     } else if let Some(back) = d.back.take() {
         app.dialog = Some(*back);
     }
+}
+
+/// Paste Special as Excel lays it out: Paste and Operation each in two columns of options, Skip
+/// blanks and Transpose side by side, and Paste Link as a button that pastes at once. The options
+/// come from the dialog's `fields`, so the letter shortcuts and the control channel see the same.
+fn paste_special(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, open: &mut bool) {
+    let lang = app.ui.language;
+    let t = theme::Tokens::get(ui.ctx());
+    let choices: Vec<(&'static str, &'static str, Vec<(&'static str, &'static str)>)> = d
+        .fields
+        .iter()
+        .filter_map(|f| match f {
+            Field::Choice { key, label, options } => Some((*key, *label, options.clone())),
+            _ => None,
+        })
+        .collect();
+    for (key, label, options) in choices {
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(lang.tr(label)).strong());
+        egui::Frame::new().stroke(Stroke::new(1.0, t.separator)).corner_radius(4.0).inner_margin(egui::Margin::symmetric(10, 6)).show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            let cur = d.values.get(key).and_then(Json::as_str).unwrap_or("").to_string();
+            // Column by column, as Excel fills them.
+            let rows = options.len().div_ceil(2);
+            egui::Grid::new(("paste_special", key)).num_columns(2).min_col_width(200.0).spacing(vec2(16.0, 4.0)).show(ui, |ui| {
+                for r in 0..rows {
+                    for c in 0..2 {
+                        if let Some((value, text)) = options.get(c * rows + r) {
+                            if ui.radio(cur == *value, lang.tr(text)).clicked() {
+                                d.set_value(key, json!(value));
+                            }
+                        } else {
+                            ui.label("");
+                        }
+                    }
+                    ui.end_row();
+                }
+            });
+        });
+    }
+    ui.add_space(8.0);
+    // In the same columns as the options above.
+    egui::Frame::new().inner_margin(egui::Margin::symmetric(11, 0)).show(ui, |ui| {
+        egui::Grid::new("paste_special_checks").num_columns(2).min_col_width(200.0).spacing(vec2(16.0, 4.0)).show(ui, |ui| {
+            for (key, label) in [("skipBlanks", "Skip blanks"), ("transpose", "Transpose (E)")] {
+                let mut b = d.values.get(key).and_then(Json::as_bool).unwrap_or(false);
+                if ui.checkbox(&mut b, lang.tr(label)).changed() {
+                    d.values.insert(key.into(), json!(b));
+                }
+            }
+            ui.end_row();
+        });
+    });
+    ui.add_space(8.0);
+    ui.separator();
+    ui.horizontal(|ui| {
+        // Excel's Paste Link pastes references to the copied cells straight away.
+        if ui.button(lang.tr("Paste Link")).on_hover_text(lang.tr("Paste formulas that refer to the copied cells")).clicked() {
+            d.values.insert("what".into(), json!("all"));
+            d.values.insert("operation".into(), json!("none"));
+            d.values.insert("link".into(), json!(true));
+            *confirm = true;
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let ok = ui.add(egui::Button::new(egui::RichText::new(format!("   {}   ", lang.tr("OK"))).color(Color32::WHITE)).fill(t.accent));
+            if ok.clicked() || ui.input(|i| i.key_pressed(Key::Enter)) {
+                *confirm = true;
+            }
+            if ui.button(format!(" {} ", lang.tr("Cancel"))).clicked() {
+                *open = false;
+            }
+        });
+    });
 }
 
 /// Paste Special's legacy mnemonics select options; Enter still performs the paste.
@@ -1962,6 +2135,43 @@ fn find(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog) {
     }
 }
 
+/// Zoom's Magnification presets, as `preset` values and labels, in Excel's order.
+const ZOOM_PRESETS: [(&str, &str); 5] = [("200", "200%"), ("100", "100%"), ("75", "75%"), ("50", "50%"), ("25", "25%")];
+
+/// The `preset` that shows a zoom percentage: its Magnification entry, or Custom.
+fn zoom_preset(percent: f64) -> &'static str {
+    ZOOM_PRESETS.iter().map(|(val, _)| *val).find(|val| val.parse::<f64>().ok() == Some(percent)).unwrap_or("custom")
+}
+
+/// View › Zoom, laid out as Excel's: one Magnification column of 200% to 25%, Fit selection and
+/// Custom with its percentage box. The current zoom is pre-selected; typing a percentage
+/// selects Custom; Fit selection zooms so the selected cells fill the grid.
+fn zoom(ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, open: &mut bool) {
+    let lang = crate::i18n::current(ui.ctx());
+    let cur = d.values.get("preset").and_then(Json::as_str).unwrap_or("custom").to_string();
+    ui.label(egui::RichText::new(lang.tr("Magnification")).strong());
+    for (val, text) in ZOOM_PRESETS {
+        if ui.radio(cur == val, text).clicked() {
+            d.set_value("preset", json!(val));
+        }
+    }
+    if ui.radio(cur == "fit", lang.tr("Fit selection")).clicked() {
+        d.set_value("preset", json!("fit"));
+    }
+    ui.horizontal(|ui| {
+        if ui.radio(cur == "custom", format!("{}:", lang.tr("Custom"))).clicked() {
+            d.set_value("preset", json!("custom"));
+        }
+        // Whole percentages, as Excel shows them; the engine clamps to 10..400 as well.
+        let mut percent = d.values.get("percent").and_then(Json::as_f64).unwrap_or(100.0).round() as i64;
+        if ui.add(egui::DragValue::new(&mut percent).range(10..=400).speed(1.0)).changed() {
+            d.set_value("percent", json!(percent));
+        }
+        ui.label("%");
+    });
+    ok_cancel(ui, confirm, open);
+}
+
 fn go_to(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool) {
     let names: Vec<String> = app.session.active().map(|doc| doc.wb.names.iter().map(|n| n.name.clone()).collect()).unwrap_or_default();
     for n in names {
@@ -1995,12 +2205,43 @@ fn sort(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut boo
     ui.checkbox(&mut header, "My list has headers");
     d.values.insert("header".into(), json!(header));
     let mut levels: Vec<Json> = d.values.get("levels").and_then(Json::as_array).cloned().unwrap_or_default();
+    // Columns of the region around the active cell, labelled with their header (or first value).
+    let columns: Vec<(String, String)> = app
+        .session
+        .active()
+        .and_then(|d| {
+            let sh = d.wb.active()?;
+            let region = gridcraft_engine::selection::current_region(sh, d.selection.active);
+            Some(
+                (region.start.col..=region.end.col)
+                    .map(|c| {
+                        let letter = gridcraft_engine::core::col_to_letters(c);
+                        // The region starts at the header row when one is present, so the
+                        // label always comes from start.row: header text with headers on,
+                        // first data value with them off.
+                        let label_row = region.start.row;
+                        let text = gridcraft_engine::display::cell_text(&d.wb, sh, gridcraft_engine::core::CellRef::new(label_row, c));
+                        let text: String = text.chars().take(24).collect();
+                        (letter.clone(), if text.is_empty() { letter } else { format!("{letter}: {text}") })
+                    })
+                    .collect(),
+            )
+        })
+        .unwrap_or_default();
     let mut remove = None;
     for (i, lv) in levels.iter_mut().enumerate() {
         ui.horizontal(|ui| {
             ui.label(if i == 0 { "Sort by" } else { "Then by" });
             let mut col = lv["column"].as_str().unwrap_or("A").to_string();
-            ui.add(egui::TextEdit::singleline(&mut col).desired_width(50.0));
+            if columns.is_empty() {
+                ui.add(egui::TextEdit::singleline(&mut col).desired_width(50.0));
+            } else {
+                egui::ComboBox::from_id_salt(("sort_col", i)).selected_text(col.clone()).show_ui(ui, |ui| {
+                    for (letter, label) in &columns {
+                        ui.selectable_value(&mut col, letter.clone(), label.as_str());
+                    }
+                });
+            }
             lv["column"] = json!(col.to_ascii_uppercase());
             let mut by = lv["by"].as_str().unwrap_or("values").to_string();
             egui::ComboBox::from_id_salt(("by", i))
@@ -2030,7 +2271,15 @@ fn sort(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut boo
         levels.remove(i);
     }
     if ui.button("+ Add Level").clicked() {
-        levels.push(json!({"column": "B", "order": "asc"}));
+        let used: Vec<String> = levels.iter().filter_map(|l| l.get("column").and_then(Json::as_str).map(str::to_string)).collect();
+        let next = columns
+            .iter()
+            .map(|(l, _)| l)
+            .find(|l| !used.contains(l))
+            .cloned()
+            .or_else(|| columns.last().map(|(l, _)| l.clone()))
+            .unwrap_or_else(|| "B".into());
+        levels.push(json!({"column": next, "order": "asc"}));
     }
     d.values.insert("levels".into(), Json::Array(levels.clone()));
     let mut open = true;
@@ -2830,6 +3079,31 @@ mod data_validation_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remove_duplicates_prefills_the_selection_and_submits_the_edited_range() {
+        let mut session = gridcraft_engine::Session::default();
+        session.new_workbook();
+        session.execute("selection.set", json!({"range": "B2:C5"})).unwrap();
+        let mut app = SheetApp::new(session, Default::default());
+        let mut dialog = Dialog::open(&mut app, "removeDuplicates", json!({})).unwrap();
+        assert_eq!(dialog.values.get("range"), Some(&json!("B2:C5")));
+        assert!(dialog.fields.iter().any(|field| matches!(field, Field::Text { key: "range", .. })));
+        assert_eq!(build_params(&dialog)["range"], "B2:C5");
+        dialog.set_value("range", json!("D2:E6"));
+        assert_eq!(build_params(&dialog)["range"], "D2:E6");
+    }
+
+    #[test]
+    fn remove_duplicates_with_only_the_cursor_prefills_the_current_region() {
+        let mut session = gridcraft_engine::Session::default();
+        session.new_workbook();
+        session.execute("range.setValues", json!({"range": "B2:C4", "values": [["a", 1], ["a", 1], ["b", 2]]})).unwrap();
+        session.execute("selection.set", json!({"range": "C3"})).unwrap();
+        let mut app = SheetApp::new(session, Default::default());
+        let dialog = Dialog::open(&mut app, "removeDuplicates", json!({})).unwrap();
+        assert_eq!(dialog.values.get("range"), Some(&json!("B2:C4")));
+    }
 
     #[test]
     fn data_validation_opens_on_the_rule_of_the_active_cell() {

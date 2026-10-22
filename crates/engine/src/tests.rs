@@ -3243,6 +3243,74 @@ fn a_cut_moves_the_sources_notes_hyperlinks_and_merges() {
     assert!(v(&s, "A1").is_empty() && v(&s, "B1").is_empty());
 }
 
+/// Page Layout ▸ Print Titles: naming one axis must not clear the other. `print_titles` read
+/// both `rows` and `cols` into `Option`s and assigned both unconditionally, so
+/// `{"rows":"2:2"}` silently dropped the repeated columns from every printed page.
+#[test]
+fn print_titles_keeps_the_axis_it_is_not_given() {
+    let mut s = s();
+    s.execute("pageLayout.printTitles", json!({"rows": "1:1", "cols": "A:A"})).unwrap();
+    let titles = |s: &Session| {
+        let d = s.doc().unwrap();
+        let sh = d.wb.active().unwrap();
+        (sh.print.title_rows, sh.print.title_cols)
+    };
+    assert_eq!(titles(&s), (Some((0, 0)), Some((0, 0))));
+    // Only rows: the columns stay.
+    s.execute("pageLayout.printTitles", json!({"rows": "2:2"})).unwrap();
+    assert_eq!(titles(&s), (Some((1, 1)), Some((0, 0))), "rows alone must not clear the columns");
+    // Only columns: the rows stay.
+    s.execute("pageLayout.printTitles", json!({"cols": "B:B"})).unwrap();
+    assert_eq!(titles(&s), (Some((1, 1)), Some((1, 1))), "columns alone must not clear the rows");
+    // An empty value clears that axis on purpose.
+    s.execute("pageLayout.printTitles", json!({"cols": ""})).unwrap();
+    assert_eq!(titles(&s), (Some((1, 1)), None));
+    // A bad range is an error, not a silent wipe.
+    assert!(s.execute("pageLayout.printTitles", json!({"rows": "not a range"})).is_err());
+    assert_eq!(titles(&s), (Some((1, 1)), None));
+}
+
+/// Sorting and removing duplicates rewrite the rows of a range. The cells, pictures, row heights
+/// and anchors travel with them, but the notes and hyperlinks hung off their old cells: a note
+/// describing one record ended up annotating whatever landed on that row, and on a removed row it
+/// annotated blank cells.
+#[test]
+fn sort_and_remove_duplicates_move_the_rows_notes_and_links() {
+    fn setup(values: [&str; 5]) -> Session {
+        let mut s = s();
+        for (row, text) in values.iter().enumerate() {
+            s.execute("cell.set", json!({"cell": format!("A{}", row + 1), "input": text})).unwrap();
+        }
+        s.execute("review.newNote", json!({"cell": "B5", "text": "late", "author": "Example"})).unwrap();
+        s.execute("insert.link", json!({"cell": "B4", "target": "https://example.com/4"})).unwrap();
+        s
+    }
+    let notes_and_links = |s: &Session| {
+        let sh = s.doc().unwrap().wb.active().unwrap().clone();
+        let cells = ["B2", "B3", "B4", "B5"].map(|c| CellRef::parse(c).unwrap());
+        (cells.map(|c| sh.comments.get(&c).map(|m| m.text.clone())), cells.map(|c| sh.hyperlinks.get(&c).map(|h| h.target.clone())))
+    };
+
+    // Sort ascending with unique keys d,a,e,b,c: the order becomes a(2), b(4), c(5), d(1), e(3).
+    // The note on B5 describes row 5's record ("c"), which lands on row 3; the link on B4
+    // describes row 4's record ("b"), which lands on row 2. Both must travel with their record.
+    let mut s = setup(["d", "a", "e", "b", "c"]);
+    s.execute("data.sort", json!({"range": "A1:B5", "keys": [{"column": "A"}]})).unwrap();
+    assert_eq!(v(&s, "A3"), Value::text("c"));
+    assert_eq!(v(&s, "A5"), Value::text("e"));
+    let (notes, links) = notes_and_links(&s);
+    assert_eq!(notes[1], Some("late".to_string()), "the note moved with its record: {notes:?}");
+    assert_eq!(links[0], Some("https://example.com/4".to_string()), "the link moved with its record: {links:?}");
+
+    // Remove duplicates keeps the first of each value: rows 3 and 5 go, and row 4's record moves
+    // to row 3. The note on B5 described row 5 and goes with it.
+    let mut s = setup(["a", "b", "a", "c", "a"]);
+    s.execute("data.removeDuplicates", json!({"range": "A1:B5"})).unwrap();
+    assert_eq!(v(&s, "A3"), Value::text("c"));
+    let (notes, _) = notes_and_links(&s);
+    assert!(notes.iter().all(Option::is_none), "a note on a removed row goes with it: {notes:?}");
+}
+
 /// Insert › Link sorts a target as Excel's dialog does: a sheet reference, a defined name or `#…` is
 /// a place in this document, anything else an existing file or web page. A file saved as a
 /// `location` opens nothing in Excel (#800).
