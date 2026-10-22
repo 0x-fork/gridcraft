@@ -61,12 +61,21 @@ pub fn number_stored_as_text(s: &str) -> Option<f64> {
 }
 
 fn parse_numeric(t: &str, sys: DateSystem) -> Option<(f64, Option<&'static str>)> {
+    // Parenthesised negatives: (100) = -100. Each level negates, so ((100)) = 100. Stripped in a
+    // loop, not by recursion: runtime text (e.g. from REPT) can nest thousands deep (#2180).
+    let mut t = t;
+    let mut neg = false;
+    while let Some(inner) = t.strip_prefix('(').and_then(|x| x.strip_suffix(')')) {
+        t = inner.trim();
+        neg = !neg;
+    }
+    let (n, f) = parse_unparenthesised(t, sys)?;
+    Some((if neg { -n } else { n }, f))
+}
+
+fn parse_unparenthesised(t: &str, sys: DateSystem) -> Option<(f64, Option<&'static str>)> {
     if t.is_empty() {
         return None;
-    }
-    // Parenthesised negatives: (100) = -100.
-    if let Some(inner) = t.strip_prefix('(').and_then(|x| x.strip_suffix(')')) {
-        return parse_numeric(inner.trim(), sys).map(|(n, f)| (-n, f));
     }
     if let Some(r) = parse_plain(t) {
         return Some(r);
@@ -361,6 +370,24 @@ mod tests {
         assert_eq!(p("1e3").value, Value::Number(1000.0));
         assert_eq!(p("1 1/2").value, Value::Number(1.5));
         assert_eq!(p(".5").value, Value::Number(0.5));
+    }
+
+    #[test]
+    fn deeply_nested_parentheses_do_not_overflow() {
+        // #2180: coercion used to recurse once per parenthesis and overflow the stack.
+        let depth = 100_000;
+        let s = format!("{}1{}", "(".repeat(depth), ")".repeat(depth));
+        assert_eq!(parse_number_text(&s), Some(1.0));
+        let odd = format!("{}1{}", "(".repeat(depth + 1), ")".repeat(depth + 1));
+        assert_eq!(parse_number_text(&odd), Some(-1.0));
+        let unbalanced = format!("{}1{}", "(".repeat(depth), ")".repeat(depth - 1));
+        assert_eq!(parse_number_text(&unbalanced), None);
+        assert_eq!(p(&s).value, Value::Number(1.0));
+        // Existing results are unchanged.
+        assert_eq!(parse_number_text("(100)"), Some(-100.0));
+        assert_eq!(parse_number_text("((100))"), Some(100.0));
+        assert_eq!(parse_number_text("( $1,200.50 )"), Some(-1200.5));
+        assert_eq!(parse_number_text("()"), None);
     }
 
     #[test]
