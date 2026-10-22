@@ -4234,6 +4234,16 @@ mod pane_tests {
         sh.show_headings = false;
         let bare = Geo::new(&sh, rect, vec2(0.0, 0.0));
         assert_eq!((bare.band_w, bare.band_h), (0.0, 0.0));
+        // No button answers a click on the empty bands' edges (the grid's left and top), where the
+        // level buttons would sit with no headings to hold them.
+        for geo in [&hidden, &bare] {
+            for i in 0..400 {
+                let t = i as f32 * 0.5;
+                for p in [pos2(geo.rect.left(), geo.rect.top() + t), pos2(geo.rect.left() + t, geo.rect.top())] {
+                    assert_eq!(crate::outline::hit(geo, &sh, p), None, "{p:?}");
+                }
+            }
+        }
     }
 
     /// Two frozen rows and columns, scrolled right so that columns C:E lie under the frozen columns.
