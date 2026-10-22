@@ -833,11 +833,7 @@ impl SheetApp {
             } else {
                 "This workbook contains VBA macros. GridCraft keeps them when you save as .xlsm, but does not run them."
             };
-            self.notice = Some(Notice {
-                text: text.into(),
-                kind: NoticeKind::Warning,
-                action: Some(("What this means".into(), "macros".into())),
-            });
+            self.notice = Some(Notice { text: text.into(), kind: NoticeKind::Warning, action: Some(("What this means".into(), "macros".into())) });
         } else {
             let text = if msgs.len() == 1 {
                 msgs[0].to_string()

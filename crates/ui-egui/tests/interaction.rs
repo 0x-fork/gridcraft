@@ -784,10 +784,7 @@ fn opening_a_macro_workbook_shows_a_notice() {
 #[test]
 fn dropped_macro_warning_never_promises_to_keep_macros() {
     let mut h = harness(blank());
-    for w in [
-        "macros (VBA project) reference a missing part and were dropped",
-        "macros (VBA project) could not be read and were dropped: bad zip",
-    ] {
+    for w in ["macros (VBA project) reference a missing part and were dropped", "macros (VBA project) could not be read and were dropped: bad zip"] {
         h.state_mut().show_open_warnings(&json!({"warnings": [w]}));
         let n = h.state().notice.clone().unwrap();
         assert_eq!(n.kind, gridcraft_ui_egui::NoticeKind::Warning);
