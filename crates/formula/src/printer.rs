@@ -132,7 +132,16 @@ fn write_struct_ref(s: &StructRef, at_shorthand: bool) -> String {
 }
 
 fn number(n: f64) -> String {
-    number_to_text(n)
+    let text = number_to_text(n);
+    // 15 significant digits can round past f64::MAX, which no longer parses.
+    if text.parse::<f64>().is_ok_and(f64::is_finite) {
+        return text;
+    }
+    let exact = format!("{:E}", n);
+    match exact.split_once('E') {
+        Some((m, e)) if !e.starts_with('-') => format!("{m}E+{e}"),
+        _ => exact,
+    }
 }
 
 /// Prints an expression in A1 notation.
