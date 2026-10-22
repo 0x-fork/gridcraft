@@ -22,6 +22,7 @@ mod pt;
 mod ru;
 mod sr;
 mod zh;
+mod uk;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -42,11 +43,12 @@ pub enum Language {
     Sr,
     Pl,
     It,
+    Uk,
 }
 
 impl Language {
-    pub const ALL: [Self; 14] = [
-        Self::En, Self::Es, Self::El, Self::Zh, Self::Ja, Self::Ko, Self::Ru, Self::PtBr, Self::De, Self::Cs, Self::Fr, Self::Sr, Self::Pl, Self::It,
+    pub const ALL: [Self; 15] = [
+        Self::En, Self::Es, Self::El, Self::Zh, Self::Ja, Self::Ko, Self::Ru, Self::PtBr, Self::De, Self::Cs, Self::Fr, Self::Sr, Self::Pl, Self::It, Self::Uk,
     ];
 
     /// The language's own name, shown in the switcher.
@@ -66,6 +68,7 @@ impl Language {
             Self::Sr => "Srpski",
             Self::Pl => "Polski",
             Self::It => "Italiano",
+            Self::Uk => "Українська",
         }
     }
 
@@ -86,6 +89,7 @@ impl Language {
             Self::Sr => "sr",
             Self::Pl => "pl",
             Self::It => "it",
+            Self::Uk => "uk",
         }
     }
 
@@ -109,6 +113,7 @@ impl Language {
             "sr" => Some(Self::Sr),
             "pl" => Some(Self::Pl),
             "it" => Some(Self::It),
+            "uk" => Some(Self::Uk),
             _ => None,
         }
     }
@@ -150,6 +155,7 @@ impl Language {
             Self::Sr => sr::translate(text),
             Self::Pl => pl::translate(text),
             Self::It => it::translate(text),
+            Self::Uk => uk::translate(text),
         };
         translated.unwrap_or_else(|| text.rsplit_once('|').map_or(text, |(_, label)| label))
     }
@@ -218,6 +224,7 @@ mod tests {
             assert!(sr::translate(english).is_some_and(|text| !text.is_empty()), "missing Serbian: {english}");
             assert!(pl::translate(english).is_some_and(|text| !text.is_empty()), "missing Polish: {english}");
             assert!(it::translate(english).is_some_and(|text| !text.is_empty()), "missing Italian: {english}");
+            assert!(uk::translate(english).is_some_and(|text| !text.is_empty()), "missing Ukrainian: {english}");
         }
         assert_eq!(Language::Ja.tr("Data"), "データ");
         assert_eq!(Language::Zh.tr("Data"), "数据");
@@ -263,6 +270,8 @@ mod tests {
         assert_eq!(Language::It.tr("Freeze Panes"), "Blocca riquadri");
         assert_eq!(Language::It.tr("Page Layout|Orientation"), "Orientamento");
         assert_eq!(Language::It.tr("Orientation"), "Orientamento");
+        assert_eq!(Language::Uk.tr("Data"), "Дані");
+        assert_eq!(Language::Uk.tr("Sheet1!A1"), "Sheet1!A1");
         assert_eq!(Language::parse("xx"), None);
     }
 
@@ -398,6 +407,8 @@ mod tests {
         assert_eq!(Language::from_tag("it-IT"), Some(Language::It));
         assert_eq!(Language::from_tag("it_CH.UTF-8"), Some(Language::It));
         assert_eq!(Language::parse("it"), Some(Language::It));
+        assert_eq!(Language::from_tag("uk-XX"), Some(Language::Uk));
+        assert_eq!(Language::parse("uk"), Some(Language::Uk));
     }
 
     #[test]
