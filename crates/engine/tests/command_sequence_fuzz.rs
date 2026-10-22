@@ -373,8 +373,8 @@ fn structure_problem(wb: &Workbook, sel: &gridcraft_engine::Selection) -> Option
     if wb.sheets.is_empty() {
         return Some("no sheets left".into());
     }
-    if wb.active_sheet >= wb.sheets.len() {
-        return Some(format!("active sheet {} of {}", wb.active_sheet, wb.sheets.len()));
+    if wb.active_sheet() >= wb.sheets.len() {
+        return Some(format!("active sheet {} of {}", wb.active_sheet(), wb.sheets.len()));
     }
     let mut tables = BTreeSet::new();
     for (i, sh) in wb.sheets.iter().enumerate() {
@@ -490,7 +490,7 @@ fn watch_list(wb: &Workbook) -> Option<&str> {
 /// reset: undo restores view state as it was, but switching sheets isn't an undoable edit.
 fn canonical(wb: &Workbook) -> Workbook {
     let mut wb = wb.clone();
-    wb.active_sheet = 0;
+    wb.set_active_sheet(0);
     wb.names.retain(|n| n.name != WATCH_NAME);
     for sh in wb.sheets.iter_mut() {
         let sh = Arc::make_mut(sh);

@@ -2,7 +2,7 @@
 
 **Stage: alpha** · next: beta, ~25 points of "ready for real work" and ~160–240 h away
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-22 · **Change:** minor (a native window per workbook window; no lost workbook after New: drafts stay in their workbook, Switch Windows, macOS Quit asks to save; New Window shares the workbook) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-22 · **Change:** minor (Arrange All; a native window per workbook window; no lost workbook after New: drafts stay in their workbook, Switch Windows, macOS Quit asks to save; New Window shares the workbook) · **Target:** Microsoft Excel (Microsoft 365)
 
 GridCraft aims at full Microsoft Excel parity, and at being better in places: faster, open (XLSX
 is the native format), fully scriptable by agents (MCP, control channel, CLI), and on the web.
@@ -135,6 +135,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-10-22 | View › New Window and Arrange All on the ribbon. Arrange All tiles, stacks side by side or top to bottom, or cascades the native windows over the main window's monitor, the active one first. Two windows on one workbook show different sheets without copying the workbook or marking it changed; Save records the sheet of the window used last. A dialog stays in the window it was opened in |
 | 2026-10-22 | On the desktop every workbook window is a native window of its own: New, Open and New Window open one, each keeps its own cell draft, dialog and ribbon, and the macOS menu bar acts on the window focused last. Closing one of several windows on a workbook doesn't ask; closing a workbook's last window, or quitting, asks about unsaved changes in that window. The last window closed quits on Windows and Linux; macOS keeps running with the menu bar. First craft-libs `craft-window` use (window list and viewport driver) |
 | 2026-10-22 | View › New Window opens a second window on the same workbook (it used to open a copy whose Save overwrote the original): each window has its own selection, active sheet and scroll, titles read "Book1:1" / "Book1:2", and Switch Windows, Hide, Unhide and Close act per window. The control channel, CLI `send` and MCP tools take an optional `window` or `doc` id and default to the active window; `window.list` (MCP `list_windows`) lists the windows |
 | 2026-10-22 | Typing in a cell and then choosing File › New no longer strands the first workbook: the entry is committed into its own workbook before any File or window command (a refused entry stays open and stops the command), View › Switch Windows and the macOS Window menu list the open workbooks with unsaved markers, `view.switchWindows {doc}` switches by a stable workbook id, and the macOS Quit item asks about unsaved workbooks |
@@ -223,6 +224,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | minor | Progress log: Arrange All; two windows on one workbook without copying it |
 | 2026-10-22 | minor | Progress log: a native window per workbook window |
 | 2026-10-22 | minor | Progress log: New Window shares the workbook; window ids for scripts and MCP |
 | 2026-10-22 | minor | Progress log: drafts stay in their workbook, Switch Windows, macOS Quit asks to save |

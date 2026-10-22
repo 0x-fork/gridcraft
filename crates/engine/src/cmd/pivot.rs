@@ -206,7 +206,7 @@ fn other(msg: impl Into<String>) -> EngineError {
 /// (sheet, index) of the pivot a call targets.
 fn find_pivot(s: &Session, p: &Json) -> Result<(usize, usize)> {
     let d = s.doc()?;
-    let active = d.wb.active_sheet;
+    let active = d.wb.active_sheet();
     if let Some(v) = p.get("pivot").filter(|v| !v.is_null()) {
         let mut order: Vec<usize> = vec![active];
         order.extend((0..d.wb.sheets.len()).filter(|i| *i != active));
@@ -616,7 +616,7 @@ fn insert_pivot(s: &mut Session, p: &Json) -> Result<Json> {
         return Err(other("The workbook is protected and cannot be changed."));
     }
     let source = source_param(s, p)?;
-    let active = s.doc()?.wb.active_sheet;
+    let active = s.doc()?.wb.active_sheet();
     // Validate the source now (header names, size).
     let src = pv::read_source(&s.doc()?.wb, &source, active).map_err(other)?;
     let name = match str_param(p, "name") {
@@ -654,7 +654,7 @@ fn insert_pivot(s: &mut Session, p: &Json) -> Result<Json> {
         let (si, anchor) = match target {
             Some(t) => t,
             None => {
-                let at = cx.wb.active_sheet.min(cx.wb.sheets.len());
+                let at = cx.wb.active_sheet().min(cx.wb.sheets.len());
                 let nm = cx.wb.next_sheet_name();
                 cx.wb.sheets.insert(at, Arc::new(Sheet::new(nm)));
                 for n in cx.wb.names.iter_mut() {
@@ -704,7 +704,7 @@ fn insert_pivot(s: &mut Session, p: &Json) -> Result<Json> {
         sh.pivots.push(pt);
         let pi = sh.pivots.len() - 1;
         let area = pv::refresh(&mut cx.wb, si, pi, replace).map_err(other)?;
-        cx.wb.active_sheet = si;
+        cx.wb.set_active_sheet(si);
         *cx.sel = crate::Selection::at(anchor);
         cx.structural = true;
         let sheet_name = cx.wb.sheet(si).map(|s| s.name.clone()).unwrap_or_default();
@@ -1395,7 +1395,7 @@ fn chart_pivot(s: &Session, p: &Json) -> Result<(usize, usize)> {
                 let sh = gridcraft_core::unquote_sheet(sh);
                 (d.wb.sheet_index(&sh), a)
             }
-            None => (Some(d.wb.active_sheet), t),
+            None => (Some(d.wb.active_sheet()), t),
         };
         if let (Some(si), Some(c)) = (sheet, CellRef::parse(addr.trim().replace('$', "").as_str())) {
             let hit = d.wb.sheet(si).and_then(|sh| sh.pivots.iter().position(|pt| pt.last_range.is_some_and(|r| r.contains(c)) || pt.anchor == c));
@@ -1529,7 +1529,7 @@ fn suggestions(wb: &Workbook, src: &pv::Source) -> Vec<Json> {
 
 fn recommended(s: &mut Session, p: &Json) -> Result<Json> {
     let source = source_param(s, p)?;
-    let active = s.doc()?.wb.active_sheet;
+    let active = s.doc()?.wb.active_sheet();
     let src = pv::read_source(&s.doc()?.wb, &source, active).map_err(other)?;
     let list = suggestions(&s.doc()?.wb, &src);
     let Some(apply) = p.get("apply").and_then(Json::as_u64) else {
@@ -1612,7 +1612,7 @@ mod tests {
         assert_eq!(r["fields"], json!(["Region", "Product", "Date", "Units", "Sales"]));
         let d = s.doc().unwrap();
         assert_eq!(d.wb.sheets.len(), 2);
-        assert_eq!(d.wb.active_sheet, 0, "new sheet goes before the current one");
+        assert_eq!(d.wb.active_sheet(), 0, "new sheet goes before the current one");
         assert_eq!(d.wb.active().unwrap().name, "Sheet2");
         assert!(text(&s, "A3").starts_with("PivotTable1"));
         assert_eq!(pt(&s).source, "Sheet1!$A$1:$E$13");
@@ -1993,7 +1993,7 @@ mod tests {
     }
     fn plotted(s: &Session) -> Vec<Vec<Option<f64>>> {
         let d = s.doc().unwrap();
-        let data = gridcraft_chart::resolve(&d.wb, d.wb.active_sheet, &pivot_chart(s));
+        let data = gridcraft_chart::resolve(&d.wb, d.wb.active_sheet(), &pivot_chart(s));
         data.series.into_iter().map(|x| x.values).collect()
     }
 

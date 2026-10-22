@@ -1930,7 +1930,7 @@ fn formulas(app: &mut SheetApp, ui: &mut Ui) {
                     {
                         let locale = app.ui.language.formula_locale();
                         let name =
-                            app.session.active().map(|d| crate::formula_locale::completion_name(n, locale, &d.wb, d.wb.active_sheet)).unwrap_or(n);
+                            app.session.active().map(|d| crate::formula_locale::completion_name(n, locale, &d.wb, d.wb.active_sheet())).unwrap_or(n);
                         let desc = crate::formula_locale::description(n, locale, app.ui.language).unwrap_or_default();
                         if ui.button(name).on_hover_text(desc).clicked() {
                             app.run_or_alert("formulas.insertFunction", json!({"name": n}));
@@ -2318,6 +2318,16 @@ fn view(app: &mut SheetApp, ui: &mut Ui) {
         act(app, "view.zoomToSelection", json!({"viewWidth": r.width(), "viewHeight": r.height()}));
     }
     sep(ui);
+    let __k = big_button(ui, Icon::NewFile, "New\nWindow", "New Window", false);
+    control_keytip(app, ui, &__k, "view.newWindow");
+    if __k.clicked() {
+        act(app, "view.newWindow", json!({}));
+    }
+    let __k = big_button(ui, Icon::Table, "Arrange\nAll", "Arrange All", false);
+    control_keytip(app, ui, &__k, "view.arrangeAll");
+    if __k.clicked() {
+        app.open_dialog("arrangeAll", json!({}));
+    }
     let fp = big_button(ui, Icon::Freeze, "Freeze\nPanes", "Freeze Panes", true);
     for sequence in
         keytip_table::group_extension(app.keytips.prefix().unwrap_or_default(), &["view.freezePanes", "view.freezeTopRow", "view.freezeFirstColumn"])

@@ -307,3 +307,116 @@ fn feedback_from_opening_a_workbook_shows_in_its_new_window() {
     desk.app.enter_window(book1);
     assert!(desk.app.notice.is_none() && desk.app.message.is_none(), "Book1's window shows neither");
 }
+
+/// Book1 with two sheets, saved, shown in two windows: window 1 on Sheet1 at B2, window 2 on
+/// Sheet2 at D4. Returns the window ids.
+fn two_windows_on_one_workbook(desk: &mut Desk) -> (u64, u64) {
+    desk.app.run("home.insertSheet", json!({})).unwrap();
+    let path = std::env::temp_dir().join(format!("gridcraft-two-windows-{}-{:?}.xlsx", std::process::id(), std::thread::current().id()));
+    desk.app.run("file.save", json!({"path": path})).unwrap();
+    let _ = std::fs::remove_file(&path);
+    desk.app.run("sheet.activate", json!({"sheet": 0})).unwrap();
+    desk.app.run("selection.set", json!({"range": "B2"})).unwrap();
+    desk.frames(2);
+    let w1 = desk.app.session.active_window().unwrap();
+    desk.app.run("view.newWindow", json!({})).unwrap();
+    desk.frames(3);
+    let w2 = desk.app.session.active_window().unwrap();
+    desk.app.run("sheet.activate", json!({"sheet": 1})).unwrap();
+    desk.app.run("selection.set", json!({"range": "D4"})).unwrap();
+    desk.frames(3);
+    (w1, w2)
+}
+
+#[test]
+fn two_windows_on_one_workbook_show_their_own_sheet_and_each_others_edits() {
+    let mut desk = Desk::new(true);
+    let (w1, w2) = two_windows_on_one_workbook(&mut desk);
+    assert_eq!(desk.windows.shown_windows(), [w1, w2], "New Window opens a native window");
+    assert_ne!(desk.viewport(w1), desk.viewport(w2));
+    let titles: Vec<String> = [w1, w2].iter().map(|w| desk.app.session.window_title(*w).unwrap()).collect();
+    assert!(titles[0].ends_with(".xlsx:1") && titles[1].ends_with(".xlsx:2"), "{titles:?}");
+
+    // Drawing both windows every frame swaps their views without copying the workbook.
+    let wb = desk.app.session.doc().unwrap().wb.clone();
+    desk.frames(3);
+    assert!(std::sync::Arc::ptr_eq(&wb, &desk.app.session.doc().unwrap().wb), "a window swap copied the workbook");
+    assert!(!desk.app.session.doc().unwrap().is_dirty());
+    for (w, sheet, cell) in [(w1, 0, "B2"), (w2, 1, "D4")] {
+        desk.app.enter_window(w);
+        let d = desk.app.session.doc().unwrap();
+        assert_eq!((d.wb.active_sheet(), d.selection.active), (sheet, CellRef::parse(cell).unwrap()), "window {w}'s sheet and selection");
+        assert!(desk.app.grid.rect.is_some(), "window {w} drew its grid");
+    }
+
+    // Window 1 refers to Sheet2!D4; window 2 types there; window 1 shows it on the next frame.
+    desk.app.enter_window(w1);
+    desk.app.run("cell.set", json!({"cell": "B2", "input": "=Sheet2!D4*2"})).unwrap();
+    desk.frames(1);
+    desk.app.enter_window(w2);
+    desk.app.run("cell.set", json!({"input": "21"})).unwrap();
+    desk.frames(1);
+    desk.app.enter_window(w1);
+    let d = desk.app.session.doc().unwrap();
+    assert_eq!(d.wb.active_sheet(), 0);
+    assert_eq!(d.wb.active().unwrap().value(CellRef::parse("B2").unwrap()), Value::Number(42.0));
+}
+
+#[test]
+fn a_dialog_stays_with_its_window_across_a_switch() {
+    let mut desk = Desk::new(true);
+    let (w1, w2) = two_windows_on_one_workbook(&mut desk);
+    desk.app.enter_window(w1);
+    desk.app.open_dialog("zoom", json!({}));
+    desk.frames(2);
+    assert_eq!(desk.app.dialog.as_ref().map(|d| d.name()), Some("zoom"));
+
+    // From the menu bar.
+    desk.app.run("view.switchWindows", json!({"window": w2})).unwrap();
+    desk.frames(3);
+    assert_eq!(desk.app.session.active_window(), Some(w2));
+    assert!(desk.app.dialog.is_none(), "window 2 shows no dialog");
+
+    // The user clicks into window 1, then back into window 2.
+    for (w, other) in [(w1, w2), (w2, w1)] {
+        let (v, o) = (desk.viewport(w), desk.viewport(other));
+        INFOS.with(|i| {
+            let mut i = i.borrow_mut();
+            i.entry(v).or_default().focused = Some(true);
+            i.entry(o).or_default().focused = Some(false);
+        });
+        desk.frames(2);
+        assert_eq!(desk.app.session.active_window(), Some(w));
+        let expected = if w == w1 { Some("zoom") } else { None };
+        assert_eq!(desk.app.dialog.as_ref().map(|d| d.name()), expected, "window {w}'s dialog");
+    }
+
+    // A script switching windows while the dialog is open.
+    desk.frame_with(|app, ctx| {
+        let _ = gridcraft_ui_egui::control::handle(app, ctx, "engine.execute", &json!({"command": "window.activate", "params": {"window": w1}}));
+    });
+    desk.frames(2);
+    assert_eq!(desk.app.dialog.as_ref().map(|d| d.name()), Some("zoom"));
+    desk.app.enter_window(w2);
+    assert!(desk.app.dialog.is_none());
+}
+
+#[test]
+fn arrange_all_lays_out_the_native_windows_active_first() {
+    let mut desk = Desk::new(true);
+    let (w1, w2) = two_windows_on_one_workbook(&mut desk);
+    INFOS.with(|i| i.borrow_mut().entry(ViewportId::ROOT).or_default().monitor_size = Some(egui::vec2(1000.0, 800.0)));
+    desk.app.run("view.arrangeAll", json!({"arrange": "vertical"})).unwrap();
+    let sent = desk.frames(1);
+    let at = |x: f32| ViewportCommand::OuterPosition(egui::pos2(x, 0.0));
+    assert!(sent_to(&sent, desk.viewport(w2), &at(0.0)), "the active window goes left: {sent:?}");
+    assert!(sent_to(&sent, desk.viewport(w1), &at(500.0)));
+    assert!(sent_to(&sent, desk.viewport(w1), &ViewportCommand::InnerSize(egui::vec2(500.0, 800.0))));
+
+    // Without parameters, as a script calls it: tiled.
+    let r = desk.app.run("view.arrangeAll", json!({})).unwrap();
+    assert_eq!(r["arrange"], "tiled");
+    let tiled = gridcraft_ui_egui::doc_windows::arrange_rects("tiled", 3, craft_window::Rect::new(0.0, 0.0, 1000.0, 800.0));
+    let r = |x, y, w, h| craft_window::Rect::new(x, y, w, h);
+    assert_eq!(tiled, [r(0.0, 0.0, 500.0, 400.0), r(500.0, 0.0, 500.0, 400.0), r(0.0, 400.0, 1000.0, 400.0)]);
+}

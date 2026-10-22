@@ -563,7 +563,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     app.grid.rect = Some(rect);
     let Some(d) = app.session.active() else { return };
     let wb: Arc<Workbook> = d.wb.clone();
-    let si = wb.active_sheet;
+    let si = wb.active_sheet();
     let Some(sh) = wb.sheet(si) else { return };
     let sel = d.selection.clone();
     let place = (d.uid, si);
@@ -1803,7 +1803,7 @@ pub(crate) fn paint_selection(
     }
     // Marching ants around the copied range.
     if let Some(clip) = &app.session.clipboard
-        && app.session.active().is_some_and(|d| d.uid == clip.doc_uid && d.wb.active_sheet == clip.sheet)
+        && app.session.active().is_some_and(|d| d.uid == clip.doc_uid && d.wb.active_sheet() == clip.sheet)
         && range_in_pane(clip.range, rows, cols)
     {
         // A multi-area copy marks each area as selected.
@@ -2109,7 +2109,7 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
     if primary_clicked
         && !resp.drag_started()
         && let Some(p) = pos
-        && let Some((id, act)) = crate::chartview::slicer_click(geo, sh, wb, wb.active_sheet, p)
+        && let Some((id, act)) = crate::chartview::slicer_click(geo, sh, wb, wb.active_sheet(), p)
     {
         app.selected_chart = Some(id);
         match act {
@@ -2307,13 +2307,13 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
             && ed.can_point()
         {
             let anchor = if mods.shift && ed.point_at_caret() {
-                ed.point_anchor.filter(|(sheet, _)| *sheet == wb.active_sheet).map(|(_, cell)| cell).unwrap_or(c)
+                ed.point_anchor.filter(|(sheet, _)| *sheet == wb.active_sheet()).map(|(_, cell)| cell).unwrap_or(c)
             } else {
                 c
             };
             let range = RangeRef::new(anchor, c);
             let text = if range.is_single() { c.a1() } else { range.a1() };
-            let sheet_name = (ed.sheet != wb.active_sheet).then(|| sh.name.clone());
+            let sheet_name = (ed.sheet != wb.active_sheet()).then(|| sh.name.clone());
             let r = match sheet_name {
                 Some(n) => format!("{}!{text}", gridcraft_engine::formula::quote_sheet(&n)),
                 None => text,
@@ -2325,7 +2325,7 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
             }
             ed.request_focus = true;
             ed.point_cell = Some(c);
-            ed.point_anchor = Some((wb.active_sheet, anchor));
+            ed.point_anchor = Some((wb.active_sheet(), anchor));
             app.grid.drag = Drag::Select;
             app.grid.drag_select = true;
             if resp.drag_started()
@@ -2614,7 +2614,7 @@ fn format_painter_apply(app: &mut SheetApp) {
 fn point_header(app: &mut SheetApp, wb: &Workbook, sh: &Sheet, range: RangeRef, extend: bool, add: bool) -> bool {
     let Some(ed) = app.editor.as_mut().filter(|ed| ed.can_point()) else { return false };
     let edit_sheet = ed.sheet;
-    let active_sheet = wb.active_sheet;
+    let active_sheet = wb.active_sheet();
     let range = if extend {
         ed.point
             .and_then(|point| crate::editor::formula_refs(&ed.text).into_iter().find(|(start, end, ..)| (*start, *end) == point))
@@ -2636,7 +2636,8 @@ fn point_header(app: &mut SheetApp, wb: &Workbook, sh: &Sheet, range: RangeRef, 
         range
     };
     let reference = range.a1();
-    let reference = if ed.sheet != wb.active_sheet { format!("{}!{reference}", gridcraft_engine::formula::quote_sheet(&sh.name)) } else { reference };
+    let reference =
+        if ed.sheet != wb.active_sheet() { format!("{}!{reference}", gridcraft_engine::formula::quote_sheet(&sh.name)) } else { reference };
     if add {
         ed.append_ref(&reference);
     } else {
@@ -2656,13 +2657,13 @@ fn select_to_pointer(app: &mut SheetApp, geo: &Geo, sh: &Sheet, wb: &Workbook, p
     if let Some(ed) = app.editor.as_mut()
         && ed.point.is_some()
     {
-        if let Some(start) = ed.point_anchor.filter(|(sheet, _)| *sheet == wb.active_sheet).map(|(_, cell)| cell).or(ed.point_cell) {
+        if let Some(start) = ed.point_anchor.filter(|(sheet, _)| *sheet == wb.active_sheet()).map(|(_, cell)| cell).or(ed.point_cell) {
             let range = RangeRef::new(start, cell);
             let text = if range.is_single() { range.start.a1() } else { range.a1() };
-            let text = if ed.sheet != wb.active_sheet { format!("{}!{text}", gridcraft_engine::formula::quote_sheet(&sh.name)) } else { text };
+            let text = if ed.sheet != wb.active_sheet() { format!("{}!{text}", gridcraft_engine::formula::quote_sheet(&sh.name)) } else { text };
             ed.insert_ref(&text);
             ed.point_cell = Some(cell);
-            ed.point_anchor = Some((wb.active_sheet, start));
+            ed.point_anchor = Some((wb.active_sheet(), start));
         }
     } else if let Some(d) = app.session.active() {
         // Read the current anchor: starting a drag may have just replaced the selection.
@@ -3117,7 +3118,7 @@ fn filter_menu(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_open: bool)
     let Some((col, row, at)) = app.grid.filter_menu else { return };
     let Some(d) = app.session.active() else { return };
     let wb = d.wb.clone();
-    let si = wb.active_sheet;
+    let si = wb.active_sheet();
     let Some(sh) = wb.sheet(si) else { return };
     let _ = geo;
     // Tables get an autofilter on demand.
@@ -3460,12 +3461,12 @@ pub fn point_move(app: &mut SheetApp, ed: &mut EditState, dr: i64, dc: i64, exte
                 )
             })
             .unwrap_or(from);
-        ed.point_anchor.filter(|(sheet, _)| *sheet == d.wb.active_sheet).map(|(_, cell)| cell).unwrap_or(inferred_anchor)
+        ed.point_anchor.filter(|(sheet, _)| *sheet == d.wb.active_sheet()).map(|(_, cell)| cell).unwrap_or(inferred_anchor)
     } else {
         to
     };
     let text = if extend { RangeRef::new(anchor, to).a1() } else { to.a1() };
-    let sheet = d.wb.active_sheet;
+    let sheet = d.wb.active_sheet();
     ed.insert_ref(&text);
     ed.point_cell = Some(to);
     ed.point_anchor = Some((sheet, anchor));
@@ -3606,7 +3607,7 @@ fn list_picker(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_open: bool)
     let Some(c) = app.grid.list_picker else { return };
     let Some(d) = app.session.active() else { return };
     let wb = d.wb.clone();
-    let si = wb.active_sheet;
+    let si = wb.active_sheet();
     let Some(sh) = wb.sheet(si) else { return };
     let Some(dv) = sh.validations.iter().find(|x| x.ranges.iter().any(|r| r.contains(c))).cloned() else {
         app.grid.list_picker = None;
@@ -3743,7 +3744,7 @@ fn is_checkbox(sh: &Sheet, app: &SheetApp) -> bool {
 
 fn paint_pages(app: &mut SheetApp, p: &Painter, geo: &Geo, sh: &Sheet) {
     let Some(d) = app.session.active() else { return };
-    let key = (d.uid, d.revision, d.wb.active_sheet);
+    let key = (d.uid, d.revision, d.wb.active_sheet());
     if app.grid.pages.as_ref().is_none_or(|(k, _)| *k != key) {
         let pages: Vec<(RangeRef, u32)> = app
             .session

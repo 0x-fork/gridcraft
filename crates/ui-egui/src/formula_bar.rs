@@ -83,7 +83,7 @@ fn active_input(app: &SheetApp) -> String {
         }
         return sh
             .cell(anchor)
-            .map(|c| crate::formula_locale::display(&c.input_text(), app.ui.language.formula_locale(), &d.wb, d.wb.active_sheet))
+            .map(|c| crate::formula_locale::display(&c.input_text(), app.ui.language.formula_locale(), &d.wb, d.wb.active_sheet()))
             .unwrap_or_default();
     }
     if let Some(c) = sh.cell(a) {
@@ -91,7 +91,7 @@ fn active_input(app: &SheetApp) -> String {
             return String::new();
         }
         return if let Some(f) = &c.formula {
-            let shown = crate::formula_locale::display(&c.input_text(), app.ui.language.formula_locale(), &d.wb, d.wb.active_sheet);
+            let shown = crate::formula_locale::display(&c.input_text(), app.ui.language.formula_locale(), &d.wb, d.wb.active_sheet());
             // A legacy array formula shows in braces (`{=A1:A2*2}`), as `Cell::bar_text` does.
             if f.array.is_some() { format!("{{{shown}}}") } else { shown }
         } else {
@@ -126,7 +126,7 @@ fn name_box(app: &mut SheetApp, ui: &mut egui::Ui, t: &Tokens) {
             if !target.is_empty() && target != shown {
                 // A new name for the selection, or a place to go.
                 let is_ref = gridcraft_engine::core::RangeRef::parse(target.split('!').next_back().unwrap_or("")).is_some();
-                let known = app.session.active().is_some_and(|d| d.wb.name(&target, d.wb.active_sheet).is_some() || d.wb.table(&target).is_some());
+                let known = app.session.active().is_some_and(|d| d.wb.name(&target, d.wb.active_sheet()).is_some() || d.wb.table(&target).is_some());
                 let r = if is_ref || known {
                     app.run("edit.goTo", json!({"reference": target}))
                 } else {

@@ -126,6 +126,19 @@ impl SheetApp {
         self.follow_active_window();
     }
 
+    /// Puts back a dialog that was taken out of window `home`'s fields while it ran. A command
+    /// run from the dialog may have switched windows meanwhile; the dialog stays in the window it
+    /// was opened in (dropped if that window closed).
+    pub(crate) fn return_dialog(&mut self, home: Option<u64>, d: dialogs::Dialog) {
+        if home == self.ui_window {
+            self.dialog = Some(d);
+        } else if let Some(w) = home.and_then(|h| self.parked.get_mut(&h))
+            && w.dialog.is_none()
+        {
+            w.dialog = Some(d);
+        }
+    }
+
     /// Whether a window other than the current one has a cell or text-box draft open.
     pub fn parked_window_with_draft(&self) -> Option<u64> {
         self.parked.iter().filter(|(_, w)| w.editor.is_some() || w.text_box_editor.is_some()).map(|(id, _)| *id).min()

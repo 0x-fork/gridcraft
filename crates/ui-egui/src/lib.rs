@@ -342,6 +342,8 @@ pub struct SheetApp {
     /// tests, embedding hosts) one window shows the active workbook window, and its close button
     /// quits.
     pub native_windows: bool,
+    /// View › Arrange All's layout and windows, waiting for the native windows to move.
+    pub arrange_windows: Option<(String, Vec<u64>)>,
     /// The native window that has focus, which menu commands and screenshots go to.
     pub(crate) focus_window: Option<u64>,
 }
@@ -394,6 +396,7 @@ impl SheetApp {
             ui_window: None,
             parked: HashMap::new(),
             native_windows: false,
+            arrange_windows: None,
             focus_window: None,
         }
     }
@@ -479,6 +482,14 @@ impl SheetApp {
         // Requests the command made (a dialog, a draft) belong to the window it left active.
         self.follow_active_window();
         self.after_engine();
+        if id == "view.arrangeAll"
+            && self.native_windows
+            && let Ok(r) = &r
+        {
+            let arrange = r.get("arrange").and_then(Json::as_str).unwrap_or("tiled").to_string();
+            let windows = r.get("windows").and_then(Json::as_array).map(|a| a.iter().filter_map(Json::as_u64).collect()).unwrap_or_default();
+            self.arrange_windows = Some((arrange, windows));
+        }
         // The new chart is selected, as after inserting any object, so Delete removes it, not its data.
         if id == "insert.chart"
             && let Ok(r) = &r
@@ -811,7 +822,7 @@ impl SheetApp {
                     let text = text.map(|text| {
                         self.session
                             .active()
-                            .map(|d| formula_locale::display_template(&text, self.ui.language.formula_locale(), &d.wb, d.wb.active_sheet))
+                            .map(|d| formula_locale::display_template(&text, self.ui.language.formula_locale(), &d.wb, d.wb.active_sheet()))
                             .unwrap_or(text)
                     });
                     self.begin_edit(text, false);
@@ -977,12 +988,12 @@ impl SheetApp {
 
     /// The active workbook and sheet: what drafts, text boxes and picture targets belong to.
     pub fn view_key(&self) -> Option<(u64, usize)> {
-        self.session.active().map(|d| (d.uid, d.wb.active_sheet))
+        self.session.active().map(|d| (d.uid, d.wb.active_sheet()))
     }
 
     /// The active window and sheet: each window scrolls on its own.
     fn scroll_key(&self) -> Option<(u64, usize)> {
-        Some((self.session.active_window()?, self.session.active()?.wb.active_sheet))
+        Some((self.session.active_window()?, self.session.active()?.wb.active_sheet()))
     }
 
     pub fn view(&self) -> SheetView {
@@ -1053,7 +1064,7 @@ impl SheetApp {
             String::new()
         } else {
             match sh.cell(at) {
-                Some(c) if c.formula.is_some() => formula_locale::display(&c.input_text(), locale, &d.wb, d.wb.active_sheet),
+                Some(c) if c.formula.is_some() => formula_locale::display(&c.input_text(), locale, &d.wb, d.wb.active_sheet()),
                 _ => gridcraft_engine::display::edit_text(&d.wb, sh, at),
             }
         };
@@ -1061,7 +1072,7 @@ impl SheetApp {
             Some(t) => (t, true),
             None => (current.clone(), false),
         };
-        let mut ed = editor::EditState::new(d.uid, d.wb.active_sheet, at, text, replace, from_formula_bar);
+        let mut ed = editor::EditState::new(d.uid, d.wb.active_sheet(), at, text, replace, from_formula_bar);
         ed.window = self.session.active_window();
         ed.locale = locale;
         if replace && self.ui.autocomplete && !ed.is_formula() {
@@ -1153,7 +1164,7 @@ impl SheetApp {
             self.toast = Some((msg, now_ms()));
         }
         // Point mode can leave another sheet active; the edit belongs to the sheet it started on.
-        if self.session.active().is_some_and(|d| d.wb.active_sheet != ed.sheet)
+        if self.session.active().is_some_and(|d| d.wb.active_sheet() != ed.sheet)
             && let Err(e) = self.session.run("sheet.activate", json!({"sheet": ed.sheet}))
         {
             self.message = Some(("GridCraft".into(), clean_error(&e)));
@@ -1214,7 +1225,7 @@ impl SheetApp {
         let multi = self.session.active().is_some_and(|d| !d.selection.is_single_cell());
         // Any other move (arrows, clicks, another sheet) leaves the selection off the cell the
         // last Tab landed on, which ends the run.
-        let here = self.session.active().map(|d| (d.uid, d.wb.active_sheet, d.selection.active));
+        let here = self.session.active().map(|d| (d.uid, d.wb.active_sheet(), d.selection.active));
         let run = self.tab_run.take().filter(|&(uid, sheet, _, at)| here == Some((uid, sheet, at)));
         if multi {
             let fwd = dr > 0 || dc > 0;
@@ -1227,7 +1238,7 @@ impl SheetApp {
             if dr == 0 && dc != 0 {
                 let start = run.map(|r| r.2);
                 self.tab_run = self.session.active().and_then(|d| {
-                    let (uid, sheet) = (d.uid, d.wb.active_sheet);
+                    let (uid, sheet) = (d.uid, d.wb.active_sheet());
                     let col = start.or(here.map(|h| h.2.col))?;
                     Some((uid, sheet, col, d.selection.active))
                 });

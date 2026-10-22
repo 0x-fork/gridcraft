@@ -18,7 +18,7 @@
 //!
 //! [`Session::windows`]: gridcraft_engine::Session::windows
 
-use craft_window::{Frame, Viewports, WindowEvent, WindowId, WindowList};
+use craft_window::{CASCADE_STEP, Frame, Rect, Viewports, WindowEvent, WindowId, WindowList, cascade};
 use serde_json::json;
 
 use crate::SheetApp;
@@ -79,6 +79,33 @@ impl DocWindows {
     /// the logic then): shows windows created or opened by menu commands, files and scripts.
     pub fn logic(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
         self.sync(app, ctx);
+        if let Some((arrange, windows)) = app.arrange_windows.take() {
+            self.arrange(ctx, &arrange, &windows);
+        }
+    }
+
+    /// View › Arrange All: moves and sizes the native windows of `windows` (engine ids, the first
+    /// on top or at the top left) over the root window's monitor.
+    fn arrange(&self, ctx: &egui::Context, arrange: &str, windows: &[u64]) {
+        let ids: Vec<WindowId> = windows.iter().filter_map(|w| self.find(*w)).collect();
+        let (monitor, infos) = ctx.input(|i| (i.viewport().monitor_size, i.raw.viewports.clone()));
+        // Platforms that don't report the monitor (Wayland, tests) get a common laptop screen.
+        let size = monitor.filter(|m| m.x > 0.0 && m.y > 0.0).unwrap_or(egui::vec2(1280.0, 800.0));
+        let mut rects = arrange_rects(arrange, ids.len(), Rect::new(0.0, 0.0, size.x, size.y));
+        if arrange == "cascade" {
+            // The active window goes in front: the last step of the cascade.
+            rects.reverse();
+        }
+        for (id, r) in ids.iter().zip(rects) {
+            let vp = self.viewports.viewport_id(*id);
+            // Inner size is what can be set: take off the frame the window has now.
+            let frame = infos.get(&vp).and_then(|v| Some(v.outer_rect?.size() - v.inner_rect?.size())).unwrap_or(egui::Vec2::ZERO);
+            ctx.send_viewport_cmd_to(vp, egui::ViewportCommand::OuterPosition(egui::pos2(r.x, r.y)));
+            ctx.send_viewport_cmd_to(vp, egui::ViewportCommand::InnerSize((egui::vec2(r.width, r.height) - frame).max(egui::vec2(240.0, 160.0))));
+        }
+        if let Some(first) = ids.first() {
+            self.viewports.focus(ctx, *first);
+        }
     }
 
     /// Mirrors the engine's visible windows: closed or hidden windows lose their native window
@@ -224,4 +251,49 @@ fn window_title(app: &SheetApp, window: u64) -> String {
     let title = app.session.window_title(window).unwrap_or_default();
     let dirty = app.session.window(window).and_then(|w| app.session.documents().iter().find(|d| d.uid == w.doc_uid)).is_some_and(|d| d.is_dirty());
     if dirty { format!("{title} — Edited") } else { title }
+}
+
+/// Outer rectangles for `n` windows arranged within `bounds` as View › Arrange All's `arrange`
+/// says: `tiled` (a grid, the last row's windows widened to fill it), `horizontal` (stacked top
+/// to bottom), `vertical` (side by side) or `cascade` (each one title bar below and right of the
+/// previous, wrapping at the edges).
+pub fn arrange_rects(arrange: &str, n: usize, bounds: Rect) -> Vec<Rect> {
+    if n == 0 {
+        return vec![];
+    }
+    let count = n as f32;
+    match arrange {
+        "horizontal" => {
+            let h = bounds.height / count;
+            (0..n).map(|i| Rect::new(bounds.x, bounds.y + h * i as f32, bounds.width, h)).collect()
+        }
+        "vertical" => {
+            let w = bounds.width / count;
+            (0..n).map(|i| Rect::new(bounds.x + w * i as f32, bounds.y, w, bounds.height)).collect()
+        }
+        "cascade" => {
+            let shift = CASCADE_STEP * (count - 1.0);
+            let size = [(bounds.width - shift).max(bounds.width * 0.5), (bounds.height - shift).max(bounds.height * 0.5)];
+            let mut previous = Rect::new(bounds.x - CASCADE_STEP, bounds.y - CASCADE_STEP, size[0], size[1]);
+            (0..n)
+                .map(|_| {
+                    previous = cascade(previous, size, bounds, CASCADE_STEP);
+                    previous
+                })
+                .collect()
+        }
+        _ => {
+            let cols = (count.sqrt().ceil() as usize).max(1);
+            let rows = n.div_ceil(cols);
+            let h = bounds.height / rows as f32;
+            (0..n)
+                .map(|i| {
+                    let (row, col) = (i / cols, i % cols);
+                    let in_row = if row + 1 == rows { n - row * cols } else { cols };
+                    let w = bounds.width / in_row as f32;
+                    Rect::new(bounds.x + w * col as f32, bounds.y + h * row as f32, w, h)
+                })
+                .collect()
+        }
+    }
 }
