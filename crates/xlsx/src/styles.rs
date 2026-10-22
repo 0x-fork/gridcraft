@@ -716,11 +716,11 @@ pub fn write_styles(wb: &Workbook, dxfs: &[Style], extra_fmts: &[String]) -> (St
         if let Some(a) = alignment_xml(&d.align) {
             dx.push_str(&a);
         }
-        if st.protection || d.protection != def.protection {
-            let _ = write!(dx, "<protection locked=\"{}\" hidden=\"{}\"/>", d.protection.locked as u8, d.protection.hidden as u8);
-        }
         if d.borders != def.borders {
             dx.push_str(&border_xml(&d.borders));
+        }
+        if st.protection || d.protection != def.protection {
+            let _ = write!(dx, "<protection locked=\"{}\" hidden=\"{}\"/>", d.protection.locked as u8, d.protection.hidden as u8);
         }
         dx.push_str("</dxf>");
     }
