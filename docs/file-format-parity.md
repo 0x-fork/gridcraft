@@ -1,6 +1,6 @@
 # File-format parity
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-19 · **Change:** minor (XLSX text keeps carriage returns on save and reopen; .xls dialog sheets are skipped instead of read as worksheets; `.xls` import reads each sheet's display options from WINDOW2: right-to-left, gridlines, headings, zeros, formulas; XLSX text boxes and shapes keep their paragraphs' right-to-left direction on save; CSV/TSV/TXT can open with every field kept as text via `file.open {csvAsText}`; formulas over Excel's 8,192 characters, and `%` or call chains past the nesting limit, are parse errors instead of stack overflows when a file is opened; XLSX PivotTables read and write `rowGrandTotals`/`colGrandTotals` the way Excel does, so a table saved with only one grand total opens with the right one; HTML export keeps right-to-left) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-19 · **Change:** minor (legacy XLSX `INDEX`/`MATCH` formulas stay scalar on save; XLSX text keeps carriage returns on save and reopen; .xls dialog sheets are skipped instead of read as worksheets; `.xls` import reads each sheet's display options from WINDOW2: right-to-left, gridlines, headings, zeros, formulas; XLSX text boxes and shapes keep their paragraphs' right-to-left direction on save; CSV/TSV/TXT can open with every field kept as text via `file.open {csvAsText}`; formulas over Excel's 8,192 characters, and `%` or call chains past the nesting limit, are parse errors instead of stack overflows when a file is opened; XLSX PivotTables read and write `rowGrandTotals`/`colGrandTotals` the way Excel does, so a table saved with only one grand total opens with the right one; HTML export keeps right-to-left) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Every format Excel opens or saves, with GridCraft's read and write support, fidelity and tests.
 Part of [target-app-parity.md](target-app-parity.md). **File formats: ~50% ready, 80–120 h**
@@ -10,6 +10,9 @@ Excel's list comes from Microsoft's public "File formats that are supported in E
 documentation (the Office bundle is off limits under this repo's clean-room rule). GridCraft's
 support comes from `crates/engine/src/io.rs` (`FileKind`), `crates/xlsx/src` and the tests in
 `crates/xlsx/src/tests/` (round-trip, fixtures, malformed input, CSV, ODS, XLSB, XLS, PivotTables).
+
+Legacy scalar `INDEX(range, MATCH(...))` formulas remain ordinary formulas on save, including when
+shared formulas are expanded during import (`array_export.rs`, #1505).
 
 ## Workbook formats
 
@@ -93,6 +96,7 @@ refresh. Counted under features (Get & Transform, ~10% ready), not here.
 | 2026-10-19 | minor | HTML (Save as Web Page and clipboard) marks right-to-left sheets and right-to-left cell text with `dir` |
 | 2026-10-14 | trivial | Formula parser: text longer than Excel's 8,192 characters, and postfix chains (`1%%%…`, `f(1)(1)…`) past the 256-level nesting limit, are parse errors (the cell keeps its formula text and cached value) instead of trees deep enough to overflow the stack when a hostile file is opened, saved or dropped |
 | 2026-10-15 | minor | XLSX text preserves CR and CRLF across save/reopen; shared strings use `_x000D_` and other XML text uses `&#13;` (#1488) |
+| 2026-10-15 | minor | XLSX save keeps legacy `INDEX`/`MATCH` formulas scalar instead of marking them as dynamic arrays (#1505) |
 | 2026-10-12 | trivial | XLSX chart sheets are kept on save (#727) |
 | 2026-10-12 | trivial | CSV and TSV export is capped at 512 MiB and refuses a larger used range with an error (#528) |
 | 2026-10-12 | minor | `.xls` import reads the calculation settings (CalcMode, CalcIter, CalcCount, CalcDelta, CalcPrecision), so circular models calculate instead of showing `#CIRC!` (#724) |
