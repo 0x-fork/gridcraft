@@ -1228,6 +1228,7 @@ impl SheetApp {
             && self.name_box.is_none()
             && !ctx.text_edit_focused()
             && self.grid.context_menu.is_none()
+            && self.grid.object_menu.is_none()
             && self.grid.header_menu.is_none()
             && self.grid.filter_menu.is_none()
             && self.grid.list_picker.is_none()

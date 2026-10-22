@@ -114,6 +114,8 @@ pub struct GridState {
     /// Column and row of the clicked header cell, and where to open the menu.
     pub filter_menu: Option<(u32, u32, Pos2)>,
     pub context_menu: Option<Pos2>,
+    /// The right-clicked chart, picture, shape or slicer: where to open its menu, its kind and id.
+    pub object_menu: Option<(Pos2, &'static str, u32)>,
     pub marching_phase: f32,
     /// The selection outline on its way to a new selection.
     pub glide: crate::selection_glide::SelectionGlide,
@@ -780,6 +782,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     list_picker(app, ui, &geo, previous_popups.1 == app.grid.list_picker);
     header_menu(app, ui, previous_popups.2 == app.grid.header_menu);
     context_menu(app, ui);
+    object_menu(app, ui);
     let track_x = if rtl { (available.left(), rect.left()) } else { (rect.right(), available.right()) };
     vertical_scrollbar(app, ui, sh, &geo, track_x, max_y, &t);
     if app.session.clipboard.is_some() {
@@ -1930,10 +1933,12 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
         }
         return;
     }
-    // Objects (charts, pictures, shapes, slicers) take clicks first.
-    if resp.drag_started() || primary_clicked {
+    // Objects (charts, pictures, shapes, slicers) take clicks first. Only the primary button moves
+    // them: a right-click that wobbles into a drag still opens the object's menu (#2067).
+    let primary_drag = resp.drag_started_by(egui::PointerButton::Primary);
+    if primary_drag || primary_clicked {
         // A drag is recognised only after the pointer has moved, so grab the object where the press began.
-        let at = if resp.drag_started() { pointer.press_origin().or(pos) } else { pos };
+        let at = if primary_drag { pointer.press_origin().or(pos) } else { pos };
         if let Some(p) = at
             && let Some((kind, id, rect)) = crate::chartview::hit(app, geo, sh, p)
         {
@@ -1948,7 +1953,7 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
             if kind == "chart" && resp.double_clicked() {
                 app.grid.pane = Some("formatChart".into());
             }
-            if resp.drag_started() {
+            if primary_drag {
                 let a = object_anchor(sh, kind, id);
                 let resize = (p - rect.right_bottom()).length() < OBJECT_RESIZE_RADIUS;
                 if let Some(a) = a {
@@ -1956,9 +1961,20 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                 }
             }
             return;
-        } else if primary_clicked || resp.drag_started() {
+        } else {
             app.selected_chart = None;
         }
+    }
+    // A right-click on a chart, picture, shape or slicer opens the object's menu, not the cell's
+    // under it; a right press that wobbles into a drag counts too (#2067).
+    let secondary_drag = resp.drag_started_by(egui::PointerButton::Secondary);
+    if (resp.secondary_clicked() || secondary_drag)
+        && let Some(p) = if secondary_drag { pointer.press_origin().map(|p| geo.mirror_pos(p)).or(pos) } else { pos }
+        && let Some((kind, id, _)) = crate::chartview::hit(app, geo, sh, p)
+    {
+        app.selected_chart = Some(id);
+        app.grid.object_menu = Some((geo.mirror_pos(p), kind, id));
+        return;
     }
 
     // A double-click is also a click: handle header AutoFit before resize setup returns.
@@ -2968,6 +2984,48 @@ fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
             && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| !resp.response.rect.contains(p)))
     {
         app.grid.context_menu = None;
+    }
+}
+
+/// The right-click menu of a chart, picture, shape or slicer.
+fn object_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
+    let Some((at, kind, id)) = app.grid.object_menu else { return };
+    let mut close = false;
+    let resp = egui::Area::new(egui::Id::new("object_context")).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
+        egui::Frame::popup(ui.style()).show(ui, |ui| {
+            ui.set_min_width(200.0);
+            let mut items = vec![("Delete", "object.delete")];
+            if kind == "chart" {
+                items.extend([("-", ""), ("Select Data…", "ui:selectData"), ("Format Chart Area…", "ui:formatChart")]);
+            }
+            let lang = crate::i18n::current(ui.ctx());
+            for (label, action) in items {
+                if label == "-" {
+                    ui.separator();
+                    continue;
+                }
+                if ui.add(egui::Button::new(lang.tr(label)).frame(false).min_size(vec2(190.0, 20.0))).clicked() {
+                    close = true;
+                    match action {
+                        "ui:selectData" => app.open_dialog("selectData", json!({"chart": id})),
+                        "ui:formatChart" => app.grid.pane = Some("formatChart".into()),
+                        _ => {
+                            app.run_or_alert("object.delete", json!({"kind": kind, "id": id}));
+                            app.selected_chart = None;
+                        }
+                    }
+                }
+            }
+        });
+    });
+    if close
+        || ui.input(|i| i.key_pressed(egui::Key::Escape))
+        || (ui.input(|i| i.pointer.any_pressed())
+            && !resp.response.contains_pointer()
+            && !resp.response.hovered()
+            && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| !resp.response.rect.contains(p)))
+    {
+        app.grid.object_menu = None;
     }
 }
 

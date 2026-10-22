@@ -61,6 +61,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Insert" => "Einfügen",
         "Insert Cells…" => "Zellen einfügen…",
         "Delete" => "Löschen",
+        "Select Data…" => "Daten auswählen…",
+        "Format Chart Area…" => "Diagrammbereich formatieren…",
         "Delete Cells…" => "Zellen löschen…",
         "Insert Sheet Rows" => "Blattzeilen einfügen",
         "Insert Sheet Columns" => "Blattspalten einfügen",
