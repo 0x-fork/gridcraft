@@ -533,11 +533,7 @@ pub fn auto_row_height(wb: &mut Workbook, si: usize, row: u32) {
             if st.align.wrap {
                 let text = crate::display::cell_text(wb, sh, CellRef::new(row, c));
                 let w = sh.col_width(c).max(1.0) - 6.0;
-                lines = text
-                    .lines()
-                    .map(|l| wrapped_line_count(l, w.max(1.0), size, st.font.bold))
-                    .sum::<f32>()
-                    .max(1.0);
+                lines = text.lines().map(|l| wrapped_line_count(l, w.max(1.0), size, st.font.bold)).sum::<f32>().max(1.0);
             }
         } else if st.font.size <= gridcraft_model::DEFAULT_FONT_SIZE {
             continue;
