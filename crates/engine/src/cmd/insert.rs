@@ -1396,6 +1396,49 @@ fn cf_style_json(st: &Json) -> Result<Json> {
     Ok(Json::Object(st))
 }
 
+/// #1999: a formula that doesn't parse must never reach the workbook — Excel refuses to open
+/// files carrying it, even in repair mode. Validated here so the API and the New Rule dialog
+/// (which dispatches this command) share one gate, the way Excel's object model refuses.
+fn check_cf_formula(cmd: &str, what: &str, formula: &str) -> Result<()> {
+    // Strip exactly one leading '=', the way the XLSX writer does: a value like '===A1'
+    // only parses after several strips and would still be saved unparseable. (#1999 review)
+    if gridcraft_formula::parse(formula.strip_prefix('=').unwrap_or(formula)).is_err() {
+        return Err(bad(cmd, format!("invalid {what} formula `{formula}` — it does not parse; Excel would reject the saved file")));
+    }
+    Ok(())
+}
+
+fn check_cf_value(what: &str, v: &gridcraft_model::features::CfValueKind) -> Result<()> {
+    if let gridcraft_model::features::CfValueKind::Formula(f) = v {
+        check_cf_formula("home.conditionalFormat", what, f)?;
+    }
+    Ok(())
+}
+
+fn check_cf_rule(rule: &CfRule) -> Result<()> {
+    const CMD: &str = "home.conditionalFormat";
+    match rule {
+        CfRule::CellIs { a, b, .. } => {
+            check_cf_formula(CMD, "comparison value", a)?;
+            if let Some(b) = b {
+                check_cf_formula(CMD, "second comparison value", b)?;
+            }
+        }
+        CfRule::Expression { formula, .. } => check_cf_formula(CMD, "rule", formula)?,
+        CfRule::DataBar { min, max, .. } => {
+            check_cf_value("data bar minimum", min)?;
+            check_cf_value("data bar maximum", max)?;
+        }
+        CfRule::ColorScale { stops } => {
+            for (kind, _) in stops {
+                check_cf_value("color scale threshold", kind)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn add_cf(s: &mut Session, p: &Json) -> Result<Json> {
     let ranges = target_ranges(s, p)?;
     let sheet = target_sheet(s, p)?;
@@ -1509,6 +1552,7 @@ fn add_cf(s: &mut Session, p: &Json) -> Result<Json> {
         },
         other => return Err(bad("home.conditionalFormat", format!("unknown rule type `{other}`"))),
     };
+    check_cf_rule(&rule)?;
     edit(s, |cx| {
         let sh = cx.sheet_mut(sheet)?;
         let priority = sh.cond_formats.iter().map(|c| c.priority).max().unwrap_or(0) + 1;
