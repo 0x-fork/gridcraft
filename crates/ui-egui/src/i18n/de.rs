@@ -10,8 +10,6 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Transpose" => "Transponieren",
         "Paste Link" => "Verknüpfung einfügen",
         "Paste Special…" => "Inhalte einfügen…",
-        "Cut" => "Ausschneiden",
-        "Copy" => "Kopieren",
         "Format Painter (double-click to keep it on)" => "Format übertragen (Doppelklick zum Beibehalten)",
         "Bold" => "Fett",
         "Italic" => "Kursiv",
