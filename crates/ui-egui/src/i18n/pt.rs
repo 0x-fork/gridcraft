@@ -427,6 +427,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Select a chart first." => "Selecione um gráfico primeiro.",
         "Text Box" => "Caixa de Texto",
         "Select Data" => "Selecionar Dados",
+        "Paste formulas that refer to the copied cells" => "Colar fórmulas que se referem às células copiadas",
         "Row Height" => "Altura da Linha",
         "Column Width" => "Largura da Coluna",
         "Standard Width" => "Largura Padrão",
