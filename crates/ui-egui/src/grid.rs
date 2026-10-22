@@ -3214,7 +3214,10 @@ fn list_picker(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_open: bool)
             ui.set_min_width(r.width().max(100.0));
             egui::ScrollArea::vertical().max_height(height).min_scrolled_height(height).show(ui, |ui| {
                 for it in &items {
-                    if ui.add(egui::Button::new(it.as_str()).frame_when_inactive(false).min_size(vec2(r.width().max(100.0), LIST_PICKER_ROW_H))).clicked() {
+                    if ui
+                        .add(egui::Button::new(it.as_str()).frame_when_inactive(false).min_size(vec2(r.width().max(100.0), LIST_PICKER_ROW_H)))
+                        .clicked()
+                    {
                         app.run_or_alert("cell.set", json!({"cell": c.a1(), "input": it}));
                         close = true;
                     }
