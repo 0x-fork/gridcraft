@@ -20,6 +20,7 @@ mod ko;
 mod pl;
 mod nl;
 mod pt;
+mod ro;
 mod ru;
 mod sr;
 mod vi;
@@ -48,11 +49,12 @@ pub enum Language {
     Uk,
     Vi,
     Nl,
+    Ro,
 }
 
 impl Language {
-    pub const ALL: [Self; 17] = [
-        Self::En, Self::Es, Self::El, Self::Zh, Self::Ja, Self::Ko, Self::Ru, Self::PtBr, Self::De, Self::Cs, Self::Fr, Self::Sr, Self::Pl, Self::It, Self::Uk, Self::Vi, Self::Nl,
+    pub const ALL: [Self; 18] = [
+        Self::En, Self::Es, Self::El, Self::Zh, Self::Ja, Self::Ko, Self::Ru, Self::PtBr, Self::De, Self::Cs, Self::Fr, Self::Sr, Self::Pl, Self::It, Self::Uk, Self::Vi, Self::Nl, Self::Ro,
     ];
 
     /// The language's own name, shown in the switcher.
@@ -75,6 +77,7 @@ impl Language {
             Self::Uk => "Українська",
             Self::Vi => "Tiếng Việt",
             Self::Nl => "Nederlands",
+            Self::Ro => "Română",
         }
     }
 
@@ -98,6 +101,7 @@ impl Language {
             Self::Uk => "uk",
             Self::Vi => "vi",
             Self::Nl => "nl",
+            Self::Ro => "ro",
         }
     }
 
@@ -124,6 +128,7 @@ impl Language {
             "uk" => Some(Self::Uk),
             "vi" => Some(Self::Vi),
             "nl" => Some(Self::Nl),
+            "ro" => Some(Self::Ro),
             _ => None,
         }
     }
@@ -168,6 +173,7 @@ impl Language {
             Self::Uk => uk::translate(text),
             Self::Vi => vi::translate(text),
             Self::Nl => nl::translate(text),
+            Self::Ro => ro::translate(text),
         };
         translated.unwrap_or_else(|| text.rsplit_once('|').map_or(text, |(_, label)| label))
     }
@@ -239,6 +245,7 @@ mod tests {
             assert!(uk::translate(english).is_some_and(|text| !text.is_empty()), "missing Ukrainian: {english}");
             assert!(vi::translate(english).is_some_and(|text| !text.is_empty()), "missing Vietnamese: {english}");
             assert!(nl::translate(english).is_some_and(|text| !text.is_empty()), "missing Dutch: {english}");
+            assert!(ro::translate(english).is_some_and(|text| !text.is_empty()), "missing Romanian: {english}");
         }
         assert_eq!(Language::Ja.tr("Data"), "データ");
         assert_eq!(Language::Zh.tr("Data"), "数据");
@@ -294,6 +301,10 @@ mod tests {
         assert_eq!(Language::Nl.tr("Sheet1!A1"), "Sheet1!A1");
         assert_eq!(Language::Nl.tr("Page Layout|Orientation"), "Paginastand");
         assert_eq!(Language::Nl.tr("Orientation"), "Richting");
+        assert_eq!(Language::Ro.tr("Data"), "Date");
+        assert_eq!(Language::Ro.tr("Sheet1!A1"), "Sheet1!A1");
+        assert_eq!(Language::Ro.tr("Page Layout|Orientation"), "Orientare");
+        assert_eq!(Language::Ro.tr("Orientation"), "Orientare text");
         assert_eq!(Language::parse("xx"), None);
     }
 
@@ -383,6 +394,9 @@ mod tests {
         assert_eq!(Language::Nl.tr("Options|General"), "Algemeen");
         assert_eq!(Language::Nl.tr("Options|Save"), "Opslaan");
         assert_eq!(Language::Nl.tr("Sheet Options|View"), "Weergeven");
+        assert_eq!(Language::Ro.tr("Options|General"), "General");
+        assert_eq!(Language::Ro.tr("Options|Save"), "Salvare");
+        assert_eq!(Language::Ro.tr("Sheet Options|View"), "Vizualizare");
     }
 
     #[test]
@@ -439,6 +453,9 @@ mod tests {
         assert_eq!(Language::from_tag("nl-NL"), Some(Language::Nl));
         assert_eq!(Language::from_tag("nl_BE"), Some(Language::Nl));
         assert_eq!(Language::parse("nl"), Some(Language::Nl));
+        assert_eq!(Language::from_tag("ro-RO"), Some(Language::Ro));
+        assert_eq!(Language::from_tag("ro_MD.UTF-8"), Some(Language::Ro));
+        assert_eq!(Language::parse("ro"), Some(Language::Ro));
     }
 
     #[test]
