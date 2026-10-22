@@ -457,9 +457,7 @@ fn same_content(a: Option<&gridcraft_model::Cell>, b: Option<&gridcraft_model::C
 /// Rows with a user-set height keep it.
 ///
 /// Line breaks in a cell's text count only when the cell wraps, as in Excel: with Wrap Text off
-/// a multi-line value shows on one line and AutoFit gives a one-line row. (Until 2026-10-15 a
-/// line break grew the row whether or not the cell wrapped, so a sheet whose notes column held
-/// pasted multi-line text had tall rows with nothing visibly tall in them.)
+/// a multi-line value shows on one line and AutoFit gives a one-line row.
 pub fn auto_row_height(wb: &mut Workbook, si: usize, row: u32) {
     let Some(sh) = wb.sheet(si) else { return };
     if sh.rows.get(&row).is_some_and(|i| i.custom) {

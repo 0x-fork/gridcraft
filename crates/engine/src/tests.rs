@@ -1122,9 +1122,7 @@ fn open_grows_default_height_rows_to_their_font() {
 #[test]
 fn line_breaks_grow_a_row_only_when_the_cell_wraps() {
     // Excel: a cell holding "a\nb" with Wrap Text off displays on one line and AutoFit gives a
-    // one-line row; with Wrap Text on it gets one line per break. Until 2026-10-15 the break grew
-    // the row either way, so a file whose notes column held pasted multi-line text (wrap off, as
-    // generating libraries write it) opened with tall rows and nothing visibly tall in them.
+    // one-line row; with Wrap Text on it gets one line per break.
     // Typing a break (Alt+Enter) turns wrap on, as in Excel, so the unwrapped case comes from a
     // file, built with the model API and exported without row heights.
     let text = "first line\n\n\nfourth line";
