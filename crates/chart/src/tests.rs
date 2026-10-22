@@ -1170,7 +1170,7 @@ fn a_huge_trendline_forecast_does_not_collapse_the_columns() {
     let col: Rgba = [10, 20, 30, 255];
     let mut s = series("Sales", &[1.0, 3.0, 2.0, 5.0, 4.0], col, ChartKind::ColumnClustered);
     s.trendlines = vec![TrendlineData { spec: Trendline { forward: 1e6, backward: 1e6, ..Trendline::default() }, color: tc }];
-    let d = ChartData { palette: vec![], categories: ["a", "b", "c", "d", "e"].map(String::from).to_vec(), series: vec![s] };
+    let d = ChartData { palette: vec![], category_levels: vec![], categories: ["a", "b", "c", "d", "e"].map(String::from).to_vec(), series: vec![s] };
     let mut c = chart(ChartKind::ColumnClustered);
     c.legend = LegendPos::None;
     let prims = render(&c, &d, 600.0, 400.0, &m);
