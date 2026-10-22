@@ -678,6 +678,8 @@ impl PdfDoc {
         let width = if width_pt.is_finite() { width_pt.clamp(3.0, 14_400.0) } else { 612.0 };
         let height = if height_pt.is_finite() { height_pt.clamp(3.0, 14_400.0) } else { 792.0 };
         self.pages.push(Page { width, height, content: String::new(), fonts: [false; FONT_SLOTS], images: Vec::new(), links: Vec::new(), depth: 0 });
+        let i = self.pages.len() - 1;
+        &mut self.pages[i]
     }
 
     pub fn page_count(&self) -> usize {
