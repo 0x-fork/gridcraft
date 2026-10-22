@@ -3445,3 +3445,34 @@ fn recording_keeps_its_steps_when_the_journal_is_trimmed() {
     let script = s.doc().unwrap().wb.names.iter().find(|n| n.name == "_sc_scripts").map(|n| n.formula.clone()).unwrap();
     assert!(script.contains("step0") && script.contains("step19") && !script.contains("selection.set"), "{script}");
 }
+
+#[test]
+fn html_export_draws_charts_as_inline_svg_with_their_text() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Month", "Sales"], ["Jan", 5], ["Feb", 7], ["Mar", 9]]})).unwrap();
+    s.execute("insert.chart", json!({"range": "A1:B4", "type": "column", "title": "Quarterly <Sales>", "at": "D2", "width": 300, "height": 200}))
+        .unwrap();
+    let html = crate::io::to_html(&s.doc().unwrap().wb, 0).unwrap();
+    assert!(html.contains("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"300\" height=\"200\""), "{html}");
+    assert!(html.contains(">Quarterly &lt;Sales&gt;</text>"), "the title is drawn as escaped text: {html}");
+    assert!(html.contains("position:absolute;left:"), "{html}");
+    assert!(html.contains("<rect "), "{html}");
+}
+
+#[test]
+fn html_export_draws_pie_wedges_as_svg_paths() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Region", "Share"], ["North", 60], ["South", 40]]})).unwrap();
+    s.execute("insert.chart", json!({"range": "A1:B3", "type": "pie", "title": "Share"})).unwrap();
+    let html = crate::io::to_html(&s.doc().unwrap().wb, 0).unwrap();
+    assert!(html.matches("<path d=\"M").count() >= 2, "one wedge per slice: {html}");
+    assert!(html.contains(">North</text>") && html.contains(">South</text>"), "the legend names the slices: {html}");
+}
+
+#[test]
+fn html_export_without_pictures_or_charts_has_no_fixed_geometry() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["a", "b"]]})).unwrap();
+    let html = crate::io::to_html(&s.doc().unwrap().wb, 0).unwrap();
+    assert!(!html.contains("<colgroup>") && !html.contains("table-layout") && !html.contains("<svg") && !html.contains("<img"), "{html}");
+}
