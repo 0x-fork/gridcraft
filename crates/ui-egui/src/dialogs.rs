@@ -1384,7 +1384,6 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
     }
 }
 
-/// Paste Special's legacy mnemonics select options; Enter still performs the paste.
 /// Paste Special as Excel lays it out: Paste and Operation each in two columns of options, Skip
 /// blanks and Transpose side by side, and Paste Link as a button that pastes at once. The options
 /// come from the dialog's `fields`, so the letter shortcuts and the control channel see the same.
@@ -1458,6 +1457,7 @@ fn paste_special(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm:
     });
 }
 
+/// Paste Special's legacy mnemonics select options; Enter still performs the paste.
 fn paste_special_shortcuts(d: &mut Dialog, ctx: &egui::Context) {
     if ctx.text_edit_focused() {
         return;
