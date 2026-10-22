@@ -1,6 +1,6 @@
 # Localization parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-19 · **Change:** minor (defined-name length limit counts characters, so long Arabic names are accepted; Table names are limited to 255 characters; right-to-left sheets in `.xls` files open right-to-left; text boxes and shapes keep right-to-left paragraph direction through XLSX save; Save as Web Page and copied HTML keep right-to-left; French and Serbian `context|label` translations no longer show the context) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-20 · **Change:** minor (the Japanese catalog covers the dialogs, messages and menus) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Per-language status against Excel, which ships its UI in dozens of languages (Windows language
 packs cover 100+), with localized function names, argument separators, number and date formats,
@@ -9,18 +9,19 @@ right-to-left sheets and full complex-script support. Part of
 
 ## Where we are (measured from source on `main`, after the 2026-10-10 merges)
 
-- **A first catalog exists, for the ribbon only.** `crates/ui-egui/src/i18n.rs` (merged 10-10 in
-  #31, #104, #82; German added 10-11) adds an interface-language preference that defaults to the
-  system language (closes #20) and a View-tab switcher, with English-keyed lookup tables:
-  Japanese 268 labels, Simplified Chinese, Korean, Russian, Brazilian Portuguese, German and Czech 266
-  each. The tables are used by
-  the ribbon, sheet tabs and widgets (`ribbon.rs`, `tabs.rs`, `widgets.rs`), the Format Cells
-  dialog, every dialog title and the shared OK/Cancel buttons; the other dialogs, menus,
-  context menus, task panes, status messages, command labels and function descriptions are still
-  English literals. Untranslated labels fall back to English.
+- **A first catalog exists.** `crates/ui-egui/src/i18n.rs` (merged 10-10 in #31, #104, #82; German
+  added 10-11) adds an interface-language preference that defaults to the system language (closes
+  #20) and a View-tab switcher, with English-keyed lookup tables: Simplified Chinese, Korean,
+  Russian, German and Czech 266–518 labels each, Brazilian Portuguese and Japanese 943 each. The
+  tables are used by the ribbon, sheet tabs and widgets (`ribbon.rs`, `tabs.rs`, `widgets.rs`), the
+  Format Cells dialog, every dialog title and the shared OK/Cancel buttons; Japanese and Portuguese
+  also cover the other dialog labels, message boxes, Backstage/File-view items, template names and
+  native menus (Japanese, 10-17: `i18n/ja.rs` keeps the shared 398-label core and adds 545 of those
+  strings). The remaining menus, context menus, task panes, status messages, command labels and
+  function descriptions are still English literals. Untranslated labels fall back to English.
 - **About 2,200 user-visible strings** in all (heuristic source scan: ~1,700 UI and command
-  strings plus ~500 function descriptions), so each shipped language covers **~12%** (measured
-  count / estimated total).
+  strings plus ~500 function descriptions), so the ribbon-only languages cover **~12%** and
+  Japanese and Portuguese **~43%** (measured count / estimated total).
 - **en-US only formulas and formats.** Function names, `,` argument separator, `.` decimal
   separator, en-US number and date formats (`crates/numfmt` says "en-US only"). Users ask for
   localized function names and `;` separators (#45). German with localized numbers and formulas
@@ -54,9 +55,9 @@ separators, number/date formats, machine translation with agent review, and scri
 | Hindi | hi | 0 (0%) | no | Devanagari: **no shaping** | no | none | 12–18 h |
 | Arabic | ar | 0 (0%) | no | **no shaping, no RTL UI**; Sheet Right-to-Left mirrors the grid (#146) | no | none | 25–35 h |
 | French | fr | 0 (0%) | no | Latin: yes | no | none | 6–10 h |
-| Portuguese | pt-BR | 923 (~42%) | dialogs and tooltips (dialogs take effect with #669) | Latin: yes | no | menus, File view, dialogs | 2–4 h |
+| Portuguese | pt-BR | 943 (~43%) | dialogs and tooltips (dialogs take effect with #669) | Latin: yes | no | menus, File view, dialogs | 2–4 h |
 | Indonesian | id | 0 (0%) | no | Latin: yes | no | none | 5–8 h |
-| Japanese | ja | 268 (~12%) | no | CJK system-font fallback; IME unverified; no furigana display | no | menus only | 8–12 h |
+| Japanese | ja | 943 (~43%) | dialogs and messages | CJK system-font fallback; IME unverified; no furigana display | no | menus, File view, dialogs, messages | 3–5 h |
 | German | de | 266 (~12%) | no | Latin: yes | no | menus only | 4–8 h |
 | Italian | it | 971 (~44%) | dialogs, tooltips, pivot pane | Latin: yes | no | menus, File view, dialogs, pivot pane | 3–5 h |
 | Korean | ko | 266 (~12%) | no | Hangul via the CJK fallback; IME unverified | no | menus only | 6–10 h |
@@ -84,6 +85,7 @@ language (none so far) and of localized function names.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-20 | minor | Japanese catalog (`i18n/ja.rs`) covers every key the Brazilian Portuguese catalog translates: the 398-label shared core moved verbatim plus 545 dialog, message, Backstage and menu strings — 943 keys, ~12% → ~43%. A test parses `pt.rs`'s source, so the two catalogs can't drift apart again. Portuguese re-measured at 943 (was 923) |
 | 2026-10-15 | minor | Italian catalog (`i18n/it.rs`, 971 entries, ~44%): every key the Brazilian Portuguese catalog translates plus the PivotTable Fields pane strings; `it` locale tags (it-IT, it-CH…) resolve to Italian. Labels follow Excel's Italian terminology; native-speaker review still pending |
 | 2026-10-19 | minor | Defined-name length counts characters, not bytes: Arabic names up to 255 letters are accepted, and Create from Selection keeps long Arabic headers |
 | 2026-10-19 | minor | Table names are limited to 255 Unicode characters |
