@@ -710,7 +710,11 @@ impl Dialog {
                 }],
                 json!({"kind": "blanks"}),
             ),
-            "sort" => Dialog::custom("sort", "Sort", json!({"header": true, "levels": [{"column": "A", "order": "asc"}]})),
+            "sort" => {
+                // Seed "Sort by" from the column the user is actually in (#1906).
+                let col = app.session.active().map(|d| gridcraft_engine::core::col_to_letters(d.selection.active.col)).unwrap_or_else(|| "A".into());
+                Dialog::custom("sort", "Sort", json!({"header": true, "levels": [{"column": col, "order": "asc"}]}))
+            }
             "nameManager" => Dialog::custom("nameManager", "Name Manager", json!({})),
             "manageRules" => Dialog::custom("manageRules", "Conditional Formatting Rules Manager", json!({})),
             "commandSearch" => Dialog::custom("commandSearch", "Search Commands", json!({})),
@@ -2038,12 +2042,43 @@ fn sort(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut boo
     ui.checkbox(&mut header, "My list has headers");
     d.values.insert("header".into(), json!(header));
     let mut levels: Vec<Json> = d.values.get("levels").and_then(Json::as_array).cloned().unwrap_or_default();
+    // Columns of the region around the active cell, labelled with their header (or first value).
+    let columns: Vec<(String, String)> = app
+        .session
+        .active()
+        .and_then(|d| {
+            let sh = d.wb.active()?;
+            let region = gridcraft_engine::selection::current_region(sh, d.selection.active);
+            Some(
+                (region.start.col..=region.end.col)
+                    .map(|c| {
+                        let letter = gridcraft_engine::core::col_to_letters(c);
+                        // The region starts at the header row when one is present, so the
+                        // label always comes from start.row: header text with headers on,
+                        // first data value with them off.
+                        let label_row = region.start.row;
+                        let text = gridcraft_engine::display::cell_text(&d.wb, sh, gridcraft_engine::core::CellRef::new(label_row, c));
+                        let text: String = text.chars().take(24).collect();
+                        (letter.clone(), if text.is_empty() { letter } else { format!("{letter}: {text}") })
+                    })
+                    .collect(),
+            )
+        })
+        .unwrap_or_default();
     let mut remove = None;
     for (i, lv) in levels.iter_mut().enumerate() {
         ui.horizontal(|ui| {
             ui.label(if i == 0 { "Sort by" } else { "Then by" });
             let mut col = lv["column"].as_str().unwrap_or("A").to_string();
-            ui.add(egui::TextEdit::singleline(&mut col).desired_width(50.0));
+            if columns.is_empty() {
+                ui.add(egui::TextEdit::singleline(&mut col).desired_width(50.0));
+            } else {
+                egui::ComboBox::from_id_salt(("sort_col", i)).selected_text(col.clone()).show_ui(ui, |ui| {
+                    for (letter, label) in &columns {
+                        ui.selectable_value(&mut col, letter.clone(), label.as_str());
+                    }
+                });
+            }
             lv["column"] = json!(col.to_ascii_uppercase());
             let mut by = lv["by"].as_str().unwrap_or("values").to_string();
             egui::ComboBox::from_id_salt(("by", i))
@@ -2073,7 +2108,15 @@ fn sort(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut boo
         levels.remove(i);
     }
     if ui.button("+ Add Level").clicked() {
-        levels.push(json!({"column": "B", "order": "asc"}));
+        let used: Vec<String> = levels.iter().filter_map(|l| l.get("column").and_then(Json::as_str).map(str::to_string)).collect();
+        let next = columns
+            .iter()
+            .map(|(l, _)| l)
+            .find(|l| !used.contains(l))
+            .cloned()
+            .or_else(|| columns.last().map(|(l, _)| l.clone()))
+            .unwrap_or_else(|| "B".into());
+        levels.push(json!({"column": next, "order": "asc"}));
     }
     d.values.insert("levels".into(), Json::Array(levels.clone()));
     let mut open = true;
