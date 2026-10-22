@@ -3344,3 +3344,10 @@ fn csv_as_text_keeps_identifier_columns_as_written() {
     let saved = s.execute("file.saveBytes", json!({"format": "csv"})).unwrap();
     assert_eq!(crate::io::base64_decode(saved["base64"].as_str().unwrap()).unwrap(), csv.replace('\n', "\r\n").as_bytes());
 }
+
+#[test]
+fn saving_csv_keeps_leading_empty_columns_and_rows() {
+    let wb = gridcraft_xlsx::read_csv(b",x\r\n\r\n,,y\r\n", &gridcraft_xlsx::CsvOptions::default()).unwrap();
+    let out = crate::io::save_bytes(&wb, "a.csv").unwrap();
+    assert_eq!(String::from_utf8(out).unwrap(), ",x,\r\n,,\r\n,,y\r\n");
+}
