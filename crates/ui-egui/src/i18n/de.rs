@@ -63,6 +63,8 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Delete" => "Löschen",
         "Select Data…" => "Daten auswählen…",
         "Format Chart Area…" => "Diagrammbereich formatieren…",
+        "Number Stored as Text" => "Als Text gespeicherte Zahl",
+        "Convert to Number" => "In eine Zahl umwandeln",
         "Delete Cells…" => "Zellen löschen…",
         "Insert Sheet Rows" => "Blattzeilen einfügen",
         "Insert Sheet Columns" => "Blattspalten einfügen",
