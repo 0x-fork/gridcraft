@@ -60,13 +60,13 @@ const MAX_LAMBDA_CALLS: usize = 140;
 
 /// Native stack, in bytes, that one formula's evaluation may use below its first `eval`. Past it,
 /// `eval` answers `#NUM!`. It guards the stack and leaves 128 KiB of a 1 MiB thread for the frames
-/// above the formula. A cell that another cell's formula computes on demand gets its own `Evaluator`,
-/// which starts its own budget.
+/// above the formula. A cell that another cell's formula computes on demand shares the budget of the
+/// outermost formula ([`Host::stack_top`]).
 const STACK_BUDGET: usize = 896 * 1024;
 
 /// The address of a local variable, which shows how far down the native stack this call is.
 #[inline(always)]
-fn stack_position() -> usize {
+pub(crate) fn stack_position() -> usize {
     let marker = 0u8;
     std::hint::black_box(&marker) as *const u8 as usize
 }
@@ -98,6 +98,13 @@ pub trait Host {
     fn visit_range(&mut self, _sheet: usize, _range: RangeRef, _f: &mut dyn FnMut(&Value) -> bool) -> bool {
         false
     }
+    /// While a formula is calculated on demand inside another one: `stack_position()` where the
+    /// outermost one started, which the stack budget is counted from.
+    fn stack_top(&self) -> Option<usize> {
+        None
+    }
+    /// Called when a formula's evaluation runs past the stack budget.
+    fn stack_exhausted(&mut self) {}
 }
 
 pub struct Evaluator<'h> {
@@ -265,8 +272,10 @@ impl<'h> Evaluator<'h> {
     pub fn eval(&mut self, e: &Expr) -> Ev {
         let here = stack_position();
         if self.depth == 0 {
-            self.stack_top = here;
-        } else if self.stack_top.abs_diff(here) > STACK_BUDGET {
+            self.stack_top = self.host.stack_top().unwrap_or(here);
+        }
+        if self.stack_top.abs_diff(here) > STACK_BUDGET {
+            self.host.stack_exhausted();
             return err(CellError::Num);
         }
         self.depth += 1;

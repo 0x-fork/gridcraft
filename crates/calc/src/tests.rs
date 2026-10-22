@@ -835,6 +835,40 @@ fn a_recursive_lambda_stops_at_the_same_call_on_any_stack_size() {
 }
 
 #[test]
+fn a_recursive_lambda_that_reads_another_cells_recursive_lambda_shares_the_stack() {
+    let run = |stack: usize| {
+        std::thread::Builder::new()
+            .stack_size(stack)
+            .spawn(|| {
+                // Row-major order calculates A1 first, so each cell below is calculated on demand
+                // at the deepest call of the one above it.
+                let countdown = |then: &str| format!("=LET(F,LAMBDA(me,n,IF(n<=0,{then},1+me(me,n-1))),F(F,131))");
+                let mut wb = Workbook::new();
+                let sheet = wb.sheet_mut(0).expect("sheet");
+                for (at, f) in [
+                    ("A1", countdown("A2")),
+                    ("A2", countdown("A3")),
+                    ("A3", countdown("0")),
+                    ("B1", countdown("B2")),
+                    ("B2", "=LET(f,LAMBDA(g,x,g(g,x)),f(f,1))".to_string()),
+                ] {
+                    sheet.cells.set(c(at), Cell::formula(Formula::new(&f)));
+                }
+                let mut calc = Calc::new();
+                calc.recalc_all(&mut wb);
+                ["A1", "A2", "A3", "B1", "B2"].map(|at| wb.sheet(0).map(|s| s.value(c(at))).unwrap_or_default())
+            })
+            .expect("spawn")
+            .join()
+            .expect("recursion must not overflow the stack")
+    };
+    let small = run(1 << 20);
+    let num = Value::Error(CellError::Num);
+    assert_eq!(small, [Value::Number(393.0), Value::Number(262.0), Value::Number(131.0), num.clone(), num]);
+    assert_eq!(run(64 << 20), small);
+}
+
+#[test]
 fn names_and_sheets() {
     let mut t = T::new();
     t.wb.names.push(gridcraft_model::DefinedName { name: "Rate".into(), scope: None, formula: "0.5".into(), comment: String::new(), hidden: false });
