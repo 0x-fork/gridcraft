@@ -64,8 +64,10 @@ pub const INDEXED: [u32; 64] = [
     0x003366, 0x339966, 0x003300, 0x333300, 0x993300, 0x993366, 0x333399, 0x333333, // 56-63
 ];
 
-/// Paper sizes (`pageSetup paperSize`) we name.
-const PAPERS: [(u32, &str); 14] = [
+/// Paper sizes (`pageSetup paperSize`) we name. ID 12/13 are the JIS B4/B5 that
+/// `pageLayout.pageSetup` calls `B4`/`B5`; 42 is ISO B4, and 43–88 are the Japanese postcards,
+/// envelopes and B6. The engine's `known_paper` uses the same names and sizes.
+const PAPERS: [(u32, &str); 23] = [
     (1, "Letter"),
     (3, "Tabloid"),
     (4, "Ledger"),
@@ -80,14 +82,40 @@ const PAPERS: [(u32, &str); 14] = [
     (20, "Envelope #10"),
     (27, "Envelope DL"),
     (34, "Envelope B5"),
+    (42, "B4 (ISO)"),
+    (43, "Japanese Postcard"),
+    (69, "Japanese Double Postcard"),
+    (70, "A6"),
+    (71, "Japanese Envelope Kaku #2"),
+    (72, "Japanese Envelope Kaku #3"),
+    (73, "Japanese Envelope #3"),
+    (74, "Japanese Envelope #4"),
+    (88, "B6"),
 ];
 
 pub fn paper_name(id: u32) -> Option<&'static str> {
     PAPERS.iter().find(|(i, _)| *i == id).map(|(_, n)| *n)
 }
 
+/// The file ID for a paper name. Spelling is loose like `known_paper`'s — spaces, hyphens,
+/// underscores and parentheses don't matter, and the JIS/ISO and Japanese-envelope spellings the
+/// page-setup commands take are folded onto the name in [`PAPERS`].
 pub fn paper_id(name: &str) -> Option<u32> {
-    PAPERS.iter().find(|(_, n)| n.eq_ignore_ascii_case(name.trim())).map(|(i, _)| *i)
+    let norm = |s: &str| s.trim().to_ascii_lowercase().replace([' ', '-', '_', '(', ')'], "");
+    let normalized = norm(name);
+    let alias = match normalized.as_str() {
+        "b4jis" => "b4",
+        "b5jis" => "b5",
+        "b6jis" => "b6",
+        "postcard" => "japanesepostcard",
+        "doublepostcard" => "japanesedoublepostcard",
+        "chou#3" => "japaneseenvelope#3",
+        "chou#4" => "japaneseenvelope#4",
+        "kaku#2" => "japaneseenvelopekaku#2",
+        "kaku#3" => "japaneseenvelopekaku#3",
+        other => other,
+    };
+    PAPERS.iter().find(|(_, n)| norm(n) == alias).map(|(i, _)| *i)
 }
 
 /// Functions introduced after Excel 2007 that files store with the `_xlfn.` prefix. Entries with
@@ -339,5 +367,26 @@ mod tests {
         assert_eq!(builtin_id(builtin_format(5).unwrap()), None);
         assert_eq!(paper_name(9), Some("A4"));
         assert_eq!(paper_id("a4"), Some(9));
+        // 12/13 are the JIS B4/B5 Japanese Excel uses; 42 is ISO B4.
+        assert_eq!(paper_name(12), Some("B4"));
+        assert_eq!(paper_id("b5"), Some(13));
+        assert_eq!(paper_id("B5 (JIS)"), Some(13));
+        assert_eq!(paper_id("B4 (ISO)"), Some(42));
+        // The Japanese papers page setup names.
+        assert_eq!(paper_name(43), Some("Japanese Postcard"));
+        assert_eq!(paper_name(88), Some("B6"));
+        for (name, id) in [
+            ("Japanese Postcard", 43),
+            ("japanese double postcard", 69),
+            ("A6", 70),
+            ("Japanese Envelope Kaku #2", 71),
+            ("kaku #3", 72),
+            ("Japanese Envelope #3", 73),
+            ("chou #4", 74),
+            ("B6 (JIS)", 88),
+        ] {
+            assert_eq!(paper_id(name), Some(id), "{name}");
+        }
+        assert_eq!(paper_id("Napkin"), None);
     }
 }

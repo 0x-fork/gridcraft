@@ -2,7 +2,8 @@
 
 **Stage: alpha** · next: beta, ~25 points of "ready for real work" and ~160–240 h away
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-19 · **Change:** minor (long flat operator chains up to Excel's formula limit) · **Target:** Microsoft Excel (Microsoft 365)
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-21 · **Change:** minor (Page Setup paper sizes: JIS B4/B5/B6, the Japanese postcards and envelopes, and A6; long flat operator chains up to Excel's formula limit) · **Target:** Microsoft Excel (Microsoft 365)
+>>>>>>> upr/2131
 
 GridCraft aims at full Microsoft Excel parity, and at being better in places: faster, open (XLSX
 is the native format), fully scriptable by agents (MCP, control channel, CLI), and on the web.
@@ -132,6 +133,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | What landed |
 |---|---|
+| 2026-10-21 | Page Setup paper sizes match Japanese Excel: `B4`/`B5`/`B6` are the JIS sizes (ISO B4/B5/B6 stay reachable by name), so a Japanese B5 worksheet prints at 182×257 mm; Japanese Postcard (100×148 mm), Double Postcard (148×200 mm), Envelope #3/#4 (120×235/90×205 mm), Kaku #2/#3 (240×332/216×277 mm) and A6 are added, both sizes reach the PDF page (`file.exportPdf`/`file.print` MediaBox) and the size survives an XLSX round-trip; the Page Layout Size menu lists them. `B4`/`B5` used to be the ISO sizes, which is changed here |
 | 2026-10-19 | Long flat operator chains (`=A1+A2+…`) up to Excel's 8,192-character limit (4,096 operands): entering, filling, inserting rows, undo, Evaluate Formula and XLSX save no longer overflow the stack; chains past 64 operands are saved as plain formulas, not dynamic arrays; Spanish formula entry accepts chains past 256 operands (#916) |
 | 2026-10-12 | Rows auto-fit oversized fonts: opening a file and whole-row/column formatting grow non-custom rows to their tallest font (#833) |
 | 2026-10-12 | Number formats: parsing a format code is linear in its length (long runs of `[`, `,` or `/` no longer take quadratic time), and an unclosed `[` is a literal when splitting sections as well as when tokenizing (#810) |
@@ -194,6 +196,7 @@ Ranked; estimates in Opus 5.5 agent-hours. Detail and the full beta-gate list in
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Page Setup paper sizes: JIS B4/B5/B6 (ISO by name), Japanese postcards and envelopes, A6; PDF page size follows, XLSX round-trips |
 | 2026-10-19 | minor | Progress log: long flat operator chains (#916) |
 | 2026-10-12 | minor | Rows auto-fit oversized fonts on open and whole-row/column formatting (#833); progress log row |
 | 2026-10-12 | minor | Progress log: multi-area row/column delete (#758) |

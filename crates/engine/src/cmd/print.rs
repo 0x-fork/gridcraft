@@ -50,7 +50,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Page Setup…",
             ["Page Layout", "Page Setup"],
             None,
-            "{sheet?, orientation?: portrait|landscape, paper?: Letter|Legal|A4|A3|A5|Tabloid|Executive|Ledger|B5, margins?: {left,right,top,bottom,header,footer} (inches; also accepted as top-level keys), scale?: 10..400, fitWidth?, fitHeight? (pages; 0 = automatic), fitToPage?: bool, centerH?, centerV?, gridlines?, headings?, header?: \"&L&A&RPage &P of &N\", footer?, printArea?: \"A1:F50\" (\"\" clears), titleRows?: \"1:2\", titleCols?: \"A:A\", rowBreaks?: [46, 91], colBreaks?: [\"K\"]} → the sheet's print settings",
+            "{sheet?, orientation?: portrait|landscape, paper?: Letter|Legal|A4|A3|A5|A6|Tabloid|Executive|Ledger|B4|B5|B6|B4 (ISO)|B5 (ISO)|B6 (ISO)|Japanese Postcard|Japanese Double Postcard|Japanese Envelope #3|Japanese Envelope #4|Japanese Envelope Kaku #2|Japanese Envelope Kaku #3 (B4/B5/B6 are the JIS sizes), margins?: {left,right,top,bottom,header,footer} (inches; also accepted as top-level keys), scale?: 10..400, fitWidth?, fitHeight? (pages; 0 = automatic), fitToPage?: bool, centerH?, centerV?, gridlines?, headings?, header?: \"&L&A&RPage &P of &N\", footer?, printArea?: \"A1:F50\" (\"\" clears), titleRows?: \"1:2\", titleCols?: \"A:A\", rowBreaks?: [46, 91], colBreaks?: [\"K\"]} → the sheet's print settings",
             has_doc,
             page_setup
         ),
@@ -71,19 +71,36 @@ pub fn paper_size(name: &str) -> (f32, f32) {
     known_paper(name).unwrap_or((612.0, 792.0))
 }
 
+/// Paper sizes in points, portrait. `B4`/`B5`/`B6` are the **JIS** sizes Japanese Excel and its
+/// e-mail attachments use (257×364, 182×257 and 128×182 mm); the ISO B series stays reachable as
+/// `B4 (ISO)`/`B5 (ISO)`/`B6 (ISO)`. The Japanese postcards and envelopes are the JIS ones too.
 fn known_paper(name: &str) -> Option<(f32, f32)> {
-    let n = name.trim().to_ascii_lowercase().replace([' ', '-', '_'], "");
+    // Spaces, hyphens, underscores and parentheses don't matter: `B5 (JIS)`, `b5-jis` and `b5`
+    // are one name.
+    let n = name.trim().to_ascii_lowercase().replace([' ', '-', '_', '(', ')'], "");
     Some(match n.as_str() {
         "letter" | "usletter" => (612.0, 792.0),
         "legal" | "uslegal" => (612.0, 1008.0),
         "a4" => (595.28, 841.89),
         "a3" => (841.89, 1190.55),
         "a5" => (419.53, 595.28),
+        "a6" => (297.64, 419.53),
         "tabloid" | "11x17" => (792.0, 1224.0),
         "ledger" => (1224.0, 792.0),
         "executive" => (522.0, 756.0),
-        "b5" => (498.9, 708.66),
-        "b4" => (708.66, 1000.63),
+        "b4" | "b4jis" => (728.50, 1031.81),
+        "b5" | "b5jis" => (515.91, 728.50),
+        "b6" | "b6jis" => (362.83, 515.91),
+        "b4iso" => (708.66, 1000.63),
+        "b5iso" => (498.90, 708.66),
+        "b6iso" => (354.33, 498.90),
+        "japanesepostcard" | "postcard" => (283.46, 419.53),
+        "japanesedoublepostcard" | "doublepostcard" => (419.53, 566.93),
+        "japaneseenvelope#3" | "chou#3" => (340.16, 666.14),
+        // 長形4号 is 90×205 mm; 90×225 mm is 長形40号, a different envelope, so it stays out.
+        "japaneseenvelope#4" | "chou#4" => (255.12, 581.10),
+        "japaneseenvelopekaku#2" | "kaku#2" => (680.31, 941.10),
+        "japaneseenvelopekaku#3" | "kaku#3" => (612.28, 785.20),
         _ => return None,
     })
 }
@@ -2059,6 +2076,81 @@ mod tests {
         // Undoable as one step.
         s.execute("edit.undo", json!({})).unwrap();
         assert!(s.doc().unwrap().wb.active().unwrap().print.print_area.is_some());
+    }
+
+    /// The Japanese paper sizes are the JIS ones: `B4`/`B5`/`B6` changed meaning from ISO, and the
+    /// ISO B series stays reachable by name. The postcards and envelopes are the JIS sizes too.
+    #[test]
+    fn japanese_paper_sizes_are_jis() {
+        for (name, w, h) in [
+            ("A4", 595.28, 841.89), // unchanged
+            ("B4", 728.50, 1031.81),
+            ("B5", 515.91, 728.50),
+            ("B6", 362.83, 515.91),
+            ("B4 (JIS)", 728.50, 1031.81),
+            ("b5-jis", 515.91, 728.50),
+            ("B4 (ISO)", 708.66, 1000.63),
+            ("B5 (ISO)", 498.90, 708.66),
+            ("B6 (ISO)", 354.33, 498.90),
+            ("A6", 297.64, 419.53),
+            ("Japanese Postcard", 283.46, 419.53),
+            ("japanese double postcard", 419.53, 566.93),
+            ("Japanese Envelope #3", 340.16, 666.14),
+            ("chou #4", 255.12, 581.10),
+            ("Japanese Envelope Kaku #2", 680.31, 941.10),
+            ("kaku #3", 612.28, 785.20),
+        ] {
+            let got = paper_size(name);
+            assert!((got.0 - w).abs() < 0.01 && (got.1 - h).abs() < 0.01, "{name}: {got:?}");
+        }
+        // 長形4号 is 90×205 mm (90×225 mm is 長形40号), so its height is 205 mm = 581.10 pt — not the
+        // 225 mm it once had.
+        let chou4 = paper_size("Japanese Envelope #4");
+        assert_eq!((chou4.0, chou4.1), (255.12, 581.10));
+        assert_eq!(chou4, paper_size("chou #4"));
+        // Unknown names keep the old Letter fallback.
+        assert_eq!(paper_size("Napkin"), (612.0, 792.0));
+    }
+
+    /// Page Setup's paper reaches the PDF page: the MediaBox is the paper's, A4 is unchanged, B5 is
+    /// JIS B5, and the Japanese postcard prints at 283.46×419.53 pt. Landscape swaps the sides and
+    /// fit-to-page keeps the paper size.
+    #[test]
+    fn page_setup_paper_sizes_reach_the_pdf_page() {
+        let mut s = s();
+        s.execute("range.setValues", json!({"range": "A1", "values": [["x"]]})).unwrap();
+        let close = |v: &Json, want: f64| (v.as_f64().unwrap() - want).abs() < 0.01;
+        for (paper, w, h) in [
+            ("A4", 595.28f64, 841.89f64),
+            ("B5", 515.91, 728.50),
+            ("Japanese Postcard", 283.46, 419.53),
+            ("Japanese Double Postcard", 419.53, 566.93),
+            ("Japanese Envelope Kaku #2", 680.31, 941.10),
+        ] {
+            s.execute("pageLayout.pageSetup", json!({"paper": paper, "orientation": "portrait"})).unwrap();
+            let pv = s.execute("file.printPreview", json!({})).unwrap();
+            let page = &pv["pageList"][0];
+            assert_eq!(page["paper"], paper);
+            assert!(close(&page["width"], w) && close(&page["height"], h), "{paper}: {page}");
+            let (pdf, pages) = pdf_of(&mut s, json!({}));
+            assert_eq!(pages, 1);
+            let want = format!("/MediaBox [0 0 {w} {h}]");
+            assert!(contains(&pdf, &want), "{paper}: wanted {want}");
+        }
+        // Landscape swaps the sides, and fit-to-page does not change the paper.
+        s.execute("pageLayout.pageSetup", json!({"paper": "B5", "orientation": "landscape"})).unwrap();
+        let (pdf, pages) = pdf_of(&mut s, json!({}));
+        assert_eq!(pages, 1);
+        assert!(contains(&pdf, "/MediaBox [0 0 728.5 515.91]"));
+        s.execute("pageLayout.pageSetup", json!({"paper": "B5", "orientation": "portrait"})).unwrap();
+        let (pdf, _) = pdf_of(&mut s, json!({"fitToPage": true}));
+        assert!(contains(&pdf, "/MediaBox [0 0 515.91 728.5]"));
+        // `pageLayout.size` still takes any name, and an unknown one prints on Letter as before.
+        s.execute("pageLayout.size", json!({"paper": "Napkin"})).unwrap();
+        let pv = s.execute("file.printPreview", json!({})).unwrap();
+        assert!(close(&pv["pageList"][0]["width"], 612.0) && close(&pv["pageList"][0]["height"], 792.0));
+        // Page Setup refuses an unknown name.
+        assert!(s.execute("pageLayout.pageSetup", json!({"paper": "Napkin"})).is_err());
     }
 
     #[test]
