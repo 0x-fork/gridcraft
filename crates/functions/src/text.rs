@@ -769,7 +769,21 @@ fn regexreplace(a: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
     let occ = opt_int(a, 3, 0)?;
     let re = build_regex(&text(a, 1)?, case_arg(a, 4)?)?;
     if occ == 0 {
-        return check_len(re.replace_all(&s, rep.as_str()).into_owned());
+        // Match by match, giving up once the text can only be too long (a character is at most
+        // four bytes) rather than building every replacement first (#2162).
+        let mut out = String::new();
+        let mut last = 0;
+        for cap in re.captures_iter(&s) {
+            let Some(m) = cap.get(0) else { continue };
+            out.push_str(s.get(last..m.start()).unwrap_or_default());
+            cap.expand(&rep, &mut out);
+            last = m.end();
+            if out.len() > MAX_TEXT * 4 {
+                return Err(CellError::Value);
+            }
+        }
+        out.push_str(s.get(last..).unwrap_or_default());
+        return check_len(out);
     }
     let caps: Vec<regex::Captures> = re.captures_iter(&s).collect();
     let k = occ.unsigned_abs() as usize;
