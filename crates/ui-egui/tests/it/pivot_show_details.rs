@@ -74,3 +74,17 @@ fn double_click_on_a_row_label_still_edits() {
     assert!(app.editor.is_some());
     assert_eq!(app.session.active().unwrap().wb.sheets.len(), 1);
 }
+
+#[test]
+fn double_click_on_a_value_cell_of_a_protected_workbook_says_why_and_does_not_edit() {
+    let mut h = harness();
+    h.state_mut().session.execute("review.protectWorkbook", json!({"on": true})).unwrap();
+    h.run_steps(2);
+    let pos = center(&h, "E4");
+    double_click(&mut h, pos);
+
+    let app = h.state();
+    assert!(app.editor.is_none(), "the value cell must not open for editing");
+    assert!(app.message.as_ref().is_some_and(|(_, m)| m.contains("protected")), "{:?}", app.message);
+    assert_eq!(app.session.active().unwrap().wb.sheets.len(), 1);
+}

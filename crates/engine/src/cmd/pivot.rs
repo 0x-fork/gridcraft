@@ -753,10 +753,10 @@ fn show_details(s: &mut Session, p: &Json) -> Result<Json> {
         .pivots
         .iter()
         .find(|pt| pt.last_range.is_some_and(|r| r.contains(at)))
-        .ok_or_else(|| EngineError::Disabled("pivot.showDetails".into(), "select a value cell in a PivotTable".into()))?;
+        .ok_or_else(|| EngineError::Disabled("pivot.showDetails".into(), pv::NOT_A_VALUE_CELL.into()))?;
     let origin = pt.last_range.map(|r| r.start).unwrap_or_default();
     let found = pv::detail_records(&d.wb, pt, active, at.row.saturating_sub(origin.row), at.col.saturating_sub(origin.col)).map_err(other)?;
-    let (src, records) = found.ok_or_else(|| EngineError::Disabled("pivot.showDetails".into(), "select a value cell in a PivotTable".into()))?;
+    let (src, records) = found.ok_or_else(|| EngineError::Disabled("pivot.showDetails".into(), pv::NOT_A_VALUE_CELL.into()))?;
     if d.wb.protected_structure {
         return Err(other("The workbook is protected and cannot be changed."));
     }
@@ -2539,6 +2539,22 @@ mod tests {
         let rows = sheet_rows(&mut s);
         assert_eq!(rows.len(), 3);
         assert!(rows.iter().skip(1).all(|row| row[0] == "East" && row[1] == "Apples"), "{rows:?}");
+    }
+
+    #[test]
+    fn show_details_refuses_a_report_its_source_has_moved_on_from() {
+        let mut s = sales();
+        s.execute("insert.pivotTable", json!({"rows": ["Region"], "columns": ["Product"], "values": ["Sales"]})).unwrap();
+        // B5 still shows East × Apples (160), but the first East record is now Central's.
+        s.execute("range.setValues", json!({"range": "Sheet1!A2", "values": [["Central"]]})).unwrap();
+        assert_eq!(val(&s, "B5"), Value::Number(160.0));
+        let e = s.execute("pivot.showDetails", json!({"cell": "B5"})).unwrap_err().to_string();
+        assert!(e.contains("out of date"), "{e}");
+        assert_eq!(s.doc().unwrap().wb.sheets.len(), 2);
+        // After a refresh East × Apples (now B6) has the one record left.
+        s.execute("pivot.refresh", json!({})).unwrap();
+        assert_eq!(text(&s, "A6"), "East");
+        assert_eq!(s.execute("pivot.showDetails", json!({"cell": "B6"})).unwrap()["records"], 1);
     }
 
     #[test]
