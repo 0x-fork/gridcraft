@@ -75,9 +75,7 @@ fn leaving_the_table_while_on_table_design_returns_to_home() {
 
 #[test]
 fn startup_opens_on_home_not_the_saved_tab() {
-    let mut saved = gridcraft_ui_egui::UiState::default();
-    saved.ribbon_tab = "Table Design".into();
-    saved.dark = true;
+    let saved = gridcraft_ui_egui::UiState { ribbon_tab: "Table Design".into(), dark: true, ..Default::default() };
     let json = serde_json::to_string(&saved).unwrap();
     assert!(json.contains(r#""ribbonTab":"Table Design""#), "{json}");
     let restored = serde_json::from_str::<gridcraft_ui_egui::UiState>(&json).unwrap().at_startup();
