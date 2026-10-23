@@ -2399,9 +2399,10 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                 d.selection.anchor = sel.anchor;
             }
         } else if mods.command {
-            // Ctrl+click on a hyperlink's text follows it instead of adding the cell to the selection.
+            // Ctrl+click (without Alt) on a hyperlink's text follows it instead of adding the cell to the selection.
             if let Some(h) = sh.hyperlinks.get(&c).cloned()
                 && primary_clicked
+                && !mods.alt
                 && p.x < geo.cell_rect(sh, c).left() + geo.cell_rect(sh, c).width() * 0.8
             {
                 follow_link(app, &h.target);
@@ -3410,7 +3411,8 @@ fn fill_options_tag(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet
     let size = vec2(18.0, 18.0);
     let corner = geo.range_rect(sh, tag.target).right_bottom();
     let button = geo.mirror_rect(Rect::from_min_size(corner + vec2(2.0, 2.0), size));
-    if !geo.cells.contains_rect(button) {
+    // `button` is in screen space, so compare it with the mirrored cells area.
+    if !geo.mirror_rect(geo.cells).contains_rect(button) {
         return;
     }
     let lang = crate::i18n::current(ui.ctx());
