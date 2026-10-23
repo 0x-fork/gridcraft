@@ -3089,6 +3089,19 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
     }
 }
 
+/// Room the in-cell editor keeps right of its text. It is sized from the text of the last frame, so
+/// the next typed character must still fit: a fixed 14 px was less than one glyph at high zoom,
+/// and the field scrolled and snapped back on every key (#2336). `size` is the font size in px.
+fn editor_slack(size: f32) -> f32 {
+    14.0 + size
+}
+
+/// Width of the one-line in-cell editor. While the text fits the cell (with the usual 14 px margin) the
+/// editor is exactly the cell wide, as in Excel; once it overflows, the extra `editor_slack` applies.
+fn editor_width(text_w: f32, cell_w: f32, size: f32) -> f32 {
+    if text_w + 14.0 <= cell_w { cell_w } else { text_w + editor_slack(size) }
+}
+
 fn in_cell_editor(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet, wb: &Workbook) {
     let Some(ed) = app.editor.as_ref() else { return };
     if ed.sheet != wb.active_sheet {
@@ -3115,7 +3128,7 @@ fn in_cell_editor(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet, 
         let text_w = ui.painter().layout_no_wrap(ed.text.clone(), font.clone(), Color32::BLACK).size().x;
         // Excel keeps the cell's height for one line and only grows for extra lines.
         let h = if lines > 1.0 { (size * 1.3 * lines + 4.0).max(rect.height()) } else { rect.height() };
-        ((text_w + 14.0).max(rect.width()).min(geo.cells.right() - rect.left()), h)
+        (editor_width(text_w, rect.width(), size).min(geo.cells.right() - rect.left()), h)
     };
     // Grows to the left on a right-to-left sheet.
     let erect = geo.mirror_rect(Rect::from_min_size(rect.min, vec2(w, h)));
@@ -4003,6 +4016,23 @@ pub(crate) fn heading_font_size(zoom: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn editor_matches_the_cell_while_the_text_fits() {
+        use super::editor_width;
+        assert_eq!(editor_width(10.0, 80.0, 7.0), 80.0);
+        assert_eq!(editor_width(66.0, 80.0, 7.0), 80.0);
+        assert_eq!(editor_width(67.0, 80.0, 7.0), 88.0);
+    }
+
+    #[test]
+    fn editor_slack_fits_one_more_glyph_at_high_zoom() {
+        use super::editor_slack;
+        // A glyph is at most about one em wide; at 400% an em is ~60 px, far over the old fixed 14 px.
+        for size in [14.7_f32, 25.0, 60.0] {
+            assert!(editor_slack(size) - 4.0 >= size, "slack {} too small for a {size} px glyph", editor_slack(size));
+        }
+    }
 
     #[test]
     fn explicit_left_and_right_keep_their_side_on_a_right_to_left_sheet() {
