@@ -2367,7 +2367,15 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
                 d.selection.anchor = sel.anchor;
             }
         } else if mods.command {
-            select_ranges(app, RangeRef::cell(c), true, c);
+            // Ctrl+click on a hyperlink's text follows it instead of adding the cell to the selection.
+            if let Some(h) = sh.hyperlinks.get(&c).cloned()
+                && primary_clicked
+                && p.x < geo.cell_rect(sh, c).left() + geo.cell_rect(sh, c).width() * 0.8
+            {
+                follow_link(app, &h.target);
+            } else {
+                select_ranges(app, RangeRef::cell(c), true, c);
+            }
         } else {
             let _ = app.session.run("selection.set", json!({"cell": c.a1()}));
             if primary_clicked && wb.styles.get(sh.style_id(c)).num_fmt.as_str() == "checkbox" {
