@@ -235,13 +235,15 @@ impl Geo {
         let frozen_h = (ri.start(fr) as f32) * z;
         let row_outline = Arc::new(crate::outline::Axis::new(&sh.rows));
         let col_outline = Arc::new(crate::outline::Axis::new(&sh.cols));
-        let mut band_w = crate::outline::band(row_outline.levels, zoom);
-        let mut band_h = crate::outline::band(col_outline.levels, zoom);
+        // Show Outline Symbols off: no bands (the outline's hidden lines stay hidden).
+        let symbols = sh.show_outline_symbols;
+        let mut band_w = if symbols { crate::outline::band(row_outline.levels, zoom) } else { 0.0 };
+        let mut band_h = if symbols { crate::outline::band(col_outline.levels, zoom) } else { 0.0 };
         // Without headings the level buttons still need a corner to sit in.
-        if row_outline.levels > 0 && header_h == 0.0 {
+        if symbols && row_outline.levels > 0 && header_h == 0.0 {
             band_h = band_h.max(crate::outline::lane(zoom) + 3.0);
         }
-        if col_outline.levels > 0 && header_w == 0.0 {
+        if symbols && col_outline.levels > 0 && header_w == 0.0 {
             band_w = band_w.max(crate::outline::lane(zoom) + 3.0);
         }
         let cells = Rect::from_min_max(pos2(rect.left() + band_w + header_w, rect.top() + band_h + header_h), rect.max);
@@ -4225,6 +4227,34 @@ mod pane_tests {
         let sel = rng(5, 0, 7, 6);
         assert!(range_in_pane(sel, (2, 20), (0, 1)));
         assert!(range_in_pane(sel, (2, 20), (2, 10)));
+    }
+
+    #[test]
+    fn hidden_outline_symbols_take_no_room() {
+        let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0));
+        let mut sh = Sheet::new("S");
+        sh.rows.entry(3).or_default().outline = 1;
+        sh.cols.entry(2).or_default().outline = 2;
+        let shown = Geo::new(&sh, rect, vec2(0.0, 0.0));
+        assert!(shown.band_w > 0.0 && shown.band_h > 0.0);
+        sh.show_outline_symbols = false;
+        let hidden = Geo::new(&sh, rect, vec2(0.0, 0.0));
+        assert_eq!((hidden.band_w, hidden.band_h), (0.0, 0.0));
+        assert!(hidden.cells.left() < shown.cells.left() && hidden.cells.top() < shown.cells.top());
+        // Without headings too.
+        sh.show_headings = false;
+        let bare = Geo::new(&sh, rect, vec2(0.0, 0.0));
+        assert_eq!((bare.band_w, bare.band_h), (0.0, 0.0));
+        // No button answers a click on the empty bands' edges (the grid's left and top), where the
+        // level buttons would sit with no headings to hold them.
+        for geo in [&hidden, &bare] {
+            for i in 0..400 {
+                let t = i as f32 * 0.5;
+                for p in [pos2(geo.rect.left(), geo.rect.top() + t), pos2(geo.rect.left() + t, geo.rect.top())] {
+                    assert_eq!(crate::outline::hit(geo, &sh, p), None, "{p:?}");
+                }
+            }
+        }
     }
 
     /// Two frozen rows and columns, scrolled right so that columns C:E lie under the frozen columns.
