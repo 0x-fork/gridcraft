@@ -333,11 +333,14 @@ fn range_set_values(s: &mut Session, p: &Json) -> Result<Json> {
                     // Text as given: no date or number reading, and a leading `'` is part of the
                     // text rather than the marker that makes it text. A formula is still a
                     // formula, which is what the ticket asks for and what `=` means in a cell.
-                    Json::String(text) if !parse && !text.starts_with('=') => Some(Cell {
-                        value: Value::Text(text.as_str().into()),
-                        formula: None,
-                        style: cx.wb.sheet(sheet).map(|sh| sh.style_id(at)).unwrap_or_default(),
-                    }),
+                    Json::String(text) if !parse && !text.starts_with('=') => {
+                        let mut style = cx.wb.sheet(sheet).map(|sh| sh.style_id(at)).unwrap_or_default();
+                        // Line breaks still turn on Wrap Text, as typed input does.
+                        if text.contains('\n') && !cx.wb.styles.get(style).align.wrap {
+                            style = cx.wb.styles.derive(style, |s| s.align.wrap = true);
+                        }
+                        Some(Cell { value: Value::Text(text.as_str().into()), formula: None, style })
+                    }
                     _ => input_to_cell(&input, sheet, at, &mut cx.wb)?,
                 };
                 let sh = cx.sheet_mut(sheet)?;
@@ -1827,6 +1830,12 @@ mod tests {
         assert_eq!(get(&mut s, "A7")["value"], json!(2.5));
         assert!(s.execute("range.setValues", json!({"range": "A8", "parse": "no", "values": [["x"]]})).is_err());
         assert!(s.execute("range.setValues", json!({"range": "A8", "parse": 0, "values": [["x"]]})).is_err());
+        // A line break still turns on Wrap Text.
+        s.execute("range.setValues", json!({"range": "A9", "parse": false, "values": [["one\ntwo"]]})).unwrap();
+        assert_eq!(get(&mut s, "A9")["value"], json!("one\ntwo"));
+        let d = s.doc().unwrap();
+        let sh = d.wb.active().unwrap();
+        assert!(d.wb.styles.get(sh.style_id(CellRef::parse("A9").unwrap())).align.wrap);
     }
 
     #[test]

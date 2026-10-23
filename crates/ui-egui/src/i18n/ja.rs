@@ -1127,7 +1127,10 @@ pub(super) const EXTRA: &[(&str, &str)] = &[
     ("Sunburst", "サンバースト"),
     ("Stock", "株価"),
     ("Bar", "横棒"),
-    ("Drag to fill cells. Drag from inside a cell to select a range.", "ドラッグしてセルを塗りつぶします。セルの内側からドラッグすると範囲を選択します。"),
+    (
+        "Drag to fill cells. Drag from inside a cell to select a range.",
+        "ドラッグしてセルをオートフィルします。セルの内側からドラッグすると範囲を選択します。",
+    ),
 ];
 
 /// Translates an interface label; `None` for a label the catalog does not know, so `i18n.rs` can
