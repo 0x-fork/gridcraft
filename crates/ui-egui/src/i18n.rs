@@ -11,12 +11,22 @@ use serde::{Deserialize, Serialize};
 
 mod cs;
 mod de;
+mod el;
 mod es;
+mod es_functions;
 mod fr;
+mod it;
+mod ja;
 mod ko;
+mod nl;
+mod pl;
 mod pt;
+mod ro;
 mod ru;
 mod sr;
+mod tr;
+mod uk;
+mod vi;
 mod zh;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,6 +35,7 @@ pub enum Language {
     #[default]
     En,
     Es,
+    El,
     Zh,
     Ja,
     Ko,
@@ -35,16 +46,53 @@ pub enum Language {
     Cs,
     Fr,
     Sr,
+    Tr,
+    Pl,
+    It,
+    Uk,
+    Vi,
+    Nl,
+    Ro,
 }
 
 impl Language {
-    pub const ALL: [Self; 11] = [Self::En, Self::Es, Self::Zh, Self::Ja, Self::Ko, Self::Ru, Self::PtBr, Self::De, Self::Cs, Self::Fr, Self::Sr];
+    pub const ALL: [Self; 19] = [
+        Self::En,
+        Self::Es,
+        Self::El,
+        Self::Zh,
+        Self::Ja,
+        Self::Ko,
+        Self::Ru,
+        Self::PtBr,
+        Self::De,
+        Self::Cs,
+        Self::Fr,
+        Self::Sr,
+        Self::Pl,
+        Self::It,
+        Self::Uk,
+        Self::Vi,
+        Self::Nl,
+        Self::Ro,
+        Self::Tr,
+    ];
+
+    /// Every language in the order the switcher lists them: English first (the source language),
+    /// then the rest by their own name with accents folded, so Čeština sits under C. Names in
+    /// other scripts follow the Latin ones in code point order: Cyrillic, then the CJK languages.
+    pub fn for_picker() -> Vec<Self> {
+        let mut rest: Vec<Self> = Self::ALL.into_iter().filter(|l| *l != Self::En).collect();
+        rest.sort_by_cached_key(|l| name_sort_key(l.name()));
+        std::iter::once(Self::En).chain(rest).collect()
+    }
 
     /// The language's own name, shown in the switcher.
     pub fn name(self) -> &'static str {
         match self {
             Self::En => "English",
             Self::Es => "Español",
+            Self::El => "Ελληνικά",
             Self::Zh => "简体中文",
             Self::Ja => "日本語",
             Self::Ko => "한국어",
@@ -54,6 +102,13 @@ impl Language {
             Self::Cs => "Čeština",
             Self::Fr => "Français",
             Self::Sr => "Srpski",
+            Self::Tr => "Türkçe",
+            Self::Pl => "Polski",
+            Self::It => "Italiano",
+            Self::Uk => "Українська",
+            Self::Vi => "Tiếng Việt",
+            Self::Nl => "Nederlands",
+            Self::Ro => "Română",
         }
     }
 
@@ -62,6 +117,7 @@ impl Language {
         match self {
             Self::En => "en",
             Self::Es => "es",
+            Self::El => "el",
             Self::Zh => "zh",
             Self::Ja => "ja",
             Self::Ko => "ko",
@@ -71,6 +127,13 @@ impl Language {
             Self::Cs => "cs",
             Self::Fr => "fr",
             Self::Sr => "sr",
+            Self::Tr => "tr",
+            Self::Pl => "pl",
+            Self::It => "it",
+            Self::Uk => "uk",
+            Self::Vi => "vi",
+            Self::Nl => "nl",
+            Self::Ro => "ro",
         }
     }
 
@@ -78,10 +141,17 @@ impl Language {
         Self::from_tag(code)
     }
 
+    /// Every code `app.language.set` takes, quoted and joined (`"en"|"es"|…`), for command docs
+    /// and errors.
+    pub fn code_list(separator: &str) -> String {
+        Self::ALL.iter().map(|l| format!("\"{}\"", l.code())).collect::<Vec<_>>().join(separator)
+    }
+
     fn from_tag(tag: &str) -> Option<Self> {
         match tag.trim().split(['-', '_']).next()?.to_ascii_lowercase().as_str() {
             "en" => Some(Self::En),
             "es" => Some(Self::Es),
+            "el" => Some(Self::El),
             "zh" => Some(Self::Zh),
             "ja" => Some(Self::Ja),
             "ko" => Some(Self::Ko),
@@ -91,6 +161,13 @@ impl Language {
             "cs" => Some(Self::Cs),
             "fr" => Some(Self::Fr),
             "sr" => Some(Self::Sr),
+            "tr" => Some(Self::Tr),
+            "pl" => Some(Self::Pl),
+            "it" => Some(Self::It),
+            "uk" => Some(Self::Uk),
+            "vi" => Some(Self::Vi),
+            "nl" => Some(Self::Nl),
+            "ro" => Some(Self::Ro),
             _ => None,
         }
     }
@@ -120,7 +197,8 @@ impl Language {
         let translated = match self {
             Self::En => None,
             Self::Es => es::translate(text),
-            Self::Ja => JAPANESE.iter().find(|(english, _)| *english == text).map(|(_, translated)| *translated),
+            Self::El => el::translate(text),
+            Self::Ja => ja::translate(text),
             Self::Zh => zh::translate(text),
             Self::Ko => ko::translate(text),
             Self::Ru => ru::translate(text),
@@ -129,9 +207,54 @@ impl Language {
             Self::Cs => cs::translate(text),
             Self::Fr => fr::translate(text),
             Self::Sr => sr::translate(text),
+            Self::Tr => tr::translate(text),
+            Self::Pl => pl::translate(text),
+            Self::It => it::translate(text),
+            Self::Uk => uk::translate(text),
+            Self::Vi => vi::translate(text),
+            Self::Nl => nl::translate(text),
+            Self::Ro => ro::translate(text),
         };
         translated.unwrap_or_else(|| text.rsplit_once('|').map_or(text, |(_, label)| label))
     }
+
+    pub(crate) fn tr_error(self, message: &str) -> String {
+        let message = if message.starts_with("command `") { crate::clean_error(message) } else { message.to_owned() };
+
+        let translated = self.tr(&message);
+        let fallback = message.rsplit_once('|').map_or(message.as_str(), |(_, label)| label);
+
+        if translated == fallback { message } else { translated.to_owned() }
+    }
+
+    /// A worksheet function's description in this language, looked up by the English text of the
+    /// function catalog; `None` when untranslated, and the help shows the English.
+    pub fn function_description(self, english: &str) -> Option<&'static str> {
+        lookup(self.function_help()?.0, english)
+    }
+
+    /// A function argument name in this language, given as the catalog spells it without
+    /// brackets or index (`number`, `logical_test`).
+    pub fn function_argument(self, english: &str) -> Option<&'static str> {
+        lookup(self.function_help()?.1, english)
+    }
+
+    /// The function help tables (descriptions, argument names) of the languages that have them.
+    fn function_help(self) -> Option<(HelpTable, HelpTable)> {
+        match self {
+            Self::Es => Some((es_functions::DESCRIPTIONS, es_functions::ARGUMENTS)),
+            _ => None,
+        }
+    }
+}
+
+/// English text and its translation, sorted by the English.
+type HelpTable = &'static [(&'static str, &'static str)];
+
+/// The translation of `english` in a help table (binary search, so the table must stay sorted).
+fn lookup(table: HelpTable, english: &str) -> Option<&'static str> {
+    let i = table.binary_search_by(|(key, _)| (*key).cmp(english)).ok()?;
+    table.get(i).map(|(_, translated)| *translated)
 }
 
 /// Deserializes a saved language leniently: an unknown or malformed value (a language removed in a
@@ -594,61 +717,95 @@ const JAPANESE: &[(&str, &str)] = &[
     ("Calculation settings are saved with the workbook.", "計算の設定はブックと共に保存されます。"),
 ];
 
+/// `name` lowercased with the Latin accents that occur in language names folded away, so a
+/// byte-wise sort reads alphabetically. Other scripts are left as they are.
+fn name_sort_key(name: &str) -> String {
+    name.chars()
+        .flat_map(char::to_lowercase)
+        .map(|c| match c {
+            'à'..='å' | 'ā' | 'ă' | 'ą' => 'a',
+            'ç' | 'ć' | 'č' => 'c',
+            'è'..='ë' | 'ē' | 'ě' | 'ę' | 'ế' | 'ệ' => 'e',
+            'ì'..='ï' | 'ī' => 'i',
+            'ñ' | 'ń' | 'ň' => 'n',
+            'ò'..='ö' | 'ø' | 'ő' => 'o',
+            'ś' | 'š' => 's',
+            'ù'..='ü' | 'ū' | 'ů' | 'ű' => 'u',
+            'ý' | 'ÿ' => 'y',
+            'ź' | 'ż' | 'ž' => 'z',
+            c => c,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Help tables are sorted and unique: lookups binary-search them.
     #[test]
-    fn translations_are_unique_and_preserve_unknown_text() {
-        for (i, (en, ja)) in JAPANESE.iter().enumerate() {
-            assert!(!ja.is_empty());
-            assert!(JAPANESE.iter().take(i).all(|(other, _)| en != other));
-            assert_eq!(Language::En.tr(en), en.rsplit_once('|').map_or(*en, |(_, label)| label));
+    fn function_help_tables_are_sorted_and_unique() {
+        for language in Language::ALL {
+            let Some((description_table, argument_table)) = language.function_help() else { continue };
+            for table in [description_table, argument_table] {
+                assert!(table.windows(2).all(|pair| pair[0].0 < pair[1].0), "{language:?} function help is not sorted and unique");
+                for (english, translated) in table {
+                    assert!(!translated.is_empty(), "{language:?}: empty translation of {english:?}");
+                }
+            }
         }
-        for (english, _) in JAPANESE {
-            assert!(zh::translate(english).is_some_and(|text| !text.is_empty()), "missing Simplified Chinese: {english}");
-            assert!(ko::translate(english).is_some_and(|text| !text.is_empty()), "missing Korean: {english}");
-            assert!(ru::translate(english).is_some_and(|text| !text.is_empty()), "missing Russian: {english}");
-            assert!(pt::translate(english).is_some_and(|text| !text.is_empty()), "missing Portuguese: {english}");
-            assert!(es::translate(english).is_some_and(|text| !text.is_empty()), "missing Spanish: {english}");
-            assert!(de::translate(english).is_some_and(|text| !text.is_empty()), "missing German: {english}");
-            assert!(cs::translate(english).is_some_and(|text| !text.is_empty()), "missing Czech: {english}");
-            assert!(fr::translate(english).is_some_and(|text| !text.is_empty()), "missing French: {english}");
-            assert!(sr::translate(english).is_some_and(|text| !text.is_empty()), "missing Serbian: {english}");
+    }
+
+    #[test]
+    fn untranslated_text_falls_back_to_english() {
+        let label = |key: &'static str| key.rsplit_once('|').map_or(key, |(_, label)| label);
+        for (english, _) in ja::CORE {
+            assert_eq!(Language::En.tr(english), label(english));
         }
-        assert_eq!(Language::Ja.tr("Data"), "データ");
-        assert_eq!(Language::Zh.tr("Data"), "数据");
-        assert_eq!(Language::Ko.tr("Data"), "데이터");
-        assert_eq!(Language::Ru.tr("Data"), "Данные");
-        assert_eq!(Language::PtBr.tr("Data"), "Dados");
-        assert_eq!(Language::Es.tr("Data"), "Datos");
-        assert_eq!(Language::Es.tr("Freeze Panes"), "Inmovilizar paneles");
-        assert_eq!(Language::Es.tr("Sheet1!A1"), "Sheet1!A1");
-        assert_eq!(Language::De.tr("Data"), "Daten");
-        assert_eq!(Language::De.tr("Sheet1!A1"), "Sheet1!A1");
-        assert_eq!(Language::Fr.tr("Data"), "Données");
-        assert_eq!(Language::Fr.tr("Sheet1!A1"), "Sheet1!A1");
-        assert_eq!(Language::PtBr.tr("Date"), "Data");
-        assert_eq!(Language::PtBr.tr("Sheet1!A1"), "Sheet1!A1");
-        assert_eq!(Language::Ja.tr("Sheet1!A1"), "Sheet1!A1");
-        assert_eq!(Language::Zh.tr("Sheet1!A1"), "Sheet1!A1");
-        assert_eq!(Language::Ko.tr("Sheet1!A1"), "Sheet1!A1");
-        assert_eq!(Language::Ru.tr("Sheet1!A1"), "Sheet1!A1");
-        // Czech "Data" is spelled as in English, so probe it with a label that differs.
-        assert_eq!(Language::Cs.tr("Data"), "Data");
-        assert_eq!(Language::Cs.tr("Formulas"), "Vzorce");
-        assert_eq!(Language::Cs.tr("Sheet1!A1"), "Sheet1!A1");
-        // A `context|label` key shows only its label in English and splits the translation.
+        for language in Language::ALL {
+            assert_eq!(language.tr("Sheet1!A1"), "Sheet1!A1");
+            assert_eq!(language.tr("Not in any catalog|Untranslated"), "Untranslated");
+        }
+        // A `context|label` key shows only its label in English.
         assert_eq!(Language::En.tr("Page Layout|Orientation"), "Orientation");
-        assert_eq!(Language::Ja.tr("Page Layout|Orientation"), "印刷の向き");
-        assert_eq!(Language::Ja.tr("Orientation"), "方向");
-        assert_eq!(Language::Cs.tr("Page Layout|Orientation"), "Orientace");
-        assert_eq!(Language::Cs.tr("Orientation"), "Orientace textu");
-        assert_eq!(Language::Sr.tr("Data"), "Podaci");
-        assert_eq!(Language::Sr.tr("Sheet1!A1"), "Sheet1!A1");
-        assert_eq!(Language::Sr.tr("Page Layout|Orientation"), "Orijentacija");
-        assert_eq!(Language::Sr.tr("Orientation"), "Orijentacija");
+        // Errors drop the `command `id`:` prefix before translating; an untranslated one stays whole.
+        assert_eq!(Language::PtBr.tr_error("command `chart`: Select a chart first."), Language::PtBr.tr("Select a chart first."));
+        assert_eq!(Language::PtBr.tr_error("Sheet|Unknown failure"), "Sheet|Unknown failure");
+        assert_eq!(Language::PtBr.tr_error("Printer Office: permission denied"), "Printer Office: permission denied");
         assert_eq!(Language::parse("xx"), None);
+    }
+
+    /// A catalog whose translations slip onto their neighbours' keys still covers every key, so
+    /// check the shape of each translation against its English: placeholders survive, and a
+    /// one-line label (a menu item, a tooltip) doesn't turn into a two-line ribbon label.
+    #[test]
+    fn translations_keep_the_shape_of_their_english() {
+        let placeholders =
+            |s: &str| s.split('{').skip(1).filter_map(|rest| rest.split_once('}').map(|(name, _)| name.to_string())).collect::<Vec<_>>();
+        for language in Language::ALL {
+            for (english, _) in ja::CORE {
+                let label = english.rsplit_once('|').map_or(*english, |(_, label)| label);
+                let text = language.tr(english);
+                assert_eq!(placeholders(text), placeholders(label), "{language:?}: {english:?} => {text:?}");
+                // Big ribbon buttons whose English fits on one line may still need two.
+                if !label.contains('\n') && !["AutoSum", "PivotTable"].contains(english) {
+                    assert!(!text.contains('\n'), "{language:?}: one-line {english:?} => {text:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn translations_never_show_the_context_prefix() {
+        // `tr` returns a found translation as it is, so a catalog that keeps `context|` in its
+        // value shows it on screen (File › Options read "Options|Général" in French).
+        let keys = ja::CORE.iter().map(|(english, _)| *english).chain(["Options|General", "Options|Save", "Sheet Options|View"]);
+        for english in keys {
+            for language in Language::ALL {
+                let shown = language.tr(english);
+                assert!(!shown.contains('|'), "{} shows a context prefix for {english}: {shown}", language.code());
+            }
+        }
     }
 
     #[test]
@@ -671,6 +828,9 @@ mod tests {
         assert_eq!(Language::from_tag("ja-JP"), Some(Language::Ja));
         assert_eq!(Language::from_tag("en_US"), Some(Language::En));
         assert_eq!(Language::from_tag("es_MX"), Some(Language::Es));
+        assert_eq!(Language::from_tag("el-GR"), Some(Language::El));
+        assert_eq!(Language::from_tag("el_GR.UTF-8"), Some(Language::El));
+        assert_eq!(Language::parse("el"), Some(Language::El));
         assert_eq!(Language::from_tag("zh-Hans-CN"), Some(Language::Zh));
         assert_eq!(Language::from_tag("ko-KR"), Some(Language::Ko));
         assert_eq!(Language::from_tag("RU_ru"), Some(Language::Ru));
@@ -689,6 +849,25 @@ mod tests {
         assert_eq!(Language::from_tag("sr-Latn-RS"), Some(Language::Sr));
         assert_eq!(Language::from_tag("sr-RS"), Some(Language::Sr));
         assert_eq!(Language::parse("sr"), Some(Language::Sr));
+        assert_eq!(Language::from_tag("tr-TR"), Some(Language::Tr));
+        assert_eq!(Language::from_tag("tr_TR.UTF-8"), Some(Language::Tr));
+        assert_eq!(Language::parse("tr"), Some(Language::Tr));
+        assert_eq!(Language::from_tag("pl-PL"), Some(Language::Pl));
+        assert_eq!(Language::from_tag("pl_PL.UTF-8"), Some(Language::Pl));
+        assert_eq!(Language::parse("pl"), Some(Language::Pl));
+        assert_eq!(Language::from_tag("it-IT"), Some(Language::It));
+        assert_eq!(Language::from_tag("it_CH.UTF-8"), Some(Language::It));
+        assert_eq!(Language::parse("it"), Some(Language::It));
+        assert_eq!(Language::from_tag("uk-XX"), Some(Language::Uk));
+        assert_eq!(Language::parse("uk"), Some(Language::Uk));
+        assert_eq!(Language::from_tag("vi-VN"), Some(Language::Vi));
+        assert_eq!(Language::parse("vi"), Some(Language::Vi));
+        assert_eq!(Language::from_tag("nl-NL"), Some(Language::Nl));
+        assert_eq!(Language::from_tag("nl_BE"), Some(Language::Nl));
+        assert_eq!(Language::parse("nl"), Some(Language::Nl));
+        assert_eq!(Language::from_tag("ro-RO"), Some(Language::Ro));
+        assert_eq!(Language::from_tag("ro_MD.UTF-8"), Some(Language::Ro));
+        assert_eq!(Language::parse("ro"), Some(Language::Ro));
     }
 
     #[test]
@@ -712,10 +891,24 @@ mod tests {
         app.run("app.language.set", serde_json::json!({"code": "ja"})).unwrap();
         assert_eq!(app.ui.language, Language::Ja, "`code` is an alias for `language`");
         assert!(app.run("app.language.set", serde_json::json!({})).is_err(), "no language is an error, not a dialog");
+        let unknown = app.run("app.language.set", serde_json::json!({"language": "xx"})).unwrap_err().to_string();
+        for l in Language::ALL {
+            assert!(unknown.contains(&format!("\"{}\"", l.code())), "the error lists {:?}: {unknown}", l.code());
+        }
         app.run("app.language.english", serde_json::json!({})).unwrap();
         assert_eq!(app.ui.language, Language::En);
         for l in Language::ALL {
             assert_eq!(Language::parse(l.code()), Some(l));
         }
+    }
+
+    #[test]
+    fn picker_lists_english_first_then_names_alphabetically() {
+        let order = Language::for_picker();
+        assert_eq!(order.first(), Some(&Language::En));
+        assert_eq!(order.len(), Language::ALL.len());
+        let keys: Vec<String> = order[1..].iter().map(|l| name_sort_key(l.name())).collect();
+        assert!(keys.windows(2).all(|w| w[0] <= w[1]), "{keys:?}");
+        assert_eq!(name_sort_key("Čeština"), "cestina");
     }
 }
