@@ -158,3 +158,20 @@ fn other_dialogs_leave_grid_clicks_alone() {
     click(&mut h, "B2");
     assert_eq!(selection(&h), "B2", "a box that is not a formula does not take references");
 }
+
+#[test]
+fn pointing_on_another_sheet_keeps_the_rule_on_the_sheet_it_was_opened_for() {
+    let mut h = harness();
+    type_text(&mut h, "=");
+    h.state_mut().session.execute("sheet.activate", json!({"sheet": 1})).unwrap();
+    h.run_steps(3);
+    click(&mut h, "A1");
+    assert_eq!(formula(&h), "=Sheet2!$A$1");
+    h.key_press(Key::Enter);
+    h.run_steps(4);
+    assert!(h.state().dialog.is_none(), "Enter confirmed the rule");
+    let wb = &h.state().session.active().unwrap().wb;
+    assert!(wb.sheet(1).unwrap().cond_formats.is_empty(), "nothing lands on the sheet pointed at");
+    let cf = wb.sheet(0).unwrap().cond_formats.last().expect("the rule is on the sheet the dialog was opened on");
+    assert_eq!(cf.ranges.iter().map(|r| r.a1()).collect::<Vec<_>>(), ["F8:G9"]);
+}

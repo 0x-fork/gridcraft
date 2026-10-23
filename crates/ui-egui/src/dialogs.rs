@@ -63,6 +63,9 @@ struct RefPick {
     anchor: CellRef,
     /// Give the box the keyboard back, caret after the reference, on the next frame.
     refocus: bool,
+    /// The selection the rule applies to, fixed when the dialog opened as Excel's "Applies to":
+    /// pointing on another sheet must not move the rule there.
+    applies_to: String,
 }
 
 impl Dialog {
@@ -749,8 +752,12 @@ impl Dialog {
                     json!({"preset": "lightRedFillDarkRedText", "period": "today"}),
                 );
                 if ty == "expression" {
-                    let sheet = app.session.active().map(|doc| doc.wb.active_sheet).unwrap_or(0);
-                    d.pick = Some(RefPick { key: "formula", sheet, caret: 0, point: None, anchor: CellRef::new(0, 0), refocus: false });
+                    let (sheet, applies_to) = app
+                        .session
+                        .active()
+                        .map(|doc| (doc.wb.active_sheet, doc.selection.ranges.iter().map(RangeRef::a1).collect::<Vec<_>>().join(",")))
+                        .unwrap_or_default();
+                    d.pick = Some(RefPick { key: "formula", sheet, caret: 0, point: None, anchor: CellRef::new(0, 0), refocus: false, applies_to });
                 }
                 d.values.insert("type".into(), json!(ty));
                 d.values.insert("operator".into(), p("operator"));
@@ -1177,6 +1184,10 @@ pub(crate) fn build_params(d: &Dialog) -> Json {
                 rule.insert(k.clone(), val.clone());
             }
             v = json!({"rule": Json::Object(rule)});
+            if let Some(pick) = d.pick.as_ref().filter(|pick| !pick.applies_to.is_empty()) {
+                v["sheet"] = json!(pick.sheet);
+                v["range"] = json!(pick.applies_to);
+            }
         }
         "series" => {
             if let Some(s) = d.values.get("stop").and_then(Json::as_str).and_then(|s| s.parse::<f64>().ok()) {
