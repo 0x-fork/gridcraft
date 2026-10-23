@@ -122,6 +122,10 @@ pub struct GridState {
     /// With `ensure_visible`: scroll to the moving end of the selection instead of the active cell
     /// (Shift/Ctrl+Shift+arrows keep the active cell on the anchor while the far corner moves).
     pub reveal_moving_end: bool,
+    /// With `ensure_visible`: the cell an arrow or paging key moved from (the moving end when
+    /// extending), set only by those keys. A move from the scrolled rows or columns into the
+    /// frozen ones scrolls them back to their top or left.
+    pub reveal_from: Option<CellRef>,
     pub last_title: Option<String>,
     pub drag_select: bool,
     pub rect: Option<Rect>,
@@ -698,6 +702,7 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
     if app.grid.ensure_visible {
         app.grid.ensure_visible = false;
         let cell = if std::mem::take(&mut app.grid.reveal_moving_end) { sel.moving_end() } else { sel.active };
+        let from = app.grid.reveal_from.take();
         let target = app.editor.as_ref().and_then(|e| e.point_cell).unwrap_or(cell);
         if paper {
             crate::paper_view::ensure_covers(app, &wb, si, target);
@@ -711,6 +716,11 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
             } else if cr.bottom() > area.bottom() - 2.0 {
                 view.scroll.y += (cr.bottom() - area.bottom() + 2.0) / geo.z;
             }
+        } else if from.is_some_and(|f| f.row >= geo.fr) {
+            // A move from the scrolled rows into the frozen ones (Page Up or Ctrl+Up onto a frozen
+            // row 1) brings the scrolled rows back to their top; the rows it passed over would
+            // otherwise stay out of sight.
+            view.scroll.y = 0.0;
         }
         if target.col >= geo.fc {
             if cr.left() < area.left() {
@@ -718,6 +728,8 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
             } else if cr.right() > area.right() - 2.0 {
                 view.scroll.x += ((cr.right() - area.right() + 2.0) / geo.z).min(cr.left() - area.left());
             }
+        } else if from.is_some_and(|f| f.col >= geo.fc) {
+            view.scroll.x = 0.0;
         }
         view.scroll = view.scroll.max(egui::Vec2::ZERO);
         geo = make_geo(app, view.scroll);
@@ -2997,9 +3009,11 @@ fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Response, geo:
                 let cmd = m.command;
                 let shift = m.shift;
                 let mv = |app: &mut SheetApp, dr: i64, dc: i64| {
+                    let from = app.session.active().map(|d| if shift { d.selection.moving_end() } else { d.selection.active });
                     let _ = app.session.run("selection.move", json!({"dr": dr, "dc": dc, "extend": shift, "jump": cmd}));
                     app.grid.ensure_visible = true;
                     app.grid.reveal_moving_end = shift;
+                    app.grid.reveal_from = from;
                 };
                 match key {
                     Key::ArrowUp => mv(app, -1, 0),
