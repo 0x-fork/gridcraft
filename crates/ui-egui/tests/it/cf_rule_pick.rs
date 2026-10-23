@@ -175,3 +175,23 @@ fn pointing_on_another_sheet_keeps_the_rule_on_the_sheet_it_was_opened_for() {
     let cf = wb.sheet(0).unwrap().cond_formats.last().expect("the rule is on the sheet the dialog was opened on");
     assert_eq!(cf.ranges.iter().map(|r| r.a1()).collect::<Vec<_>>(), ["F8:G9"]);
 }
+
+#[test]
+fn the_rule_follows_its_sheet_when_sheets_move_while_the_dialog_is_open() {
+    let mut h = harness();
+    type_text(&mut h, "=");
+    click(&mut h, "B2");
+    h.state_mut().session.execute("sheet.move", json!({"sheet": 0, "to": 1})).unwrap();
+    h.run_steps(3);
+    let names = |h: &Harness| h.state().session.active().unwrap().wb.sheets.iter().map(|s| s.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&h), ["Sheet2", "Sheet1"], "Sheet1 now sits at index 1");
+    h.key_press(Key::Enter);
+    h.run_steps(4);
+    assert!(h.state().dialog.is_none(), "Enter confirmed the rule");
+    let wb = &h.state().session.active().unwrap().wb;
+    let sheet1 = wb.sheets.iter().find(|s| s.name == "Sheet1").unwrap();
+    let sheet2 = wb.sheets.iter().find(|s| s.name == "Sheet2").unwrap();
+    assert!(sheet2.cond_formats.is_empty(), "nothing lands on the sheet that took index 0");
+    let cf = sheet1.cond_formats.last().expect("the rule stays on Sheet1");
+    assert_eq!(cf.ranges.iter().map(|r| r.a1()).collect::<Vec<_>>(), ["F8:G9"]);
+}

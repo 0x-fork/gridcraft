@@ -2339,7 +2339,7 @@ fn interact(app: &mut SheetApp, ui: &mut egui::Ui, resp: &egui::Response, geo: &
         // A dialog's formula box in point mode (New Formatting Rule) takes the reference; the
         // selection, which the dialog acts on, stays.
         if let Some(d) = app.dialog.as_mut().filter(|d| d.picks_references()) {
-            d.pick_reference(c, (wb.active_sheet, &sh.name), false);
+            d.pick_reference(c, &sh.name, false);
             app.grid.drag = Drag::Select;
             app.grid.drag_select = true;
             if resp.drag_started()
@@ -2713,7 +2713,7 @@ fn select_to_pointer(app: &mut SheetApp, geo: &Geo, sh: &Sheet, wb: &Workbook, p
         geo.col_at(sh, p.x.clamp(geo.cells.left() + 1.0, geo.cells.right() - 1.0)),
     );
     if let Some(d) = app.dialog.as_mut().filter(|d| d.picks_references()) {
-        d.pick_reference(cell, (wb.active_sheet, &sh.name), true);
+        d.pick_reference(cell, &sh.name, true);
     } else if let Some(ed) = app.editor.as_mut()
         && ed.point.is_some()
     {

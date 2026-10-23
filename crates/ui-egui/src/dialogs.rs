@@ -54,8 +54,9 @@ pub struct Dialog {
 #[derive(Clone, Debug)]
 struct RefPick {
     key: &'static str,
-    /// The sheet the dialog was opened on: references to another sheet carry its name.
-    sheet: usize,
+    /// The sheet the dialog was opened on, by name: its index changes when sheets are inserted or
+    /// moved while the dialog is open. References to another sheet carry that sheet's name.
+    sheet: String,
     /// Caret (char index), mirrored from the text box while it has the keyboard.
     caret: usize,
     /// The reference last inserted (byte span), replaced by the next click or the drag.
@@ -109,10 +110,10 @@ impl Dialog {
     /// point mode. An empty box starts with `=`. After an operand there is no place for a
     /// reference, so nothing changes. `active_sheet` names the sheet shown when it is not the
     /// dialog's own.
-    pub fn pick_reference(&mut self, cell: CellRef, active_sheet: (usize, &str), extend: bool) {
+    pub fn pick_reference(&mut self, cell: CellRef, active_sheet: &str, extend: bool) {
         let Some(pick) = self.pick.as_mut() else { return };
         let text = self.values.get(pick.key).and_then(Json::as_str).unwrap_or("").to_string();
-        let mut ed = crate::editor::EditState::new(pick.sheet, cell, text, true, false);
+        let mut ed = crate::editor::EditState::new(0, cell, text, true, false);
         ed.caret = pick.caret.min(ed.text.chars().count());
         ed.point = pick.point;
         if ed.text.trim().is_empty() {
@@ -127,8 +128,11 @@ impl Dialog {
             pick.anchor = cell;
         }
         let range = abs(&RangeRef::new(pick.anchor, cell));
-        let reference =
-            if active_sheet.0 == pick.sheet { range } else { format!("{}!{range}", gridcraft_engine::formula::quote_sheet(active_sheet.1)) };
+        let reference = if active_sheet.eq_ignore_ascii_case(&pick.sheet) {
+            range
+        } else {
+            format!("{}!{range}", gridcraft_engine::formula::quote_sheet(active_sheet))
+        };
         ed.insert_ref(&reference);
         pick.caret = ed.caret;
         pick.point = ed.point;
@@ -755,7 +759,12 @@ impl Dialog {
                     let (sheet, applies_to) = app
                         .session
                         .active()
-                        .map(|doc| (doc.wb.active_sheet, doc.selection.ranges.iter().map(RangeRef::a1).collect::<Vec<_>>().join(",")))
+                        .map(|doc| {
+                            (
+                                doc.wb.active().map(|sh| sh.name.clone()).unwrap_or_default(),
+                                doc.selection.ranges.iter().map(RangeRef::a1).collect::<Vec<_>>().join(","),
+                            )
+                        })
                         .unwrap_or_default();
                     d.pick = Some(RefPick { key: "formula", sheet, caret: 0, point: None, anchor: CellRef::new(0, 0), refocus: false, applies_to });
                 }
@@ -1184,8 +1193,8 @@ pub(crate) fn build_params(d: &Dialog) -> Json {
                 rule.insert(k.clone(), val.clone());
             }
             v = json!({"rule": Json::Object(rule)});
-            if let Some(pick) = d.pick.as_ref().filter(|pick| !pick.applies_to.is_empty()) {
-                v["sheet"] = json!(pick.sheet);
+            if let Some(pick) = d.pick.as_ref().filter(|pick| !pick.applies_to.is_empty() && !pick.sheet.is_empty()) {
+                v["sheet"] = json!(pick.sheet.as_str());
                 v["range"] = json!(pick.applies_to);
             }
         }
