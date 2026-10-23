@@ -309,9 +309,7 @@ fn modulo(x: f64, d: f64) -> R<f64> {
     // `%` is an exact remainder (truncated), so |r| < |d| even for tiny divisors.
     let r = x % d;
     // Keep the sign of the divisor and avoid returning |d| from rounding.
-    if r != 0.0 && (r < 0.0) != (d < 0.0) {
-        return Ok(r + d);
-    }
+    let r = if r != 0.0 && (r < 0.0) != (d < 0.0) { r + d } else { r };
     if r.abs() >= d.abs() {
         return Ok(0.0);
     }

@@ -656,7 +656,7 @@ fn filter_blank(v: &Value) -> bool {
 /// A table's own filter is left to the table, and a row typed after a blank row does not count.
 /// A formula counts before it is calculated: this runs inside the edit, ahead of the recalc.
 pub(crate) fn grow_autofilter(sh: &mut Sheet, at: CellRef) {
-    if !sh.cells.get(at).is_some_and(|c| !c.value.is_empty() || c.formula.is_some()) {
+    if !sh.cells.get(at).is_some_and(|c| !filter_blank(&c.value) || c.formula.is_some()) {
         return;
     }
     let Some(af) = sh.autofilter.as_ref() else { return };
@@ -1588,6 +1588,9 @@ mod tests {
         assert_eq!(range(&s), Some("A1:B5".to_string()));
         // A cell outside the filter's columns does not either.
         s.execute("cell.set", json!({"cell": "C6", "input": "x"})).unwrap();
+        assert_eq!(range(&s), Some("A1:B5".to_string()));
+        // Empty text is a blank entry, not a value.
+        s.execute("range.setValues", json!({"range": "A6", "parse": false, "values": [[""]]})).unwrap();
         assert_eq!(range(&s), Some("A1:B5".to_string()));
         // A formula and Ctrl+Enter (range.fill) are entries too.
         s.execute("cell.set", json!({"cell": "B6", "input": "=1+1"})).unwrap();
