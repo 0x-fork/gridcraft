@@ -812,26 +812,29 @@ pub const NOT_A_VALUE_CELL: &str = "select a value cell in a PivotTable";
 
 /// Show Details: the source list and the indices of its records behind the value cell at
 /// (`row`, `col`) of the report grid (relative to its top-left), in source order. `None` when
-/// that cell holds no value (a label, a header, a blank). An error when the report on the sheet
-/// is no longer what the source computes: the cell's records would be another cell's.
+/// that cell holds no value (a label, a header, a blank). An error, for any cell, when the report
+/// on the sheet is no longer what the source computes: the cell's records would be another cell's.
 pub fn detail_records(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize, row: u32, col: u32) -> Result<Option<(Source, Vec<usize>)>, String> {
     let src = read_source(wb, &pt.source, pivot_sheet)?;
     let mut probe = Probe { at: (row as usize, col as usize), hit: None, paths: Vec::new() };
     let out = compute_from(wb, pt, &src, Some(&mut probe))?;
-    let Some((rp, cp)) = probe.hit else { return Ok(None) };
     // Excel reads its PivotTable cache; without one, the report written by the last refresh
-    // must still be what the source gives.
+    // must still be what the source gives. Checked first: in a stale report even a cell that
+    // computes as a label may show a value.
     let sh = wb.sheet(pivot_sheet).ok_or("There's no such sheet.")?;
     let current = pt.last_range.is_some_and(|r| {
         r.height() == out.height().max(1)
             && r.width() == out.width.max(1)
             && out.grid.iter().enumerate().all(|(ri, line)| {
-                line.iter().enumerate().all(|(ci, oc)| sh.value(CellRef::new(r.start.row + ri as u32, r.start.col + ci as u32)) == oc.value)
+                line.iter().enumerate().all(|(ci, oc)| {
+                    sh.value_ref(CellRef::new(r.start.row + ri as u32, r.start.col + ci as u32)).unwrap_or(&Value::Empty) == &oc.value
+                })
             })
     });
     if !current {
         return Err("The PivotTable report is out of date. Refresh it first.".into());
     }
+    let Some((rp, cp)) = probe.hit else { return Ok(None) };
     let records = probe.paths.into_iter().filter(|(_, r, c)| r.starts_with(&rp) && c.starts_with(&cp)).map(|(i, _, _)| i).collect();
     Ok(Some((src, records)))
 }

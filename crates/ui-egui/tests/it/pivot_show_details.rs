@@ -88,3 +88,19 @@ fn double_click_on_a_value_cell_of_a_protected_workbook_says_why_and_does_not_ed
     assert!(app.message.as_ref().is_some_and(|(_, m)| m.contains("protected")), "{:?}", app.message);
     assert_eq!(app.session.active().unwrap().wb.sheets.len(), 1);
 }
+
+#[test]
+fn double_click_in_an_out_of_date_report_asks_for_a_refresh() {
+    let mut h = harness();
+    // West goes away without a refresh: E6, the Grand Total on the sheet, has no cell in the
+    // report the source now gives.
+    h.state_mut().session.execute("range.setValues", json!({"range": "Sheet1!A3", "values": [["East"]]})).unwrap();
+    h.run_steps(2);
+    let pos = center(&h, "E6");
+    double_click(&mut h, pos);
+
+    let app = h.state();
+    assert!(app.editor.is_none(), "the cell must not open for editing");
+    assert!(app.message.as_ref().is_some_and(|(_, m)| m.contains("out of date")), "{:?}", app.message);
+    assert_eq!(app.session.active().unwrap().wb.sheets.len(), 1);
+}

@@ -2558,6 +2558,20 @@ mod tests {
     }
 
     #[test]
+    fn show_details_refuses_a_report_that_would_now_be_shorter() {
+        let mut s = sales();
+        s.execute("insert.pivotTable", json!({"rows": ["Region"], "columns": ["Product"], "values": ["Sales"]})).unwrap();
+        // North goes away: the source now gives one row fewer, so row 8 is no longer the Grand Total.
+        s.execute("range.setValues", json!({"range": "Sheet1!A5", "values": [["East"]]})).unwrap();
+        s.execute("range.setValues", json!({"range": "Sheet1!A8", "values": [["East"]]})).unwrap();
+        s.execute("range.setValues", json!({"range": "Sheet1!A11", "values": [["East"]]})).unwrap();
+        assert_eq!(text(&s, "A8"), "Grand Total");
+        let e = s.execute("pivot.showDetails", json!({"cell": "E8"})).unwrap_err().to_string();
+        assert!(e.contains("out of date"), "{e}");
+        assert_eq!(s.doc().unwrap().wb.sheets.len(), 2);
+    }
+
+    #[test]
     fn show_details_needs_a_value_cell() {
         let mut s = sales();
         s.execute("insert.pivotTable", json!({"rows": ["Region"], "columns": ["Product"], "values": ["Sales"]})).unwrap();
