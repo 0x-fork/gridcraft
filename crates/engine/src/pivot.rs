@@ -803,6 +803,30 @@ fn data_cols_exceed_sheet(col_groups: usize, grand_total: bool, values: usize) -
 /// Computes a PivotTable report from the workbook.
 pub fn compute(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Result<Output, String> {
     let src = read_source(wb, &pt.source, pivot_sheet)?;
+    compute_from(wb, pt, &src, None)
+}
+
+/// Show Details: the source list and the indices of its records behind the value cell at
+/// (`row`, `col`) of the report grid (relative to its top-left), in source order. `None` when
+/// that cell holds no value (a label, a header, a blank).
+pub fn detail_records(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize, row: u32, col: u32) -> Result<Option<(Source, Vec<usize>)>, String> {
+    let src = read_source(wb, &pt.source, pivot_sheet)?;
+    let mut probe = Probe { at: (row as usize, col as usize), hit: None, paths: Vec::new() };
+    compute_from(wb, pt, &src, Some(&mut probe))?;
+    let Some((rp, cp)) = probe.hit else { return Ok(None) };
+    let records = probe.paths.into_iter().filter(|(_, r, c)| r.starts_with(&rp) && c.starts_with(&cp)).map(|(i, _, _)| i).collect();
+    Ok(Some((src, records)))
+}
+
+/// What [`detail_records`] asks of a report computation: the row and column item paths of the
+/// value cell at `at`, and the paths of every record the filters let through.
+struct Probe {
+    at: (usize, usize),
+    hit: Option<(Vec<u32>, Vec<u32>)>,
+    paths: Vec<(usize, Vec<u32>, Vec<u32>)>,
+}
+
+fn compute_from(wb: &Workbook, pt: &PivotTable, src: &Source, mut probe: Option<&mut Probe>) -> Result<Output, String> {
     let fmt_of = |c: usize| src.formats.get(c).cloned().unwrap_or_else(|| "General".into());
     let rows: Vec<(usize, &PivotField)> = pt.rows.iter().filter_map(|f| src.col(&f.source_col).map(|c| (c, f))).collect();
     let cols: Vec<(usize, &PivotField)> = pt.columns.iter().filter_map(|f| src.col(&f.source_col).map(|c| (c, f))).collect();
@@ -913,6 +937,9 @@ pub fn compute(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Result<Out
             .map_or(cp.len(), |d| d + 1);
         if !col_leaves.contains(&cp[..shown]) {
             col_leaves.insert(cp[..shown].to_vec());
+        }
+        if let Some(pr) = probe.as_deref_mut() {
+            pr.paths.push((ri, rp.clone(), cp.clone()));
         }
         row_set.insert(rp);
         col_set.insert(cp);
@@ -1278,6 +1305,11 @@ pub fn compute(wb: &Workbook, pt: &PivotTable, pivot_sheet: usize) -> Result<Out
                     _ => raw,
                 },
             };
+            if let Some(pr) = probe.as_deref_mut()
+                && pr.at == (r, l + j)
+            {
+                pr.hit = Some((rp.to_vec(), cp.to_vec()));
+            }
             g.set(r, l + j, shown, ck.1, 0, data_fmt.get(*vi).cloned().flatten());
         }
     }
