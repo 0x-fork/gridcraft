@@ -35,14 +35,14 @@ fn corner(h: &Harness, cell: &str) -> Pos2 {
     let app = h.state();
     let sheet = app.session.active().unwrap().wb.active().unwrap();
     let geo = Geo::new(sheet, app.grid.rect.unwrap(), app.view().scroll);
-    geo.cell_rect(sheet, CellRef::parse(cell).unwrap()).right_bottom() - vec2(1.0, 1.0)
+    geo.mirror_pos(geo.cell_rect(sheet, CellRef::parse(cell).unwrap()).right_bottom() - vec2(1.0, 1.0))
 }
 
 fn center(h: &Harness, cell: &str) -> Pos2 {
     let app = h.state();
     let sheet = app.session.active().unwrap().wb.active().unwrap();
     let geo = Geo::new(sheet, app.grid.rect.unwrap(), app.view().scroll);
-    geo.cell_rect(sheet, CellRef::parse(cell).unwrap()).center()
+    geo.screen_cell_rect(sheet, CellRef::parse(cell).unwrap()).center()
 }
 
 fn press(h: &mut Harness, pos: Pos2, button: PointerButton) {
@@ -191,4 +191,21 @@ fn the_button_goes_away_once_the_workbook_changes() {
 
     assert_eq!(selection(&h), "B1:B6", "the selection did not move");
     assert!(h.query_by_label("Auto Fill Options").is_none(), "its undo would take the unrelated edit with it");
+}
+
+#[test]
+fn the_button_stays_inside_the_grid_on_a_right_to_left_sheet() {
+    let mut h = harness(|s| {
+        one_two(s);
+        s.execute("view.rightToLeft", json!({"on": true})).unwrap();
+    });
+    drag_handle(&mut h, "B2", "B6", PointerButton::Primary);
+
+    let button = h.get_by_label("Auto Fill Options").rect();
+    let app = h.state();
+    let sheet = app.session.active().unwrap().wb.active().unwrap();
+    let geo = Geo::new(sheet, app.grid.rect.unwrap(), app.view().scroll);
+    assert!(geo.cells.contains_rect(button), "{button:?} outside {:?}", geo.cells);
+    let filled = geo.screen_cell_rect(sheet, CellRef::parse("B6").unwrap());
+    assert!(button.center().x < filled.left() && button.top() >= filled.bottom() - 1.0, "below-left of the mirrored range's corner");
 }
