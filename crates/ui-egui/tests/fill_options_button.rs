@@ -180,3 +180,15 @@ fn right_drag_makes_no_button() {
     drag_handle(&mut h, "B2", "B6", PointerButton::Secondary);
     assert!(h.query_by_label("Auto Fill Options").is_none());
 }
+
+#[test]
+fn the_button_goes_away_once_the_workbook_changes() {
+    let mut h = harness(one_two);
+    drag_handle(&mut h, "B2", "B6", PointerButton::Primary);
+    assert!(h.query_by_label("Auto Fill Options").is_some());
+    h.state_mut().session.execute("cell.set", json!({"cell": "D1", "input": "x"})).unwrap();
+    h.run_steps(3);
+
+    assert_eq!(selection(&h), "B1:B6", "the selection did not move");
+    assert!(h.query_by_label("Auto Fill Options").is_none(), "its undo would take the unrelated edit with it");
+}

@@ -3398,7 +3398,11 @@ fn fill_options_tag(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet
         }
     });
     if let Some(mode) = chosen {
-        let _ = app.run("edit.undo", json!({}));
+        if let Err(e) = app.run("edit.undo", json!({})) {
+            app.grid.fill_tag = None;
+            app.message = Some(("GridCraft".into(), crate::clean_error(&e)));
+            return;
+        }
         match app.run("edit.autoFill", json!({"source": tag.src.a1(), "target": tag.target.a1(), "mode": mode})) {
             Ok(_) => set_fill_tag(app, tag.src, tag.target),
             Err(e) => {

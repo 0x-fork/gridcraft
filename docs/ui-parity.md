@@ -1,6 +1,6 @@
 # UI parity
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-21 · **Change:** minor (Esc and Enter close a data validation alert over the cell editor; Ctrl+Enter fill gives each cell the automatic number format typing gives it; keytip letters typed with Alt held, #1846; Number Stored as Text indicator and Convert to Number) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-23 · **Change:** minor (Auto Fill Options button after a left-drag of the fill handle (#1403); Esc and Enter close a data validation alert over the cell editor; Ctrl+Enter fill gives each cell the automatic number format typing gives it; keytip letters typed with Alt held, #1846; Number Stored as Text indicator and Convert to Number) · **Target:** Microsoft Excel (Microsoft 365), Excel for Mac 16.113.4
 
 Interaction, controls and feel, against Excel. Part of [target-app-parity.md](target-app-parity.md).
 **UI/UX fidelity: ~55% ready, 50–80 h** (estimated). Ribbon command coverage is measured
@@ -50,7 +50,7 @@ this logic, with one undo step.
 | Click/drag/Shift/Ctrl selection, multi-area selection | rectangular drag works in one direction only in some cases (#28) |
 | Cursor while dragging cells, headers, freeze handles and objects | stable for the active drag (#936); Draw tools keep their crosshair; header arrows and a custom cell cursor remain unimplemented |
 | Selection outline glides to a new selection (Excel: "Provide feedback with animation") | done (10-11): 0.12 s, decelerating, with the fill and fill handle; View ▸ Animations (`view.animations`) turns it off. The timing is an estimate, not yet measured against Excel; the system's reduced-motion setting isn't followed yet |
-| Fill handle: drag to fill series, double-click to fill down, right-drag menu | fill done (Ctrl+drag swaps copy and series); right-drag menu partial: Copy Cells, Fill Series, Fill Formatting Only, Fill Without Formatting, Series…; Fill Days/Weekdays/Months/Years, Linear/Growth Trend and Flash Fill missing |
+| Fill handle: drag to fill series, double-click to fill down, right-drag menu | fill done (Ctrl+drag swaps copy and series); right-drag menu partial: Copy Cells, Fill Series, Fill Formatting Only, Fill Without Formatting, Series…; a left-drag leaves an Auto Fill Options button with the first four (gone once the workbook changes or the selection moves); Fill Days/Weekdays/Months/Years, Linear/Growth Trend and Flash Fill missing |
 | Fill handle: drag to fill series, double-click to fill down, right-drag menu | fill done (Ctrl+drag swaps copy and series); month patterns use the workbook's 1900 or 1904 date system; right-drag menu missing |
 | Drag-move and drag-copy cells (border drag, Ctrl/Option, Shift to insert) | done (M3) |
 | In-cell editing, Enter/Tab movement, Alt/Option+Enter line breaks | done |
@@ -176,6 +176,7 @@ scrollbar bugs 2–4 · pixel/feel pass against observed Excel 7–12.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-23 | minor | After a left-drag of the fill handle an Auto Fill Options button sits below the filled cells; its menu redoes the fill as Copy Cells, Fill Series, Fill Formatting Only or Fill Without Formatting (undoes the drag's fill, then `edit.autoFill` in that mode). It goes away when the workbook changes or the selection moves (#1403) |
 | 2026-10-21 | minor | Background error checking, first part (#1994): a constant whose text would be a number if typed (signs, thousands, currency, percent, exponent, parenthesised negative) gets Excel's green corner triangle; the active cell then shows a warning button whose menu names the problem and offers Convert to Number for the selection (`formulas.convertToNumber`). Dates, times and fractions kept as text and formula results are not flagged, as in Excel |
 | 2026-10-21 | minor | Paste Special laid out as Excel's: Paste and Operation options each in two columns inside a frame, Skip blanks and Transpose side by side, Paste Link as a button that pastes references at once; labels translated (the generic form didn't translate them) and the window no longer runs past the screen |
 | 2026-10-21 | minor | Form dialogs (conditional-format quick rules, New Name, Remove Duplicates, Text to Columns and every other `Dialog::form`) fit their content: OK and Cancel sit in a row under the last field instead of a right-to-left layout that took the screen's whole height and left the buttons floating halfway down |
