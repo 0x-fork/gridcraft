@@ -72,3 +72,25 @@ fn leaving_the_table_while_on_table_design_returns_to_home() {
     h.run_steps(2);
     assert_eq!(h.state().ui.ribbon_tab, "Home");
 }
+
+#[test]
+fn startup_opens_on_home_not_the_saved_tab() {
+    let mut saved = gridcraft_ui_egui::UiState::default();
+    saved.ribbon_tab = "Table Design".into();
+    saved.dark = true;
+    let json = serde_json::to_string(&saved).unwrap();
+    assert!(json.contains(r#""ribbonTab":"Table Design""#), "{json}");
+    let restored = serde_json::from_str::<gridcraft_ui_egui::UiState>(&json).unwrap().at_startup();
+    assert_eq!(restored.ribbon_tab, "Home", "the saved tab is not restored");
+    assert!(restored.dark, "the other preferences are");
+}
+
+#[test]
+fn an_ordinary_tab_stays_put_in_a_session() {
+    let mut session = Session::new();
+    session.new_workbook();
+    let mut h = harness(session);
+    h.state_mut().ui.ribbon_tab = "Data".into();
+    h.run_steps(3);
+    assert_eq!(h.state().ui.ribbon_tab, "Data");
+}
