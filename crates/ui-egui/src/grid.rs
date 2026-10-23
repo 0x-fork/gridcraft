@@ -3396,7 +3396,8 @@ fn fill_options_tag(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet
     let size = vec2(18.0, 18.0);
     let corner = geo.range_rect(sh, tag.target).right_bottom();
     let button = geo.mirror_rect(Rect::from_min_size(corner + vec2(2.0, 2.0), size));
-    if !geo.cells.contains_rect(button) {
+    // `button` is in screen space, so compare it with the mirrored cells area.
+    if !geo.mirror_rect(geo.cells).contains_rect(button) {
         return;
     }
     let lang = crate::i18n::current(ui.ctx());
