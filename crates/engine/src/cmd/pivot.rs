@@ -764,11 +764,13 @@ fn show_details(s: &mut Session, p: &Json) -> Result<Json> {
         .find(|pt| pt.last_range.is_some_and(|r| r.contains(at)))
         .ok_or_else(|| EngineError::Disabled("pivot.showDetails".into(), pv::NOT_A_VALUE_CELL.into()))?;
     let origin = pt.last_range.map(|r| r.start).unwrap_or_default();
-    let found = pv::detail_records(&d.wb, pt, active, at.row.saturating_sub(origin.row), at.col.saturating_sub(origin.col)).map_err(other)?;
-    let (src, records) = found.ok_or_else(|| EngineError::Disabled("pivot.showDetails".into(), pv::NOT_A_VALUE_CELL.into()))?;
-    if !pt.enable_show_details {
+    let found = pv::detail_records(&d.wb, pt, active, at.row.saturating_sub(origin.row), at.col.saturating_sub(origin.col));
+    // With the option off, a report that is out of date or a source that cannot be read is
+    // reported as the option; only a cell that is not a value cell keeps its own message.
+    if !pt.enable_show_details && !matches!(found, Ok(None)) {
         return Err(other(SHOW_DETAILS_OFF));
     }
+    let (src, records) = found.map_err(other)?.ok_or_else(|| EngineError::Disabled("pivot.showDetails".into(), pv::NOT_A_VALUE_CELL.into()))?;
     if d.wb.protected_structure {
         return Err(other("The workbook is protected and cannot be changed."));
     }
@@ -837,7 +839,7 @@ fn show_details(s: &mut Session, p: &Json) -> Result<Json> {
 }
 
 /// The message Show Details gives while Enable show details is off.
-const SHOW_DETAILS_OFF: &str = "Show Details is turned off for this PivotTable. Turn on Enable show details in PivotTable Options.";
+const SHOW_DETAILS_OFF: &str = "Show Details is turned off for this PivotTable. Turn it on with pivot.options and enableShowDetails set to true.";
 
 /// PivotTable Options: Enable show details (Data). Changes only the option; the report is not
 /// refreshed. Without params it returns the current setting.
@@ -2629,11 +2631,11 @@ mod tests {
         assert!(!pt(&s).enable_show_details);
         assert_eq!(s.execute("pivot.fields", json!({})).unwrap()["enableShowDetails"], false);
         let e = s.execute("pivot.showDetails", json!({"cell": "B5"})).unwrap_err().to_string();
-        assert!(e.contains("Enable show details"), "{e}");
+        assert!(e.contains("turned off") && e.contains("pivot.options") && e.contains("enableShowDetails"), "{e}");
         assert_eq!(s.doc().unwrap().wb.sheets.len(), 2);
         // A label still reports that it is not a value cell.
         let e = s.execute("pivot.showDetails", json!({"cell": "A5"})).unwrap_err().to_string();
-        assert!(!e.contains("Enable show details"), "{e}");
+        assert!(!e.contains("turned off"), "{e}");
         // Setting the same value again adds no undo step.
         let after = s.doc().unwrap().revision;
         s.execute("pivot.options", json!({"enableShowDetails": false})).unwrap();
@@ -2643,5 +2645,17 @@ mod tests {
         s.execute("edit.undo", json!({})).unwrap();
         assert!(pt(&s).enable_show_details);
         assert_eq!(s.execute("pivot.showDetails", json!({"cell": "B5"})).unwrap()["records"], 2);
+    }
+
+    #[test]
+    fn enable_show_details_off_is_reported_before_an_out_of_date_report() {
+        let mut s = sales();
+        s.execute("insert.pivotTable", json!({"rows": ["Region"], "columns": ["Product"], "values": ["Sales"]})).unwrap();
+        s.execute("pivot.options", json!({"enableShowDetails": false})).unwrap();
+        // The source changes after the report was written, so the report is out of date.
+        s.execute("range.setValues", json!({"range": "Sheet1!A2", "values": [["Central"]]})).unwrap();
+        let e = s.execute("pivot.showDetails", json!({"cell": "B5"})).unwrap_err().to_string();
+        assert!(e.contains("turned off") && !e.contains("out of date"), "{e}");
+        assert_eq!(s.doc().unwrap().wb.sheets.len(), 2);
     }
 }

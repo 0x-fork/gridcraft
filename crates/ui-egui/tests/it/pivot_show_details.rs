@@ -116,6 +116,6 @@ fn double_click_with_enable_show_details_off_says_why_and_does_not_edit() {
 
     let app = h.state();
     assert!(app.editor.is_none(), "the value cell must not open for editing");
-    assert!(app.message.as_ref().is_some_and(|(_, m)| m.contains("Enable show details")), "{:?}", app.message);
+    assert!(app.message.as_ref().is_some_and(|(_, m)| m.contains("enableShowDetails")), "{:?}", app.message);
     assert_eq!(app.session.active().unwrap().wb.sheets.len(), 1);
 }
