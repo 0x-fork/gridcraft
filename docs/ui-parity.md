@@ -137,7 +137,6 @@ otherwise. Number-format and border keys match the physical key (Ctrl+Shift+4, w
 | Ctrl+Q, Ctrl+A after a function name, Ctrl+Alt+P | same | Quick Analysis, Function Arguments, tooltips | missing |
 | Ctrl+Shift+A after a function name | Control+Shift+A | argument names: `=SUMIF(` becomes `=SUMIF(range,criteria,sum_range)`, the `(` added when missing; one Undo takes them back | **added** |
 | Ctrl+Shift+U | Control+Shift+U | expand or collapse the formula bar (`view.expandFormulaBar`), on the grid and while editing; on Windows and Linux it no longer underlines | **added** |
-| Ctrl+6, Ctrl+Q, Ctrl+A after a function name, Ctrl+Alt+P | same | objects, Quick Analysis, Function Arguments, tooltips | missing |
 | Ctrl+Shift+Page Up / Down, Ctrl+Alt+5, Ctrl+Shift+F1, Ctrl+F5–F10, Alt+F8 / F11 / F12 | same | group sheets, shape cycling, full screen, window keys, macros, VBA, Power Query | missing |
 | — | Cmd+= (calculate), Cmd+T (references while editing; F4 works), Shift+F7, Cmd+Shift+L | Mac-only extras | missing (Cmd+= is egui's zoom key; no thesaurus or Modify Cell Style) |
 
