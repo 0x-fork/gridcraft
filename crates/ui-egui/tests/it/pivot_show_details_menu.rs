@@ -4,7 +4,7 @@
 use egui::{Event, Modifiers, PointerButton, Pos2, vec2};
 use egui_kittest::kittest::Queryable as _;
 use gridcraft_engine::Session;
-use gridcraft_engine::core::CellRef;
+use gridcraft_engine::core::{CellRef, Value};
 use gridcraft_ui_egui::{SheetApp, grid::Geo};
 use serde_json::json;
 
@@ -88,6 +88,23 @@ fn labels_of_the_report_and_ordinary_cells_have_no_show_details_item() {
         h.input_mut().events.push(escape);
         h.run_steps(2);
     }
+}
+
+#[test]
+fn the_cell_menu_computes_the_report_once_for_all_its_cells() {
+    let mut h = harness();
+    right_click(&mut h, "E4");
+    assert!(h.query_by_label("Show Details").is_some());
+    let escape = Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
+    h.input_mut().events.push(escape);
+    h.run_steps(2);
+    // West goes away behind the session's back, so the revision stays the same. A menu that
+    // computed the report again for D4 would find it out of date and offer Show Details there.
+    let doc = h.state_mut().session.active_mut().unwrap();
+    let si = doc.wb.active_sheet;
+    std::sync::Arc::make_mut(&mut doc.wb).sheet_mut(si).unwrap().set_value(CellRef::parse("A3").unwrap(), Value::text("East"));
+    right_click(&mut h, "D4");
+    assert!(h.query_by_label("Show Details").is_none(), "D4 is a label of the report computed for E4");
 }
 
 #[test]

@@ -163,9 +163,11 @@ pub struct GridState {
     /// The PivotTable Fields pane's `pivot.fields` answer, cached per (doc uid, revision, pivot):
     /// it scans the whole source list, far too slow to repeat every frame (#2113).
     pub pivot_fields: Option<((u64, u64, String), serde_json::Value)>,
-    /// Whether the cell menu offers Show Details, cached per (doc uid, revision, sheet, active
-    /// cell): finding out computes the whole PivotTable report.
-    pub show_details_item: Option<((u64, u64, usize, CellRef), bool)>,
+    /// The cells of a PivotTable report where the cell menu offers Show Details, relative to the
+    /// report's top-left and cached per (doc uid, revision, sheet, pivot): finding them computes
+    /// the whole report. `None` when the report can't be computed or is out of date: every cell
+    /// of it offers Show Details, and running it says why.
+    pub show_details_cells: Option<((u64, u64, usize, usize), Option<std::collections::HashSet<(u32, u32)>>)>,
     pub header_menu: Option<(Pos2, bool)>,
     /// Page Layout view pagination, cached per (doc uid, revision, sheet, rows, columns).
     pub paper: Option<crate::paper_view::PaperCache>,
@@ -3424,20 +3426,21 @@ fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
 fn show_details_offered(app: &mut SheetApp) -> bool {
     let Some(d) = app.session.active() else { return false };
     let (si, at) = (d.wb.active_sheet, d.selection.active);
-    let key = (d.uid, d.revision, si, at);
-    if let Some((k, on)) = app.grid.show_details_item
-        && k == key
+    let Some((pi, pt)) = d.wb.active().and_then(|sh| sh.pivots.iter().enumerate().find(|(_, pt)| pt.last_range.is_some_and(|r| r.contains(at))))
+    else {
+        return false;
+    };
+    let origin = pt.last_range.map(|r| r.start).unwrap_or_default();
+    let cell = (at.row.saturating_sub(origin.row), at.col.saturating_sub(origin.col));
+    let key = (d.uid, d.revision, si, pi);
+    if let Some((k, cells)) = &app.grid.show_details_cells
+        && *k == key
     {
-        return on;
+        return cells.as_ref().is_none_or(|c| c.contains(&cell));
     }
-    let on = d.wb.active().and_then(|sh| sh.pivots.iter().find(|pt| pt.last_range.is_some_and(|r| r.contains(at)))).is_some_and(|pt| {
-        let origin = pt.last_range.map(|r| r.start).unwrap_or_default();
-        !matches!(
-            gridcraft_engine::pivot::detail_records(&d.wb, pt, si, at.row.saturating_sub(origin.row), at.col.saturating_sub(origin.col)),
-            Ok(None)
-        )
-    });
-    app.grid.show_details_item = Some((key, on));
+    let cells = gridcraft_engine::pivot::detail_cells(&d.wb, pt, si).ok();
+    let on = cells.as_ref().is_none_or(|c| c.contains(&cell));
+    app.grid.show_details_cells = Some((key, cells));
     on
 }
 
