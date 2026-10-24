@@ -290,3 +290,47 @@ fn down_from_a_frozen_header_row_goes_to_row_2_at_the_top_from_far_down() {
     assert_eq!(scroll(&h).y, 0.0);
     assert!(visible(&h, "A2"));
 }
+
+#[test]
+fn shift_arrows_on_a_whole_column_leave_the_rows_where_they_are() {
+    // A whole column's moving end is on the sheet's last row: Shift+Right from Ctrl+Space must
+    // widen it to the next columns without scrolling down to the bottom of the sheet.
+    let mut h = harness();
+    h.state_mut().session.execute("selection.set", json!({"cell": "A100"})).unwrap();
+    h.state_mut().grid.ensure_visible = true;
+    h.run_steps(2);
+    let down = scroll(&h).y;
+    assert!(down > 0.0 && visible(&h, "A100"));
+    h.state_mut().session.execute("selection.column", json!({})).unwrap();
+    h.run_steps(2);
+    key(&mut h, Key::ArrowRight, Modifiers::SHIFT);
+    assert_eq!(h.state().session.active().unwrap().selection.current(), RangeRef::parse("A:B").unwrap());
+    assert_eq!(scroll(&h).y, down, "the view stays on the rows it showed");
+    // The columns still scroll to follow the extension.
+    for _ in 0..30 {
+        key(&mut h, Key::ArrowRight, Modifiers::SHIFT);
+    }
+    assert!(visible(&h, "AF100") && !visible(&h, "A100"));
+    assert_eq!(scroll(&h).y, down);
+}
+
+#[test]
+fn shift_arrows_on_a_whole_row_leave_the_columns_where_they_are() {
+    let mut h = harness();
+    h.state_mut().session.execute("selection.set", json!({"cell": "CA1"})).unwrap();
+    h.state_mut().grid.ensure_visible = true;
+    h.run_steps(2);
+    let right = scroll(&h).x;
+    assert!(right > 0.0 && visible(&h, "CA1"));
+    h.state_mut().session.execute("selection.row", json!({})).unwrap();
+    h.run_steps(2);
+    key(&mut h, Key::ArrowDown, Modifiers::SHIFT);
+    assert_eq!(h.state().session.active().unwrap().selection.current(), RangeRef::parse("1:2").unwrap());
+    assert_eq!(scroll(&h).x, right, "the view stays on the columns it showed");
+    // The rows still scroll to follow the extension.
+    for _ in 0..60 {
+        key(&mut h, Key::ArrowDown, Modifiers::SHIFT);
+    }
+    assert!(visible(&h, "CA62") && !visible(&h, "CA1"));
+    assert_eq!(scroll(&h).x, right);
+}
