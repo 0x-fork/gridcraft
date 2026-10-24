@@ -415,6 +415,34 @@ fn options_sets_maximum_iterations_and_change_only_while_iteration_is_on() {
     assert_eq!(calc(&h).max_change, 0.01);
     let change = field(&h, "Maximum Change:");
     assert_eq!(h.get_all_by_role(Role::TextInput).find(|n| n.rect() == change).unwrap().value().as_deref(), Some("0.01"));
+
+    // A value typed but not confirmed with Enter is dropped when the checkbox switches iteration off.
+    let iterations = field(&h, "Maximum Iterations:");
+    h.input_mut().events.push(egui::Event::PointerMoved(iterations.center()));
+    h.run_steps(1);
+    h.get_all_by_role(Role::TextInput).find(|n| n.rect() == iterations).unwrap().click();
+    h.run_steps(2);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.input_mut().events.push(egui::Event::Text("777".into()));
+    h.run_steps(2);
+    h.get_by_role_and_label(Role::CheckBox, "Enable iterative calculation").click();
+    h.run_steps(3);
+    assert!(!calc(&h).iterative);
+    assert_eq!(calc(&h).max_iterations, 32767, "an unconfirmed entry is not committed once iteration is off");
+    assert!(h.state().message.is_none());
+
+    // Spanish accepts a decimal comma in Maximum Change, and still a dot.
+    h.get_by_role_and_label(Role::CheckBox, "Enable iterative calculation").click();
+    h.run_steps(3);
+    h.state_mut().run("app.language.set", serde_json::json!({"language": Language::Es.code()})).unwrap();
+    h.state_mut().run("file.options", serde_json::json!({})).unwrap();
+    h.run_steps(3);
+    let change = field(&h, "Cambio máximo:");
+    retype(&mut h, change, "0,02");
+    assert_eq!(calc(&h).max_change, 0.02);
+    retype(&mut h, change, "0.5");
+    assert_eq!(calc(&h).max_change, 0.5);
+    assert!(h.state().message.is_none());
 }
 
 /// Share › Export as Web Page (and the native File menu's Save as Web Page) asks for a name in its
