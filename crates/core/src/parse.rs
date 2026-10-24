@@ -54,8 +54,10 @@ pub fn parse_number_text_in(s: &str, sys: DateSystem) -> Option<f64> {
 /// fractions kept as text are not flagged, as in Excel.
 pub fn number_stored_as_text(s: &str) -> Option<f64> {
     let t = s.trim();
-    match t.strip_prefix('(').and_then(|x| x.strip_suffix(')')) {
-        Some(inner) => parse_plain(inner.trim()).map(|(n, _)| -n),
+    // The same parentheses typed entry reads, accounting forms included: `$(5)`, `(5)%`.
+    match parenthesized(t) {
+        Some(inner) if inner.strip_prefix('$').map_or(inner.as_str(), str::trim_start).starts_with(['-', '+', '(']) => None,
+        Some(inner) => parse_plain(&inner).map(|(n, _)| -n),
         None => parse_plain(t).map(|(n, _)| n),
     }
 }
@@ -593,11 +595,21 @@ mod tests {
 
     #[test]
     fn numbers_stored_as_text() {
-        for (text, n) in [("123", 123.0), (" 42 ", 42.0), ("-1,000.5", -1000.5), ("$3", 3.0), ("50%", 0.5), ("1E3", 1000.0), ("(100)", -100.0)] {
+        for (text, n) in [
+            ("123", 123.0),
+            (" 42 ", 42.0),
+            ("-1,000.5", -1000.5),
+            ("$3", 3.0),
+            ("50%", 0.5),
+            ("1E3", 1000.0),
+            ("(100)", -100.0),
+            ("$(5)", -5.0),
+            ("(5)%", -0.05),
+        ] {
             assert_eq!(number_stored_as_text(text), Some(n), "{text}");
         }
         // Dates, times, fractions, words and blanks are not flagged.
-        for text in ["3/4/2026", "10:30", "1 1/2", "abc", "12abc", "", "  ", "TRUE", "#N/A", "((1))"] {
+        for text in ["3/4/2026", "10:30", "1 1/2", "abc", "12abc", "", "  ", "TRUE", "#N/A", "((1))", "(-5)", "$(5)%", "(1/2)"] {
             assert_eq!(number_stored_as_text(text), None, "{text}");
         }
     }

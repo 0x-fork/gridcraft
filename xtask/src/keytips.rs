@@ -58,7 +58,7 @@ struct Entry {
 impl Entry {
     /// The probe key: a command and the params its keytip passes.
     fn probe_key(&self) -> String {
-        if self.params.is_empty() { self.target.clone() } else { format!("{} {}", self.target, self.params) }
+        if self.params.is_empty() || self.params == "{}" { self.target.clone() } else { format!("{} {}", self.target, self.params) }
     }
 }
 

@@ -30,7 +30,8 @@ fn pmt_calc(rate: f64, nper: f64, pv: f64, fv: f64, typ: f64) -> f64 {
     let k = 1.0 + rate * typ;
     if m > 0.0 {
         // (fv + pv*p) / (p - 1) = pv + (pv + fv) / (p - 1), without the cancellation in p - 1.
-        -(pv + (pv + fv) / m) * rate / k
+        // rate / m (about 1 / nper for a tiny rate) is taken first so (pv + fv) / m can't overflow.
+        -(pv * rate + (pv + fv) * (rate / m)) / k
     } else if m > -0.5 {
         // p near 1 from below: fv + pv*p = (pv + fv) + pv*m keeps the small terms that rounding p would drop.
         -(rate * (pv + fv + pv * m)) / (k * m)
@@ -1837,6 +1838,7 @@ mod tests {
         assert_eq!(ev("PMT", vec![n(5.0), n(1000.0), n(100.0)]), Value::Number(-500.0));
         assert_eq!(ev("PMT", vec![n(1e-300), n(10.0), n(100.0)]), Value::Number(-10.0));
         close_tol(ev("PMT", vec![n(1e-12), n(10.0), n(100.0)]), -10.000000000055001, 1e-15);
+        close_tol(ev("PMT", vec![n(1e-300), n(10.0), n(1e12)]), -1e11, 1e-15);
         close_tol(ev("PMT", vec![n(-0.999), n(5.0), n(100.0)]), -9.990_000_000_000_092e-14, 1e-15);
         close_tol(ev("PMT", vec![n(0.05), n(-10.0), n(100.0)]), 7.950_457_496_545_667, 1e-15);
         close_tol(ev("PMT", vec![n(-1e-17), n(1.0), n(1e18), n(-1e18)]), 10.0, 1e-9);

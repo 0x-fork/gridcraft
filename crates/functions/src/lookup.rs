@@ -31,7 +31,7 @@ fn needle(args: &[Arg], i: usize) -> R<Value> {
 /// The same holds for `=100+1E-14` against 100, and in every XLOOKUP / XMATCH mode.
 fn lookup_order(a: &Value, b: &Value) -> Ordering {
     match (a, b) {
-        (Value::Number(x), Value::Number(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
+        (Value::Number(x), Value::Number(y)) => x.partial_cmp(y).unwrap_or_else(|| compare(a, b)),
         _ => compare(a, b),
     }
 }
