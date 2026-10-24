@@ -334,6 +334,8 @@ fn numbervalue(a: &[Arg], c: &mut dyn Ctx) -> R<Value> {
             if seen_dec {
                 return Err(CellError::Value);
             }
+        } else if c == '.' || c == ',' {
+            return Err(CellError::Value);
         } else {
             out.push(c);
         }
@@ -1223,6 +1225,8 @@ mod tests {
         close(ev("NUMBERVALUE", vec![t(" 1 000 ")]), 1000.0);
         close(ev("NUMBERVALUE", vec![t("")]), 0.0);
         is_err(ev("NUMBERVALUE", vec![t("1.2.3")]), CellError::Value);
+        is_err(ev("NUMBERVALUE", vec![t("1.5"), t(","), t(" ")]), CellError::Value);
+        is_err(ev("NUMBERVALUE", vec![t("1,5"), t("."), t(" ")]), CellError::Value);
         is_text(ev("FIXED", vec![n(1234.567), n(1.0)]), "1,234.6");
         is_text(ev("FIXED", vec![n(1234.567), n(-1.0)]), "1,230");
         is_text(ev("FIXED", vec![n(-1234.567), n(1.0), b(true)]), "-1234.6");
