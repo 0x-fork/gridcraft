@@ -448,6 +448,11 @@ impl std::fmt::Write for ClipboardHtml {
 /// Most rows Save as Web Page writes. A sheet whose used range is taller fails instead of losing cells.
 const HTML_EXPORT_MAX_ROWS: u32 = 100_001;
 
+/// Rows × columns of one web-page table. Save as Web Page writes every kept row's full used
+/// column span into one growing String, so a sparse sheet with a lone far-right cell (or a
+/// tall, wide one) would otherwise be gigabytes of `<td></td>` before finishing (#2387).
+const HTML_EXPORT_MAX_CELLS: u64 = 4_000_000;
+
 /// A sheet as a standalone HTML table (Save as Web Page). A sheet with pictures gets the sheet's
 /// own column widths and row heights so each picture and chart (inline SVG) can sit at its anchor.
 pub fn to_html(wb: &Workbook, sheet: usize) -> Result<String> {
@@ -477,6 +482,17 @@ pub fn to_html(wb: &Workbook, sheet: usize) -> Result<String> {
             return Err(EngineError::Other(format!(
                 "the sheet is too tall for a web page ({} rows, at most {HTML_EXPORT_MAX_ROWS}). Save as .xlsx or CSV instead.",
                 r.height()
+            )));
+        }
+        // The table is one growing String: every kept row writes a `<td>` for the whole used
+        // column span (unless the sheet has no row that is that wide). A tall, wide sheet
+        // (or a sparse one with a lone far-right cell) would be gigabytes before finishing,
+        // so the rectangle itself is bounded (#2387).
+        if u64::from(r.height()) * u64::from(r.width()) > HTML_EXPORT_MAX_CELLS {
+            return Err(EngineError::Other(format!(
+                "the sheet is too tall × wide for a web page ({} × {} cells, at most {HTML_EXPORT_MAX_CELLS}). Save as .xlsx or CSV instead.",
+                r.height(),
+                r.width()
             )));
         }
         if fixed {
@@ -709,6 +725,23 @@ mod tests {
     fn copied(wb: &Workbook, range: &str) -> String {
         let r = RangeRef::parse(range).unwrap();
         range_html(wb, 0, r, &crate::display::range_text(wb, 0, r)).unwrap()
+    }
+
+    #[test]
+    fn html_export_refuses_an_outsized_grid_instead_of_growing_forever() {
+        // #2387: the used rectangle alone bounds the output (every row writes the whole
+        // column span), so a sparse sheet with one cell at A1 and another far right
+        // 300 rows down is 4.9M cells → refused before a byte of `<td>` is written.
+        let mut wb = Workbook::new();
+        let sh = wb.sheet_mut(0).unwrap();
+        sh.set_value(CellRef::new(0, 0), gridcraft_core::Value::Text("start".into()));
+        sh.set_value(CellRef::new(300, 16383), gridcraft_core::Value::Text("corner".into()));
+        let err = to_html(&wb, 0).unwrap_err();
+        assert!(err.to_string().contains("too tall × wide"), "{err}");
+        // A normal sheet is fine.
+        let mut ok = Workbook::new();
+        ok.sheet_mut(0).unwrap().set_value(CellRef::new(5, 2), gridcraft_core::Value::Text("t".into()));
+        assert!(to_html(&ok, 0).is_ok());
     }
 
     #[test]
