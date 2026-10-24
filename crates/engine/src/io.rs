@@ -604,14 +604,27 @@ fn script_sandbox_check(path: &str) -> Result<()> {
     Ok(())
 }
 
+/// The largest native file the reader still touches: its own cap plus one, used to stop
+/// reads whose bytes arrive faster than metadata can claim (device files, growing files).
+const MAX_READ_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn read_file(path: &str) -> Result<Vec<u8>> {
+    use std::io::Read;
     script_sandbox_check(path)?;
-    let meta = std::fs::metadata(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    if meta.len() > 2 * 1024 * 1024 * 1024 {
+    let f = std::fs::File::open(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    // A symlink to an endless device reports length 0 but streams forever, so metadata
+    // alone never bounds the read: require a real file and cap the bytes actually taken.
+    if !f.metadata().map_err(|e| EngineError::Other(format!("{path}: {e}")))?.is_file() {
+        return Err(EngineError::Other(format!("{path}: only regular files can be opened")));
+    }
+    let mut buf = Vec::new();
+    let mut limited = (&f).take(MAX_READ_BYTES + 1);
+    limited.read_to_end(&mut buf).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    if buf.len() as u64 > MAX_READ_BYTES {
         return Err(EngineError::Other("files larger than 2 GB aren't supported".into()));
     }
-    std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))
+    Ok(buf)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -622,10 +635,35 @@ pub fn read_file(path: &str) -> Result<Vec<u8>> {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn write_file(path: &str, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
     script_sandbox_check(path)?;
     // Write to a temporary file, then rename: a crash never leaves a half-written workbook.
+    // The temporary file is created exclusively, so an existing file or symlink at that
+    // path (planted by another local user) makes the save fail instead of truncating the
+    // link's target; and it inherits the destination's access restrictions, so saving a
+    // private workbook doesn't widen who can read it.
     let tmp = format!("{path}.sctmp");
-    std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path)).map_err(|e| {
+    let prior = std::fs::metadata(path).ok().map(|m| m.permissions());
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    if let Some(p) = &prior {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        opts.mode(p.mode());
+    }
+    let mut f = opts.open(&tmp).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        EngineError::Other(format!("{path}: {e}"))
+    })?;
+    #[cfg(not(unix))]
+    if let Some(p) = &prior {
+        let _ = f.set_permissions(p.clone());
+    }
+    f.write_all(bytes).and_then(|()| f.flush()).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        EngineError::Other(format!("{path}: {e}"))
+    })?;
+    std::fs::rename(&tmp, path).map_err(|e| {
         // A write or rename that fails (full disk, the workbook locked by another app) leaves
         // no temporary file beside the user's workbook.
         let _ = std::fs::remove_file(&tmp);
@@ -725,6 +763,57 @@ mod tests {
     fn copied(wb: &Workbook, range: &str) -> String {
         let r = RangeRef::parse(range).unwrap();
         range_html(wb, 0, r, &crate::display::range_text(wb, 0, r)).unwrap()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn save_fails_upfront_when_the_temp_name_is_taken() {
+        // Another local user who can write the directory must not be able to point the
+        // save's predictable temporary name at their own file: creation is exclusive.
+        let dir = std::env::temp_dir().join("gridcraft-fs-safety");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let victim = dir.join("victim.txt");
+        std::fs::write(&victim, b"original").unwrap();
+        let dest = dir.join("book.xlsx");
+        std::os::unix::fs::symlink(&victim, dir.join("book.xlsx.sctmp")).unwrap();
+        let err = write_file(dest.to_str().unwrap(), b"new").unwrap_err();
+        assert_eq!(std::fs::read(&victim).unwrap(), b"original");
+        assert!(!dir.join("book.xlsx").exists(), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(unix)]
+    #[test]
+    fn save_keeps_the_destination_access_restrictions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join("gridcraft-fs-safety");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("private.xlsx");
+        std::fs::write(&dest, b"v1").unwrap();
+        std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o600)).unwrap();
+        write_file(dest.to_str().unwrap(), b"v2").unwrap();
+        let mode = std::fs::metadata(&dest).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        // And a brand-new file is created with the restrictive, not permissive, default.
+        let fresh = dir.join("new.xlsx");
+        write_file(fresh.to_str().unwrap(), b"v").unwrap();
+        let mode = std::fs::metadata(&fresh).unwrap().permissions().mode() & 0o777;
+        assert!(mode & 0o022 == 0, "mode {mode:o}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn open_refuses_directories_and_unknowable_lengths() {
+        let dir = std::env::temp_dir().join("gridcraft-fs-safety");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(read_file(dir.to_str().unwrap()).is_err(), "a directory is not a regular file");
+        assert!(read_file(dir.join("missing").to_str().unwrap()).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
