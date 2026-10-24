@@ -163,6 +163,9 @@ pub struct GridState {
     /// The PivotTable Fields pane's `pivot.fields` answer, cached per (doc uid, revision, pivot):
     /// it scans the whole source list, far too slow to repeat every frame (#2113).
     pub pivot_fields: Option<((u64, u64, String), serde_json::Value)>,
+    /// Whether the cell menu offers Show Details, cached per (doc uid, revision, sheet, active
+    /// cell): finding out computes the whole PivotTable report.
+    pub show_details_item: Option<((u64, u64, usize, CellRef), bool)>,
     pub header_menu: Option<(Pos2, bool)>,
     /// Page Layout view pagination, cached per (doc uid, revision, sheet, rows, columns).
     pub paper: Option<crate::paper_view::PaperCache>,
@@ -3353,6 +3356,12 @@ fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
             if let Some(item) = insert_copied {
                 items.insert(6, item);
             }
+            if show_details_offered(app)
+                && let Some(i) = items.iter().position(|(_, id)| *id == "data.sortDescending")
+            {
+                items.insert(i + 1, ("-", ""));
+                items.insert(i + 2, ("Show Details", "pivot.showDetails"));
+            }
             let lang = crate::i18n::current(ui.ctx());
             for (label, id) in items {
                 if label == "-" {
@@ -3407,6 +3416,29 @@ fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
     {
         app.grid.context_menu = None;
     }
+}
+
+/// Whether the cell menu offers Show Details (Excel's right-click › Show Details): the active cell
+/// is a value, subtotal or grand total cell of a PivotTable, or a cell of a report that is out of
+/// date, where running the command says so. Labels and headers of a current report don't offer it.
+fn show_details_offered(app: &mut SheetApp) -> bool {
+    let Some(d) = app.session.active() else { return false };
+    let (si, at) = (d.wb.active_sheet, d.selection.active);
+    let key = (d.uid, d.revision, si, at);
+    if let Some((k, on)) = app.grid.show_details_item
+        && k == key
+    {
+        return on;
+    }
+    let on = d.wb.active().and_then(|sh| sh.pivots.iter().find(|pt| pt.last_range.is_some_and(|r| r.contains(at)))).is_some_and(|pt| {
+        let origin = pt.last_range.map(|r| r.start).unwrap_or_default();
+        !matches!(
+            gridcraft_engine::pivot::detail_records(&d.wb, pt, si, at.row.saturating_sub(origin.row), at.col.saturating_sub(origin.col)),
+            Ok(None)
+        )
+    });
+    app.grid.show_details_item = Some((key, on));
+    on
 }
 
 /// The ways to fill a dragged range, as the fill menu and the Auto Fill Options button list them.
