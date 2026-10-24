@@ -1611,6 +1611,7 @@ fn insert(app: &mut SheetApp, ui: &mut Ui) {
                         ("Stacked Line", "line", "stacked"),
                         ("Area", "area", ""),
                         ("Stacked Area", "area", "stacked"),
+                        ("100% Stacked Area", "area", "stacked100"),
                     ],
                 ),
                 (Icon::ChartPie, "Pie or Doughnut", "insert.chart.pie", vec![("Pie", "pie", ""), ("Doughnut", "doughnut", "")]),

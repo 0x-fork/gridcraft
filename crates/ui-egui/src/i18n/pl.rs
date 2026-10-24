@@ -755,6 +755,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Doughnut" => "Pierścieniowy",
         "Area" => "Warstwowy",
         "Stacked Area" => "Warstwowy skumulowany",
+        "100% Stacked Area" => "Warstwowy 100% skumulowany",
         "Scatter" => "Punktowy",
         "Scatter with Lines" => "Punktowy z liniami",
         "Radar" => "Radarowy",

@@ -770,6 +770,7 @@ pub(super) const DIALOGS: &[(&str, &str)] = &[
     ("Doughnut", "ドーナツ"),
     ("Area", "面"),
     ("Stacked Area", "積み上げ面"),
+    ("100% Stacked Area", "100% 積み上げ面"),
     ("Scatter", "散布図"),
     ("Scatter with Lines", "直線付き散布図"),
     ("Radar", "レーダー"),

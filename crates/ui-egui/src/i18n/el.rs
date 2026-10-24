@@ -877,6 +877,7 @@ pub(super) fn translate(text: &str) -> Option<&'static str> {
         "Doughnut" => "Δακτύλιος",
         "Area" => "Περιοχή",
         "Stacked Area" => "Σωρευμένη περιοχή",
+        "100% Stacked Area" => "Σωρευμένη περιοχή 100%",
         "Scatter" => "Διασπορά",
         "Scatter with Lines" => "Διασπορά με γραμμές",
         "Radar" => "Ακτινωτό",

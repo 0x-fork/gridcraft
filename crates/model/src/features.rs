@@ -410,6 +410,7 @@ pub enum ChartKind {
     Doughnut,
     Area,
     AreaStacked,
+    AreaStacked100,
     Scatter,
     ScatterLines,
     Bubble,
