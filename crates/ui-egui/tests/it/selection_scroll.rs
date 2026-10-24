@@ -334,3 +334,33 @@ fn shift_arrows_on_a_whole_row_leave_the_columns_where_they_are() {
     assert!(visible(&h, "CA62") && !visible(&h, "CA1"));
     assert_eq!(scroll(&h).x, right);
 }
+
+#[test]
+fn ctrl_shift_down_past_the_data_to_the_whole_column_still_follows_the_moving_end() {
+    // The second Ctrl+Shift+Down from A1 runs past A200 to the last row: the selection becomes the
+    // whole column, and the view still follows its moving end down the sheet.
+    let mut h = harness();
+    key(&mut h, Key::ArrowDown, CTRL_SHIFT);
+    assert_extended(&h, "A1", "A200");
+    let at_200 = scroll(&h).y;
+    key(&mut h, Key::ArrowDown, CTRL_SHIFT);
+    assert_eq!(h.state().session.active().unwrap().selection.current(), RangeRef::parse("A:A").unwrap());
+    assert!(scroll(&h).y > at_200, "the view follows the extension to the last row");
+}
+
+#[test]
+fn ctrl_shift_right_on_a_whole_column_follows_across_and_keeps_the_rows() {
+    // Ctrl+Space then Ctrl+Shift+Right selects every column: the view follows the moving end to
+    // the last column and stays on the rows it showed.
+    let mut h = harness();
+    h.state_mut().session.execute("selection.set", json!({"cell": "A100"})).unwrap();
+    h.state_mut().grid.ensure_visible = true;
+    h.run_steps(2);
+    let down = scroll(&h).y;
+    h.state_mut().session.execute("selection.column", json!({})).unwrap();
+    h.run_steps(2);
+    key(&mut h, Key::ArrowRight, CTRL_SHIFT);
+    assert_eq!(h.state().session.active().unwrap().selection.current(), RangeRef::parse("A:XFD").unwrap());
+    assert!(scroll(&h).x > 0.0, "the view follows the extension across");
+    assert_eq!(scroll(&h).y, down, "the view stays on the rows it showed");
+}

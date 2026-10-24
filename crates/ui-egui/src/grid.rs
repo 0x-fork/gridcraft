@@ -706,7 +706,9 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
         let from = app.grid.reveal_from.take();
         let target = app.editor.as_ref().and_then(|e| e.point_cell).unwrap_or(cell);
         // A whole column's moving end sits on the sheet's last row (a whole row's on its last
-        // column): extending it only moves across, so the view keeps its place the other way.
+        // column): when an extension moves it only across, the view keeps its place the other way.
+        // An extension that reaches the last row itself (Ctrl+Shift+Down past the data) still
+        // follows it.
         let extended = (moving && target == cell).then(|| sel.current());
         let before = view.scroll;
         if paper {
@@ -736,10 +738,10 @@ pub fn show(app: &mut SheetApp, ui: &mut egui::Ui) {
         } else if from.is_some_and(|f| f.col >= geo.fc) {
             view.scroll.x = 0.0;
         }
-        if extended.is_some_and(|r| r.is_full_cols()) {
+        if extended.is_some_and(|r| r.is_full_cols()) && from.is_some_and(|f| f.row == cell.row) {
             view.scroll.y = before.y;
         }
-        if extended.is_some_and(|r| r.is_full_rows()) {
+        if extended.is_some_and(|r| r.is_full_rows()) && from.is_some_and(|f| f.col == cell.col) {
             view.scroll.x = before.x;
         }
         view.scroll = view.scroll.max(egui::Vec2::ZERO);
