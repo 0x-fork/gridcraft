@@ -2039,12 +2039,14 @@ fn formulas(app: &mut SheetApp, ui: &mut Ui) {
             let circular = circular_references(app);
             ui.add_enabled_ui(!circular.is_empty(), |ui| {
                 ui.menu_button(lang.tr("Circular References"), |ui| {
-                    for (sheet, cell, label) in circular {
-                        if ui.button(label).clicked() {
-                            act(app, "selection.set", json!({"range": cell, "sheet": sheet}));
-                            app.grid.ensure_visible = true;
+                    egui::ScrollArea::vertical().id_salt("circular_references").max_height(400.0).show(ui, |ui| {
+                        for (sheet, cell, label) in circular {
+                            if ui.button(label).clicked() {
+                                act(app, "selection.set", json!({"range": cell, "sheet": sheet}));
+                                app.grid.ensure_visible = true;
+                            }
                         }
-                    }
+                    });
                 });
             });
         });

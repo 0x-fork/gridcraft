@@ -127,3 +127,31 @@ fn circular_references_scrolls_to_the_cell_picked() {
     assert_eq!(h.state().session.active().unwrap().selection.active.a1(), "C500");
     assert!(h.state().view().scroll.y > 0.0, "the grid scrolls to the cell picked");
 }
+
+#[test]
+fn circular_references_scrolls_a_list_taller_than_the_window() {
+    let mut h = harness(false);
+    for row in 1..=100 {
+        h.state_mut().run("cell.set", json!({"cell": format!("A{row}"), "input": format!("=A{row}+1")})).unwrap();
+    }
+    h.state_mut().run("selection.set", json!({"range": "H20"})).unwrap();
+    h.run_steps(4);
+    open_menu(&mut h);
+    hover(&mut h, CIRCULAR);
+    let window = h.ctx.content_rect();
+    assert!(h.get_by_label("Sheet1!A100").rect().bottom() > window.bottom(), "setup: the last cell starts below the window");
+    hover(&mut h, "Sheet1!A1");
+    for _ in 0..20 {
+        h.input_mut().events.push(Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: vec2(0.0, -10.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run_steps(4);
+    }
+    let last = h.get_by_label("Sheet1!A100").rect();
+    assert!(last.bottom() <= window.bottom(), "the wheel brings the last cell into the window: {last:?} in {window:?}");
+    click(&mut h, last.center());
+    assert_eq!(h.state().session.active().unwrap().selection.active.a1(), "A100");
+}
