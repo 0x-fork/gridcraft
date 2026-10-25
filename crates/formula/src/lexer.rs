@@ -346,7 +346,7 @@ pub fn tokenize_locale(src: &str, locale: crate::FormulaLocale) -> Result<Vec<To
                     // `Sheet1!A1:Sheet1!B2` is a range whose second end repeats the sheet, not a span.
                     let repeats_sheet = is_range_end(&w)
                         && matches!(out.last(), Some(Token { tok: Tok::Sheet(p, None), .. })
-                            if chars.get(j + 1..k).is_some_and(|s| s.iter().map(|c| c.1).eq(p.chars())));
+                            if chars.get(j + 1..k).is_some_and(|s| crate::same_name(&s.iter().map(|c| c.1).collect::<String>(), p)));
                     k > j + 1 && ch(k) == Some('!') && !repeats_sheet
                 } {
                     let mut k = j + 1;

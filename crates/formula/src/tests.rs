@@ -10,6 +10,8 @@ fn range_end_repeating_sheet_name_round_trips() {
     assert_eq!(rt("'a'!A1:'a'!B2"), "a!A1:a!B2");
     assert_eq!(rt("Sheet1!A1:Sheet1!B2"), "Sheet1!A1:Sheet1!B2");
     assert_eq!(rt("SUM(a!A1:a!B2)"), "SUM(a!A1:a!B2)");
+    // Sheet names match without regard to case, as Excel's do.
+    assert_eq!(rt("Sheet1!A1:SHEET1!B2"), "Sheet1!A1:SHEET1!B2");
 }
 
 #[test]
