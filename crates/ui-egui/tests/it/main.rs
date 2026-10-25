@@ -35,6 +35,7 @@ mod find_dialog_focus;
 mod floating_pictures;
 mod font_size_box;
 mod format_painter;
+mod formula_bar_expand;
 mod formula_locale;
 mod formula_point_headers;
 mod formula_popup;
