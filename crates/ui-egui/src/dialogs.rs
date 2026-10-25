@@ -800,7 +800,12 @@ impl Dialog {
                 d.tab = if p("replace").as_bool() == Some(true) { "Replace".into() } else { "Find".into() };
                 d
             }
-            "goTo" => Dialog::custom("goTo", "Go To", json!({"reference": ""})),
+            "goTo" => {
+                let mut dialog = Dialog::custom("goTo", "Go To", json!({"reference": ""}));
+                // Listed once, when the dialog opens.
+                dialog.result = Some(json!(go_to_entries(app)));
+                dialog
+            }
             "pivotCalculatedField" => Dialog::form(
                 "pivotCalculatedField",
                 "Insert Calculated Field",
@@ -2345,21 +2350,28 @@ fn zoom(ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, open: &mut bool) 
     ok_cancel(ui, confirm, open);
 }
 
-fn go_to(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool) {
-    // The named ranges of every sheet, then the references gone to before, newest first.
-    let entries: Vec<String> = app
-        .session
+/// What the Go To dialog lists: the named ranges of every sheet, then the references gone to
+/// before, newest first.
+fn go_to_entries(app: &SheetApp) -> Vec<String> {
+    app.session
         .active()
         .map(|doc| {
             let mut v = gridcraft_engine::cmd::edit::go_to_names(&doc.wb, doc.wb.active_sheet);
             v.extend(doc.go_to_recent.iter().cloned());
             v
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+fn go_to(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool) {
+    let entries: Vec<String> =
+        d.result.as_ref().and_then(Json::as_array).map(|a| a.iter().filter_map(Json::as_str).map(str::to_owned).collect()).unwrap_or_default();
     let current = d.values.get("reference").and_then(Json::as_str).unwrap_or("").to_string();
-    egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
-        for n in entries {
-            let resp = ui.selectable_label(current == n, &n);
+    // A workbook can hold thousands of names: only the rows in view are laid out.
+    let row_height = ui.text_style_height(&egui::TextStyle::Button) + 2.0 * ui.spacing().button_padding.y;
+    egui::ScrollArea::vertical().max_height(160.0).auto_shrink([false, true]).show_rows(ui, row_height, entries.len(), |ui, rows| {
+        for n in entries.get(rows).unwrap_or_default() {
+            let resp = ui.selectable_label(current == *n, n);
             if resp.clicked() || resp.double_clicked() {
                 d.values.insert("reference".into(), json!(n));
             }
