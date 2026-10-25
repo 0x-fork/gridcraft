@@ -2881,6 +2881,25 @@ fn error_checking_quotes_sheet_names_in_circular_references() {
     assert_eq!((d.wb.active_sheet, d.selection.active.a1()), (1, "B2".to_string()));
 }
 
+/// Undo and redo put cells back without calculating them; the circular references listed are
+/// those of the restored cells.
+#[test]
+fn undo_and_redo_list_the_circular_references_of_the_restored_cells() {
+    let mut s = s();
+    let listed = |s: &Session| s.doc().unwrap().calc.circular.iter().map(|(si, c)| (*si, c.a1())).collect::<Vec<_>>();
+    s.execute("cell.set", json!({"cell": "A5", "input": "=A5+1"})).unwrap();
+    assert_eq!(listed(&s), vec![(0, "A5".to_string())]);
+    s.execute("home.insertRows", json!({"rows": "2"})).unwrap();
+    assert_eq!(listed(&s), vec![(0, "A6".to_string())]);
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(listed(&s), vec![(0, "A5".to_string())]);
+    s.execute("edit.redo", json!({})).unwrap();
+    assert_eq!(listed(&s), vec![(0, "A6".to_string())]);
+    // Undoing the loop itself lists none.
+    s.execute("edit.undo", json!({"steps": 2})).unwrap();
+    assert!(listed(&s).is_empty());
+}
+
 fn chart_data(s: &mut Session) {
     s.execute(
         "range.setValues",
