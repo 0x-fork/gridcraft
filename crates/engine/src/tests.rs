@@ -3383,6 +3383,19 @@ fn absolute_objects_ignore_sort_and_structural_edits() {
     assert_eq!(image_cell(&s, pinned), Some(CellRef::parse("A3").unwrap()));
 }
 
+/// Deleting a row removes the sparkline located on it; later ones shift up.
+#[test]
+fn deleting_a_row_removes_its_sparklines() {
+    let mut s = s();
+    s.execute("range.setValues", json!({"range": "A1", "values": [[1, 2, 3], [4, 5, 6], [7, 8, 9]]})).unwrap();
+    s.execute("insert.sparkline", json!({"range": "A2:C2", "location": "E2"})).unwrap();
+    s.execute("insert.sparkline", json!({"range": "A3:C3", "location": "E3"})).unwrap();
+    s.execute("home.deleteRows", json!({"rows": "2:2"})).unwrap();
+    let got: Vec<(String, String)> =
+        s.doc().unwrap().wb.active().unwrap().sparklines.iter().map(|sp| (sp.cell.to_string(), sp.source.clone())).collect();
+    assert_eq!(got, vec![("E2".to_string(), "A2:C2".to_string())]);
+}
+
 /// A "move but don't size" object follows its row across a sort but keeps its size.
 #[test]
 fn move_only_objects_follow_but_do_not_resize() {
