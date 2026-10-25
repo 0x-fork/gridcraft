@@ -1599,6 +1599,7 @@ fn insert(app: &mut SheetApp, ui: &mut Ui) {
                         ("100% Stacked Column", "column", "stacked100"),
                         ("Clustered Bar", "bar", ""),
                         ("Stacked Bar", "bar", "stacked"),
+                        ("100% Stacked Bar", "bar", "stacked100"),
                     ],
                 ),
                 (
