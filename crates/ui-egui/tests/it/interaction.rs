@@ -974,12 +974,12 @@ fn status_bar_shows_macro_badge() {
 }
 
 #[test]
-fn status_bar_quotes_the_sheet_name_of_a_circular_reference() {
+fn status_bar_names_a_circular_reference_by_its_address() {
     let mut s = blank();
     s.execute("home.insertSheet", json!({"name": "Bob's Q1"})).unwrap();
     s.execute("cell.set", json!({"cell": "B2", "input": "=B2+1"})).unwrap();
     let h = harness(s);
-    assert!(h.query_by_label("Circular References: 'Bob''s Q1'!B2").is_some(), "the status bar names the cell as a reference");
+    assert!(h.query_by_label("Circular References: B2").is_some(), "the status bar names the cell on the active sheet without its sheet");
 }
 
 #[test]
@@ -990,10 +990,10 @@ fn status_bar_names_no_cell_when_every_circular_reference_is_on_another_sheet() 
     s.execute("sheet.activate", json!({"sheet": "Sheet1"})).unwrap();
     let mut h = harness(s);
     assert!(h.query_by_label("Circular References").is_some(), "the status bar still reports circular references");
-    assert!(h.query_by_label("Circular References: Data!B2").is_none(), "no cell address from another sheet");
+    assert!(h.query_by_label("Circular References: B2").is_none(), "no cell address from another sheet");
     h.state_mut().session.execute("sheet.activate", json!({"sheet": "Data"})).unwrap();
     h.run_steps(2);
-    assert!(h.query_by_label("Circular References: Data!B2").is_some(), "the active sheet's loop is named");
+    assert!(h.query_by_label("Circular References: B2").is_some(), "the active sheet's loop is named");
 }
 
 #[test]
@@ -1006,8 +1006,8 @@ fn status_bar_names_a_circular_reference_on_the_active_sheet() {
     let circular = s.active().unwrap().calc.circular.clone();
     assert_eq!(circular, vec![(0, CellRef::new(0, 0)), (1, CellRef::new(1, 1))], "Sheet1's loop is listed first");
     let h = harness(s);
-    assert!(h.query_by_label("Circular References: Data!B2").is_some(), "the status bar names the loop on the active sheet");
-    assert!(h.query_by_label("Circular References: Sheet1!A1").is_none(), "not the first loop listed");
+    assert!(h.query_by_label("Circular References: B2").is_some(), "the status bar names the loop on the active sheet");
+    assert!(h.query_by_label("Circular References: A1").is_none(), "not the first loop listed");
 }
 
 #[test]

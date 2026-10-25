@@ -346,11 +346,9 @@ pub fn status_bar(app: &mut SheetApp, ui: &mut Ui) {
                     }
                     if !d.calc.circular.is_empty() {
                         ui.add_space(12.0);
+                        // Only a loop on the active sheet is named, so the address needs no sheet.
                         let label = match d.calc.circular.iter().find(|(si, _)| *si == d.wb.active_sheet) {
-                            Some(&(si, c)) => {
-                                let name = d.wb.sheet(si).map(|s| gridcraft_engine::formula::quote_sheet(&s.name)).unwrap_or_default();
-                                format!("Circular References: {name}!{}", c.a1())
-                            }
+                            Some((_, c)) => format!("Circular References: {}", c.a1()),
                             None => "Circular References".to_owned(),
                         };
                         text(ui, egui::RichText::new(label).font(theme::ui_font(12.5)).color(t.danger));
