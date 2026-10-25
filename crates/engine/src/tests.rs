@@ -4853,3 +4853,26 @@ fn a_script_cannot_switch_windows() {
 }
 
 mod seams;
+
+#[test]
+fn a_saved_workbook_keeps_its_values_until_an_edit_reaches_them() {
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "2"})).unwrap();
+    s.execute("cell.set", json!({"cell": "B1", "input": "=A1*2"})).unwrap();
+    s.execute("cell.set", json!({"cell": "C1", "input": "=10"})).unwrap();
+    let mut wb = (*s.doc().unwrap().wb).clone();
+    // The values a file would have saved, not the ones the formulas give.
+    for (a, n) in [("B1", 99.0), ("C1", 7.0)] {
+        let sheet = std::sync::Arc::make_mut(&mut wb.sheets[0]);
+        let c = CellRef::parse(a).unwrap();
+        let mut cell = sheet.cells.get(c).unwrap().clone();
+        cell.value = Value::Number(n);
+        sheet.set_cell(c, cell);
+    }
+    let mut saved = Session::new();
+    saved.add_document(crate::DocState::from_saved(wb, None, "saved".into(), crate::Trust::FromFile));
+    assert_eq!(v(&saved, "B1"), Value::Number(99.0));
+    saved.execute("cell.set", json!({"cell": "A1", "input": "3"})).unwrap();
+    assert_eq!(v(&saved, "B1"), Value::Number(6.0));
+    assert_eq!(v(&saved, "C1"), Value::Number(7.0));
+}
