@@ -184,7 +184,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Show Details",
             [],
             None,
-            "{cell?: \"B5\" (a value, subtotal or grand total cell of a PivotTable on the active sheet; default: the active cell)} puts the source records behind that value on a new sheet before the current one → {sheet, records}",
+            "{cell?: \"B5\" (a value, subtotal or grand total cell of a PivotTable on the active sheet; default: the active cell)} puts the source records behind that value on a new sheet before the current one → {sheet, records}. An error when the PivotTable's Enable show details option is off (`pivot.options` `{enableShowDetails: true}` turns it on).",
             has_doc,
             show_details
         ),
@@ -839,7 +839,7 @@ fn show_details(s: &mut Session, p: &Json) -> Result<Json> {
 }
 
 /// The message Show Details gives while Enable show details is off.
-const SHOW_DETAILS_OFF: &str = "Show Details is turned off for this PivotTable. Turn it on with pivot.options and enableShowDetails set to true.";
+const SHOW_DETAILS_OFF: &str = "Show Details is turned off for this PivotTable.";
 
 /// PivotTable Options: Enable show details (Data). Changes only the option; the report is not
 /// refreshed. Without params it returns the current setting.
@@ -2376,6 +2376,7 @@ mod tests {
             "pivot.changeSource",
             "pivot.delete",
             "pivot.showDetails",
+            "pivot.options",
         ];
         let hostile = [
             json!({}),
@@ -2631,7 +2632,7 @@ mod tests {
         assert!(!pt(&s).enable_show_details);
         assert_eq!(s.execute("pivot.fields", json!({})).unwrap()["enableShowDetails"], false);
         let e = s.execute("pivot.showDetails", json!({"cell": "B5"})).unwrap_err().to_string();
-        assert!(e.contains("turned off") && e.contains("pivot.options") && e.contains("enableShowDetails"), "{e}");
+        assert_eq!(e, "Show Details is turned off for this PivotTable.");
         assert_eq!(s.doc().unwrap().wb.sheets.len(), 2);
         // A label still reports that it is not a value cell.
         let e = s.execute("pivot.showDetails", json!({"cell": "A5"})).unwrap_err().to_string();
