@@ -847,6 +847,8 @@ impl Dialog {
                 // OK runs `formulas.pasteName` with the selected `name`, so `ui.dialog.confirm` does too.
                 let mut dialog = Dialog::custom("pasteName", "Paste Name", json!({"name": names.first()}));
                 dialog.command = Some("formulas.pasteName");
+                // Listed once, when the dialog opens.
+                dialog.result = Some(json!(names));
                 dialog
             }
             "manageRules" => Dialog::custom("manageRules", "Conditional Formatting Rules Manager", json!({})),
@@ -2557,7 +2559,8 @@ pub(crate) fn insert_name(app: &mut SheetApp, name: &str) {
 /// selected name (`formulas.pasteName` with `name`); Paste List writes every name and what it
 /// refers to from the active cell.
 fn paste_name(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut bool, open: &mut bool) {
-    let names = pasteable_names(app);
+    let names: Vec<String> =
+        d.result.as_ref().and_then(Json::as_array).map(|a| a.iter().filter_map(Json::as_str).map(str::to_owned).collect()).unwrap_or_default();
     // The `name` value is the selection, so `ui.dialog.set` can choose one too.
     if let Some(i) = d.values.get("name").and_then(Json::as_str).and_then(|n| names.iter().position(|x| x == n)) {
         d.list_index = i;

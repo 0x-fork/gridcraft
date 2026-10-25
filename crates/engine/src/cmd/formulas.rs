@@ -60,7 +60,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Paste Names…",
             ["Formulas", "Defined Names"],
             Some("F3"),
-            "{name?: \"Sales\" (OK: puts the name at the caret of the cell being edited, or starts `=Sales` in the active cell), list?: true (Paste List: writes each name and what it refers to in two columns, from `at`), at?: cell (default the active cell)} → {names: [{name, refersTo}]}: the names the Paste Name dialog lists (workbook names and the active sheet's own, hidden names left out, in alphabetical order). With neither nothing changes; the menu opens the dialog.",
+            "{name?: \"Sales\" (one of the names listed; OK: puts the name at the caret of the cell being edited, or starts `=Sales` in the active cell), list?: true (Paste List: writes each name and what it refers to in two columns, from `at`), at?: cell (default the active cell)} → {names: [{name, refersTo}]}: the names the Paste Name dialog lists (workbook names and the active sheet's own, hidden names left out, in alphabetical order). With neither nothing changes; the menu opens the dialog.",
             has_doc,
             paste_name
         ),
@@ -525,10 +525,10 @@ fn create_from_selection(s: &mut Session, p: &Json) -> Result<Json> {
 pub fn pasteable_names(wb: &Workbook) -> Vec<(String, String)> {
     let sheet = wb.active_sheet;
     let shown = |local: bool| wb.names.iter().filter(move |n| !n.hidden && n.scope.is_some() == local && n.scope.is_none_or(|i| i == sheet));
-    let local: Vec<&str> = shown(true).map(|n| n.name.as_str()).collect();
+    let local: std::collections::HashSet<String> = shown(true).map(|n| gridcraft_formula::fold_name(&n.name)).collect();
     let mut out: Vec<(String, String)> = shown(true).map(|n| (n.name.clone(), format!("={}", n.formula))).collect();
     for n in shown(false) {
-        if !local.iter().any(|x| gridcraft_formula::same_name(x, &n.name)) {
+        if !local.contains(&gridcraft_formula::fold_name(&n.name)) {
             out.push((n.name.clone(), format!("={}", n.formula)));
         }
     }
@@ -542,7 +542,10 @@ fn paste_name(s: &mut Session, p: &Json) -> Result<Json> {
     let listed: Vec<Json> = names.iter().map(|(n, r)| json!({"name": n, "refersTo": r})).collect();
     if !bool_param(p, "list").unwrap_or(false) {
         if let Some(name) = str_param(p, "name").map(str::trim).filter(|n| !n.is_empty()) {
-            s.ui_requests.push(crate::UiRequest::InsertName(name.to_string()));
+            let Some((listed_name, _)) = names.iter().find(|(n, _)| gridcraft_formula::same_name(n, name)) else {
+                return Err(EngineError::Other(format!("There's no name \"{name}\" to paste.")));
+            };
+            s.ui_requests.push(crate::UiRequest::InsertName(listed_name.clone()));
         }
         return Ok(json!({"names": listed}));
     }
@@ -993,6 +996,10 @@ mod tests {
         s.execute("formulas.useInFormula", json!({"name": "rate"})).unwrap();
         assert_eq!(s.take_ui_requests(), vec![crate::UiRequest::InsertName("Sales".into()), crate::UiRequest::InsertName("rate".into())]);
         assert_eq!(text_at(&s, "A1"), Value::Empty, "the cell changes only when the edit is entered");
+        // A name Paste Name doesn't list is refused; one typed in another case is pasted as listed.
+        assert!(s.execute("formulas.pasteName", json!({"name": "NoSuchName"})).is_err());
+        s.execute("formulas.pasteName", json!({"name": "SALES"})).unwrap();
+        assert_eq!(s.take_ui_requests(), vec![crate::UiRequest::InsertName("Sales".into())]);
     }
 
     #[test]
