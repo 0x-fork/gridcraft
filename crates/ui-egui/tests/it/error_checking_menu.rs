@@ -16,7 +16,7 @@ const CIRCULAR: &str = "Circular References ⏵";
 fn harness(loops: bool) -> Harness {
     let mut s = Session::new();
     s.new_workbook();
-    s.execute("home.insertSheet", json!({"name": "Data"})).unwrap();
+    s.execute("home.insertSheet", json!({"name": "Q1 Data"})).unwrap();
     if loops {
         s.execute("cell.set", json!({"cell": "B3", "input": "=B4"})).unwrap();
         s.execute("cell.set", json!({"cell": "B4", "input": "=B3"})).unwrap();
@@ -104,13 +104,14 @@ fn circular_references_lists_the_loops_and_selects_the_cell_picked() {
     assert!(!h.get_by_label(CIRCULAR).accesskit_node().is_disabled());
     hover(&mut h, CIRCULAR);
     assert!(h.query_by_label("Sheet1!C2").is_some(), "the loop on the active sheet is listed");
-    let other = ["Data!B3", "Data!B4"].into_iter().find(|l| h.query_by_label(l).is_some()).expect("the loop on Data is listed");
+    // A sheet name with a space is quoted, as in a formula.
+    let other = ["'Q1 Data'!B3", "'Q1 Data'!B4"].into_iter().find(|l| h.query_by_label(l).is_some()).expect("the loop on Q1 Data is listed");
     h.get_by_label(other).click();
     h.run_steps(4);
     let app = h.state();
     let d = app.session.active().unwrap();
-    assert_eq!(d.wb.active_sheet, 1, "picking a cell on Data goes to Data");
-    assert_eq!(format!("Data!{}", d.selection.active.a1()), other);
+    assert_eq!(d.wb.active_sheet, 1, "picking a cell on Q1 Data goes to Q1 Data");
+    assert_eq!(format!("'Q1 Data'!{}", d.selection.active.a1()), other);
 }
 
 #[test]

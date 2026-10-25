@@ -480,7 +480,7 @@ fn circular_references(app: &SheetApp) -> Vec<(usize, String, String)> {
         .circular
         .iter()
         .filter(|k| seen.insert(**k))
-        .filter_map(|(si, c)| d.wb.sheet(*si).map(|sh| (*si, c.a1(), format!("{}!{}", sh.name, c.a1()))))
+        .filter_map(|(si, c)| d.wb.sheet(*si).map(|sh| (*si, c.a1(), format!("{}!{}", gridcraft_engine::formula::quote_sheet(&sh.name), c.a1()))))
         .take(CIRCULAR_MENU_LIMIT)
         .collect()
 }
