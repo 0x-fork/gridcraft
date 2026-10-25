@@ -1539,6 +1539,11 @@ fn subtotal(s: &mut Session, p: &Json) -> Result<Json> {
             start = row;
         }
     }
+    // The totals go below each group, so the outline puts summary rows below their detail (the
+    // Subtotal dialog's "Summary below data"), in the same undo step.
+    if !sh.summary_below {
+        s.execute("data.outlineSettings", json!({"sheet": sheet, "summaryBelow": true}))?;
+    }
     // Insert a total row after each group, bottom-up so indices stay valid.
     let mut inserted = 0;
     for (g0, g1, name) in groups.iter().rev() {
@@ -1601,6 +1606,28 @@ mod tests {
         assert_eq!(get(&mut s, "B3")["value"], json!(30.0), "East's subtotal counts both East rows");
         assert_eq!(get(&mut s, "A7")["text"], json!("Grand Total"));
         assert_eq!(get(&mut s, "B7")["value"], json!(100.0), "the grand total counts every data row");
+    }
+
+    #[test]
+    fn subtotal_puts_summary_rows_below_their_detail() {
+        let mut s = Session::new();
+        s.new_workbook();
+        s.execute("range.setValues", json!({"range": "A1", "values": [["Region", "Sales"], ["East", 10], ["East", 20], ["West", 30]]})).unwrap();
+        s.execute("data.outlineSettings", json!({"summaryBelow": false})).unwrap();
+        s.execute("data.subtotal", json!({"range": "A1:B4", "groupBy": "A", "columns": ["B"]})).unwrap();
+        let sh = s.doc().unwrap().wb.active().unwrap().clone();
+        assert!(sh.summary_below, "the totals sit below their groups");
+        // East's detail is rows 2–3 and its total row 4: collapsing level 1 keeps the total showing.
+        s.execute("data.showLevels", json!({"rows": 1})).unwrap();
+        let hidden = |s: &Session, row: u32| s.doc().unwrap().wb.active().unwrap().is_row_hidden(row);
+        assert!(hidden(&s, 1) && hidden(&s, 2), "East's detail rows are hidden");
+        assert!(!hidden(&s, 3), "East Total stays visible");
+        // One undo takes the subtotals and the setting back.
+        s.execute("edit.undo", json!({})).unwrap();
+        s.execute("edit.undo", json!({})).unwrap();
+        let sh = s.doc().unwrap().wb.active().unwrap();
+        assert!(!sh.summary_below);
+        assert_eq!(sh.value(CellRef::new(3, 0)).display(), "West");
     }
 
     #[test]
