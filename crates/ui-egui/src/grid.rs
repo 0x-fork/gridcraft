@@ -3437,7 +3437,8 @@ fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
 
 /// Whether the cell menu offers Show Details (Excel's right-click › Show Details): the active cell
 /// is a value, subtotal or grand total cell of a PivotTable, or a cell of a report that is out of
-/// date, where running the command says so. Labels and headers of a current report don't offer it.
+/// date, where running the command says so. Labels and headers of a current report don't offer it,
+/// and no cell does while the PivotTable's Enable show details option is off.
 fn show_details_offered(app: &mut SheetApp) -> bool {
     let Some(d) = app.session.active() else { return false };
     let (si, at) = (d.wb.active_sheet, d.selection.active);
@@ -3445,6 +3446,9 @@ fn show_details_offered(app: &mut SheetApp) -> bool {
     else {
         return false;
     };
+    if !pt.enable_show_details {
+        return false;
+    }
     let origin = pt.last_range.map(|r| r.start).unwrap_or_default();
     let cell = (at.row.saturating_sub(origin.row), at.col.saturating_sub(origin.col));
     let key = (d.uid, d.revision, si, pi);

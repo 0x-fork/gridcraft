@@ -91,6 +91,26 @@ fn labels_of_the_report_and_ordinary_cells_have_no_show_details_item() {
 }
 
 #[test]
+fn no_cell_offers_show_details_while_it_is_turned_off() {
+    let mut h = harness();
+    h.state_mut().session.execute("pivot.options", json!({"enableShowDetails": false, "pivot": "PivotTable1"})).unwrap();
+    h.run_steps(2);
+    for cell in ["E4", "E6"] {
+        right_click(&mut h, cell);
+        assert!(h.query_by_label("Sort A to Z").is_some(), "the cell menu is up on {cell}");
+        assert!(h.query_by_label("Show Details").is_none(), "{cell} offers no Show Details");
+        let escape = Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE };
+        h.input_mut().events.push(escape);
+        h.run_steps(2);
+    }
+    // Turned back on, the value cell offers it again.
+    h.state_mut().session.execute("pivot.options", json!({"enableShowDetails": true, "pivot": "PivotTable1"})).unwrap();
+    h.run_steps(2);
+    right_click(&mut h, "E4");
+    assert!(h.query_by_label("Show Details").is_some(), "E4 offers Show Details");
+}
+
+#[test]
 fn the_cell_menu_computes_the_report_once_for_all_its_cells() {
     let mut h = harness();
     right_click(&mut h, "E4");
