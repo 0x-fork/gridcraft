@@ -388,6 +388,30 @@ fn inserted_chart_is_selected_so_delete_removes_it() {
 }
 
 #[test]
+fn insert_column_or_bar_menu_inserts_a_hundred_percent_stacked_bar() {
+    // Insert › Column or Bar (keytip N, C1) lists the column and bar types of the All Charts list.
+    let mut s = blank();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["Quarter", "North", "South"], ["Q1", 10, 30], ["Q2", 30, 10]]})).unwrap();
+    s.execute("selection.set", json!({"range": "A1:C3"})).unwrap();
+    let mut h = harness(s);
+    key(&mut h, Key::F10, Modifiers::NONE);
+    for (k, t) in [(Key::N, "n"), (Key::C, "c"), (Key::Num1, "1")] {
+        h.input_mut().events.push(Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE });
+        h.input_mut().events.push(Event::Text(t.into()));
+        h.input_mut().events.push(Event::Key { key: k, physical_key: None, pressed: false, repeat: false, modifiers: Modifiers::NONE });
+        h.run_steps(2);
+    }
+    h.run_steps(2);
+    for label in ["Clustered Column", "Stacked Column", "100% Stacked Column", "Clustered Bar", "Stacked Bar", "100% Stacked Bar"] {
+        assert!(h.query_by_role_and_label(egui::accesskit::Role::Button, label).is_some(), "the menu lists {label}");
+    }
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "100% Stacked Bar").click();
+    h.run_steps(2);
+    let kinds: Vec<_> = h.state().session.active().unwrap().wb.active().unwrap().charts.iter().map(|c| c.kind).collect();
+    assert_eq!(kinds, [gridcraft_engine::model::ChartKind::BarStacked100]);
+}
+
+#[test]
 fn renders_every_ribbon_tab_without_panicking() {
     let mut s = Session::new();
     s.execute("file.new", json!({"sample": "sales"})).unwrap();
