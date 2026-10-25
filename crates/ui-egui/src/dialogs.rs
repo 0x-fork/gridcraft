@@ -2606,7 +2606,7 @@ fn paste_name(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &m
 }
 
 /// Every chart type the All Charts tab offers: `(type, subtype, label)` for `insert.chart`.
-const ALL_CHARTS: [(&str, &str, &str); 20] = [
+const ALL_CHARTS: [(&str, &str, &str); 21] = [
     ("column", "", "Clustered Column"),
     ("column", "stacked", "Stacked Column"),
     ("column", "stacked100", "100% Stacked Column"),
@@ -2620,6 +2620,7 @@ const ALL_CHARTS: [(&str, &str, &str); 20] = [
     ("doughnut", "", "Doughnut"),
     ("area", "", "Area"),
     ("area", "stacked", "Stacked Area"),
+    ("area", "stacked100", "100% Stacked Area"),
     ("scatter", "", "Scatter"),
     ("scatter", "lines", "Scatter with Lines"),
     ("radar", "", "Radar"),
