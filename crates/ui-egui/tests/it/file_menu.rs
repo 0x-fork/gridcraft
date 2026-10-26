@@ -585,3 +585,65 @@ fn save_a_copy_with_a_bare_name_asks_where_to_save_it() {
     assert_eq!(asked.lock().unwrap().len(), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn new_window_shows_the_same_workbook_and_a_draft_settles_in_its_own_window() {
+    let mut h = harness(Services::default());
+    h.state_mut().run("selection.set", serde_json::json!({"range": "B2"})).unwrap();
+    let first = h.state().session.active_window().unwrap();
+    h.state_mut().run_or_alert("view.newWindow", serde_json::json!({}));
+    h.run_steps(2);
+    let second = h.state().session.active_window().unwrap();
+    let book = h.state().session.doc().unwrap().uid;
+    assert_ne!(first, second);
+    assert_eq!(h.state().session.documents().len(), 1, "one workbook, two windows");
+    let titles: Vec<String> = h.state().open_windows().iter().map(|w| w.title.clone()).collect();
+    assert_eq!(titles, ["Book1:1", "Book1:2"]);
+
+    // A draft typed in window 2 is entered in window 2's cell before window 1 comes forward.
+    h.state_mut().run("selection.set", serde_json::json!({"range": "D4"})).unwrap();
+    h.input_mut().events.push(egui::Event::Text("typed".into()));
+    h.run_steps(2);
+    h.state_mut().run_or_alert("view.switchWindows", serde_json::json!({"window": first}));
+    h.run_steps(2);
+    assert!(h.state().editor.is_none(), "the draft doesn't follow into window 1");
+    assert_eq!(h.state().session.active_window(), Some(first));
+    let d = h.state().session.doc().unwrap();
+    assert_eq!(d.wb.active().unwrap().value(CellRef::parse("D4").unwrap()), Value::text("typed"));
+    assert_eq!(d.selection.active, CellRef::parse("B2").unwrap(), "window 1 keeps its own selection");
+
+    // Quitting asks once about the workbook, whichever window shows it.
+    request_window_close(&mut h);
+    let sent = click_commands(&mut h, "Don't Save");
+    assert!(sent.contains(&egui::ViewportCommand::Close), "{sent:?}");
+    assert!(h.state().session.document_index(book).is_none(), "both windows closed with the workbook");
+}
+
+#[test]
+fn control_requests_route_to_a_window_and_list_windows() {
+    use gridcraft_ui_egui::control::{Outcome, handle};
+    let mut h = harness(Services::default());
+    let first = h.state().session.active_window().unwrap();
+    h.state_mut().run_or_alert("file.new", serde_json::json!({}));
+    h.run_steps(2);
+    let ctx = h.ctx.clone();
+    let call = |h: &mut egui_kittest::Harness<'static, SheetApp>, method: &str, p: serde_json::Value| match handle(h.state_mut(), &ctx, method, &p) {
+        Outcome::Done(v) => v,
+        Outcome::Screenshot { .. } => serde_json::Value::Null,
+    };
+    let r = call(&mut h, "engine.execute", serde_json::json!({"command": "cell.set", "params": {"cell": "A1", "input": "one"}, "window": first}));
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(a1(&h, 0), Value::text("one"));
+    assert_eq!(a1(&h, 1), Value::Empty);
+    assert_eq!(h.state().session.active_index(), 1, "Book2 stays in front");
+    let r = call(&mut h, "cell.get", serde_json::json!({"cell": "A1", "window": first}));
+    assert!(r["result"].to_string().contains("one"), "{r}");
+
+    let r = call(&mut h, "window.list", serde_json::json!({}));
+    let rows = r["result"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "{r}");
+    assert_eq!((rows[0]["window"].as_u64(), rows[0]["title"].as_str(), rows[0]["dirty"].as_bool()), (Some(first), Some("Book1"), Some(true)));
+    assert_eq!(rows[1]["active"].as_bool(), Some(true));
+    let r = call(&mut h, "engine.execute", serde_json::json!({"command": "cell.get", "params": {"cell": "A1"}, "window": 999}));
+    assert_eq!(r["ok"], false, "{r}");
+}

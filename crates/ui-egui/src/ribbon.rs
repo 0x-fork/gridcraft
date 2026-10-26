@@ -2607,7 +2607,7 @@ fn switch_windows(app: &mut SheetApp, ui: &mut Ui) {
         for w in app.open_windows() {
             let label = theme::available_text(ui, &format!("{}{}", if w.active { "✓ " } else { "    " }, w.label()));
             if ui.add(egui::Button::selectable(w.active, label).min_size(vec2(220.0, 22.0))).clicked() {
-                act(app, "view.switchWindows", json!({"doc": w.doc}));
+                act(app, "view.switchWindows", json!({"window": w.window}));
                 ui.close();
             }
         }
