@@ -113,7 +113,7 @@ impl Dialog {
     pub fn pick_reference(&mut self, cell: CellRef, active_sheet: &str, extend: bool) {
         let Some(pick) = self.pick.as_mut() else { return };
         let text = self.values.get(pick.key).and_then(Json::as_str).unwrap_or("").to_string();
-        let mut ed = crate::editor::EditState::new(0, cell, text, true, false);
+        let mut ed = crate::editor::EditState::new(0, 0, cell, text, true, false);
         ed.caret = pick.caret.min(ed.text.chars().count());
         ed.point = pick.point;
         if ed.text.trim().is_empty() {

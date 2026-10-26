@@ -4825,6 +4825,38 @@ fn html_export_without_pictures_or_charts_has_no_fixed_geometry() {
     let html = crate::io::to_html(&s.doc().unwrap().wb, 0).unwrap();
     assert!(!html.contains("<colgroup>") && !html.contains("table-layout") && !html.contains("<svg") && !html.contains("<img"), "{html}");
 }
+
+#[test]
+fn switch_windows_lists_workbooks_by_stable_id_and_switches_to_one() {
+    let mut s = s();
+    s.execute("cell.set", json!({"cell": "A1", "input": "first"})).unwrap();
+    let book1 = s.doc().unwrap().uid;
+    s.execute("file.new", json!({})).unwrap();
+    s.execute("file.new", json!({})).unwrap();
+    let book3 = s.doc().unwrap().uid;
+    let list = s.execute("view.switchWindows", json!({})).unwrap();
+    let rows = list.as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!((rows[0]["doc"].as_u64(), rows[0]["title"].as_str(), rows[0]["dirty"].as_bool()), (Some(book1), Some("Book1"), Some(true)));
+    assert_eq!((rows[2]["dirty"].as_bool(), rows[2]["active"].as_bool()), (Some(false), Some(true)));
+
+    // Closing a workbook shifts the indexes but not the ids.
+    s.execute("window.activate", json!({"index": 1})).unwrap();
+    s.execute("file.close", json!({"force": true})).unwrap();
+    assert_eq!(s.document_index(book3), Some(1));
+    let list = s.execute("view.switchWindows", json!({"doc": book1})).unwrap();
+    assert_eq!(s.doc().unwrap().uid, book1);
+    assert_eq!(v(&s, "A1"), Value::text("first"));
+    assert_eq!(list[0]["active"].as_bool(), Some(true));
+    s.execute("file.save", json!({"path": std::env::temp_dir().join(format!("gridcraft-uid-{}.xlsx", std::process::id()))})).unwrap();
+    assert_eq!(s.doc().unwrap().uid, book1, "saving keeps the id");
+    let _ = std::fs::remove_file(std::env::temp_dir().join(format!("gridcraft-uid-{}.xlsx", std::process::id())));
+
+    assert!(s.execute("view.switchWindows", json!({"doc": book3 + 1000})).is_err());
+    assert!(s.execute("view.switchWindows", json!({"doc": "Book1"})).is_err());
+    assert_eq!(s.doc().unwrap().uid, book1, "a bad id leaves the active workbook alone");
+}
+
 #[test]
 fn format_cells_permission_on_a_protected_sheet_cannot_unlock_cells() {
     // Formatting may be allowed on a protected sheet; the permission can't serve as a key to
@@ -4875,6 +4907,9 @@ fn a_script_cannot_switch_windows() {
     s.execute("automate.trustScripts", json!({"trusted": true})).unwrap();
     let err = s.execute("automate.runScript", json!({"name": "t"})).expect_err("script switching windows");
     assert!(err.to_string().contains("window.activate"), "{err}");
+    s.execute("automate.newScript", json!({"name": "sw", "commands": [{"command": "view.switchWindows", "params": {"doc": 1}}]})).unwrap();
+    let err = s.execute("automate.runScript", json!({"name": "sw"})).expect_err("script switching windows from the View tab");
+    assert!(err.to_string().contains("view.switchWindows"), "{err}");
     // A benign script runs.
     s.execute("automate.newScript", json!({"name": "ok", "commands": [{"command": "cell.set", "params": {"cell": "A1", "input": "=1+1"}}]})).unwrap();
     s.execute("automate.runScript", json!({"name": "ok"})).unwrap();

@@ -1828,6 +1828,7 @@ pub(crate) fn paint_selection(
     // Editing a formula: outline its references instead of the selection.
     if let Some(ed) = &app.editor
         && ed.is_formula()
+        && app.session.active().is_some_and(|d| d.uid == ed.doc)
     {
         let origin = app.session.active().and_then(|d| d.wb.sheet(ed.sheet)).map_or(sh.name.as_str(), |o| o.name.as_str());
         for (_, _, r, sheet, idx) in crate::editor::formula_refs(&ed.text) {
@@ -3214,7 +3215,7 @@ fn editor_width(text_w: f32, cell_w: f32, size: f32) -> f32 {
 /// Draws the in-cell editor, growing and wrapping with its text, mirroring for right-to-left sheets, choosing contrasting caret ink and clipping cells hidden under frozen panes.
 fn in_cell_editor(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, sh: &Sheet, wb: &Workbook) {
     let Some(ed) = app.editor.as_ref() else { return };
-    if ed.sheet != wb.active_sheet {
+    if app.view_key() != Some((ed.doc, ed.sheet)) {
         return;
     }
     let cell = ed.cell;
