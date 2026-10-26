@@ -310,14 +310,14 @@ impl DocState {
         !Arc::ptr_eq(&self.wb, &self.saved)
     }
     pub fn sheet_index(&self) -> usize {
-        self.wb.active_sheet
+        self.wb.active_sheet()
     }
     /// Records the view state that is saved with the file (`sheetView topLeftCell`, the active
     /// cell): the first visible cell of the scrolling area per sheet index in `tops`, and the
     /// active sheet's active cell. View state never makes the workbook dirty.
     pub fn store_view(&mut self, tops: &[(usize, CellRef)]) {
         let active = self.selection.active;
-        let si = self.wb.active_sheet;
+        let si = self.wb.active_sheet();
         let changed = tops.iter().any(|(i, c)| self.wb.sheets.get(*i).is_some_and(|sh| sh.view_top_left != *c))
             || self.wb.sheets.get(si).is_some_and(|sh| sh.view_active != active);
         if !changed {
@@ -623,7 +623,7 @@ impl Session {
         };
         // The recorder keeps top-level calls with the place they ran in.
         let place = (self.depth == 0 && self.recorder.is_some()).then(|| match self.active() {
-            Some(d) => (d.uid, d.wb.active_sheet, d.wb.active().map(|sh| sh.name.clone()).unwrap_or_default(), d.selection.clone()),
+            Some(d) => (d.uid, d.wb.active_sheet(), d.wb.active().map(|sh| sh.name.clone()).unwrap_or_default(), d.selection.clone()),
             None => (0, 0, String::new(), Selection::default()),
         });
         let doc_uid = before.as_ref().map(|(uid, ..)| *uid);

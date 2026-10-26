@@ -142,7 +142,15 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "view.customViews", "Custom Views…", ["View", "Workbook Views"], None, "{save?: name, show?: name, delete?: name} → list", has_doc, custom_views),
         cmd!(noundo "view.split", "Split", ["View", "Window"], None, "{} (toggles a split at the active cell; shown as frozen panes in this version)", has_doc, split),
         cmd!(noundo "view.newWindow", "New Window", ["View", "Window"], None, "{} → {window, doc, title}: opens another window on the active workbook (the same workbook: saving from either window saves it)", has_doc, new_window),
-        cmd!(noundo "view.arrangeAll", "Arrange All", ["View", "Window"], None, "{}", has_doc, |_, _| ok()),
+        cmd!(
+            noundo "view.arrangeAll",
+            "Arrange All",
+            ["View", "Window"],
+            None,
+            "{arrange?: tiled|horizontal|vertical|cascade, activeWorkbook?: bool} → {arrange, windows}: lays out the visible windows (tiled by default; `activeWorkbook` only the active workbook's), the active window first",
+            has_doc,
+            arrange_all
+        ),
         cmd!(noundo "view.hideWindow", "Hide", ["View", "Window"], None, "{window?, doc?} (the active window by default)", has_doc, hide_window),
         cmd!(noundo "view.unhideWindow", "Unhide…", ["View", "Window"], None, "{window?, doc?, index?} (the most recently hidden window by default)", has_doc, unhide_window),
         cmd!(
@@ -302,7 +310,7 @@ pub fn specs() -> Vec<CommandSpec> {
 
 fn find_chart(s: &Session, p: &Json) -> Result<(usize, usize)> {
     let d = s.doc()?;
-    let si = d.wb.active_sheet;
+    let si = d.wb.active_sheet();
     let sh = d.wb.sheet(si).ok_or(EngineError::NoDocument)?;
     let idx = match u32_param(p, "chart") {
         Some(id) => sh.charts.iter().position(|c| c.id == id),
@@ -468,7 +476,7 @@ fn select_data(s: &mut Session, p: &Json) -> Result<Json> {
             let (sheet_name, body) = split_sheet(range);
             let src_si = match sheet_name {
                 Some(n) => d.wb.sheet_index(&n).ok_or_else(|| bad("chart.selectData", "no such sheet"))?,
-                None => d.wb.active_sheet,
+                None => d.wb.active_sheet(),
             };
             let r = RangeRef::parse(body).ok_or_else(|| bad("chart.selectData", "not a range"))?;
             if r.count() > 1_000_000 {
@@ -490,7 +498,7 @@ fn select_data(s: &mut Session, p: &Json) -> Result<Json> {
             let (sheet_name, body) = split_sheet(t);
             let si = match sheet_name {
                 Some(n) => d.wb.sheet_index(&n).ok_or_else(|| bad("chart.selectData", "no such sheet"))?,
-                None => d.wb.active_sheet,
+                None => d.wb.active_sheet(),
             };
             let r = RangeRef::parse(body).ok_or_else(|| bad("chart.selectData", "`categories` is not a range"))?;
             let name = d.wb.sheet(si).map(|sh| sh.name.clone()).ok_or(EngineError::NoDocument)?;
@@ -572,7 +580,7 @@ fn shape_outline(s: &mut Session, p: &Json) -> Result<Json> {
 }
 
 fn with_shape(s: &mut Session, p: &Json, f: impl FnOnce(&mut Shape)) -> Result<Json> {
-    let si = s.doc()?.wb.active_sheet;
+    let si = s.doc()?.wb.active_sheet();
     let id = u32_param(p, "id");
     edit(s, |cx| {
         let shapes = &mut cx.sheet_mut(si)?.shapes;
@@ -590,7 +598,7 @@ fn arrange(s: &mut Session, p: &Json, forward: bool) -> Result<Json> {
     let id = u32_param(p, "id").ok_or_else(|| bad("arrange", "missing `id`"))?;
     let kind = str_param(p, "kind").unwrap_or("shape").to_string();
     let extreme = bool_param(p, "toFront").or(bool_param(p, "toBack")).unwrap_or(false);
-    let si = s.doc()?.wb.active_sheet;
+    let si = s.doc()?.wb.active_sheet();
     fn reorder<T>(v: &mut Vec<T>, i: usize, forward: bool, extreme: bool) {
         if i >= v.len() {
             return;
@@ -656,7 +664,7 @@ fn align(s: &mut Session, p: &Json) -> Result<Json> {
     let ids: Vec<u32> =
         p.get("ids").and_then(Json::as_array).map(|a| a.iter().filter_map(|v| v.as_u64().map(|x| x as u32)).collect()).unwrap_or_default();
     let how = str_param(p, "align").unwrap_or("left").to_string();
-    let si = s.doc()?.wb.active_sheet;
+    let si = s.doc()?.wb.active_sheet();
     edit(s, |cx| {
         let sheet = cx.sheet_mut(si)?;
         let geo: Vec<(u32, f64, f64, f32, f32)> = {
@@ -769,7 +777,7 @@ fn custom_views(s: &mut Session, p: &Json) -> Result<Json> {
     let mut views = stash_map(&d.wb, VIEWS_NAME);
     if let Some(name) = str_param(p, "save") {
         let sh = d.wb.active().ok_or(EngineError::NoDocument)?;
-        views[name] = json!({"sheet": d.wb.active_sheet, "selection": d.selection.a1(), "zoom": sh.zoom, "freeze": sh.freeze});
+        views[name] = json!({"sheet": d.wb.active_sheet(), "selection": d.selection.a1(), "zoom": sh.zoom, "freeze": sh.freeze});
         let v = views.clone();
         edit(s, |cx| {
             stash_set(&mut cx.wb, VIEWS_NAME, &v);
@@ -828,6 +836,25 @@ pub(crate) fn window_param(s: &Session, cmd: &str, p: &Json) -> Result<u64> {
     s.target_window(t).map_err(|e| bad(cmd, e.to_string()))
 }
 
+/// View › Arrange All. The engine has no window geometry: it picks the windows and the layout,
+/// and the interface moves its native windows ([`Session::window_list`] order, active first).
+fn arrange_all(s: &mut Session, p: &Json) -> Result<Json> {
+    let arrange = match str_param(p, "arrange").unwrap_or("tiled") {
+        a @ ("tiled" | "horizontal" | "vertical" | "cascade") => a,
+        other => return Err(bad("view.arrangeAll", format!("`arrange` must be tiled, horizontal, vertical or cascade, not `{other}`"))),
+    };
+    let active = s.active_window();
+    let doc = active.and_then(|w| s.window(w)).map(|w| w.doc_uid);
+    let only_active = p.get("activeWorkbook").and_then(Json::as_bool).unwrap_or(false);
+    let mut windows: Vec<u64> = s.windows().iter().filter(|w| !w.hidden && (!only_active || Some(w.doc_uid) == doc)).map(|w| w.id).collect();
+    if let Some(at) = windows.iter().position(|w| Some(*w) == active)
+        && let Some(first) = windows.get_mut(..=at)
+    {
+        first.rotate_right(1);
+    }
+    Ok(json!({"arrange": arrange, "windows": windows}))
+}
+
 fn hide_window(s: &mut Session, p: &Json) -> Result<Json> {
     let id = window_param(s, "view.hideWindow", p)?;
     s.hide_window(id);
@@ -861,7 +888,7 @@ fn switch_windows(s: &mut Session, p: &Json) -> Result<Json> {
 fn table_resize(s: &mut Session, p: &Json) -> Result<Json> {
     let r = str_param(p, "range").and_then(RangeRef::parse).ok_or_else(|| bad("table.resize", "missing `range`"))?;
     let d = s.doc()?;
-    let si = d.wb.active_sheet;
+    let si = d.wb.active_sheet();
     let sh = d.wb.sheet(si).ok_or(EngineError::NoDocument)?;
     let ti = match str_param(p, "table") {
         Some(n) => sh.tables.iter().position(|t| t.name.eq_ignore_ascii_case(n)),
@@ -970,7 +997,7 @@ fn from_table_range(s: &mut Session, p: &Json) -> Result<Json> {
     let d = s.doc()?;
     let sh = d.wb.active().ok_or(EngineError::NoDocument)?;
     let r = if r.is_single() { crate::selection::current_region(sh, r.start) } else { r };
-    let text = crate::display::range_text(&d.wb, d.wb.active_sheet, r);
+    let text = crate::display::range_text(&d.wb, d.wb.active_sheet(), r);
     from_csv(s, &json!({"text": text, "delimiter": "\t", "sheet": format!("{} (2)", sh.name).chars().take(31).collect::<String>()}))
 }
 
@@ -1220,7 +1247,7 @@ fn theme_fonts(s: &mut Session, p: &Json) -> Result<Json> {
 
 fn background(s: &mut Session, p: &Json) -> Result<Json> {
     if bool_param(p, "clear").unwrap_or(false) {
-        let si = s.doc()?.wb.active_sheet;
+        let si = s.doc()?.wb.active_sheet();
         return edit(s, |cx| {
             cx.sheet_mut(si)?.images.retain(|i| i.alt != "Sheet background");
             Ok(Json::Null)
@@ -1313,7 +1340,7 @@ fn watch_window(s: &mut Session, p: &Json) -> Result<Json> {
         .iter()
         .map(|w| {
             let (sheet, body) = split_sheet(w);
-            let si = sheet.and_then(|n| d.wb.sheet_index(&n)).unwrap_or(d.wb.active_sheet);
+            let si = sheet.and_then(|n| d.wb.sheet_index(&n)).unwrap_or(d.wb.active_sheet());
             let c = CellRef::parse(body).unwrap_or_default();
             let sh = d.wb.sheet(si);
             json!({"cell": w, "value": sh.map(|s| s.value(c).display()), "formula": sh.and_then(|s| s.cell(c)).and_then(|x| x.formula.as_ref()).map(|f| format!("={}", f.text))})

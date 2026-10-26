@@ -2,10 +2,11 @@
 //!
 //! Every open workbook has one or more windows (View › New Window adds another on the same
 //! workbook). A window has its own selection, active sheet and per-sheet selections. The active
-//! window's view lives in its [`DocState`] (`selection`, `wb.active_sheet`, `sheet_selections`),
-//! where every command reads it; each other window keeps its view in [`WindowState`] until it is
-//! activated. Swapping a view in or out never makes the workbook dirty: per-window view state is
-//! not a document change.
+//! window's view lives in its [`DocState`] (`selection`, `sheet_selections`) and in the workbook's
+//! active sheet ([`gridcraft_model::workbook::Workbook::active_sheet`]), where every command reads
+//! it; each other window keeps its view in [`WindowState`] until it is activated. Swapping a view
+//! in or out never copies the workbook or makes it dirty: the active sheet is set in place through
+//! the shared `Arc`, and selections live outside the workbook.
 
 use serde_json::{Value as Json, json};
 
@@ -15,7 +16,7 @@ use crate::{DocState, EngineError, Result, Selection, Session};
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WindowView {
     pub selection: Selection,
-    pub active_sheet: usize,
+    pub sheet: usize,
     /// The active sheet's name, so a sheet inserted, deleted or moved meanwhile in another
     /// window still finds it.
     pub sheet_name: String,
@@ -42,27 +43,20 @@ impl WindowView {
     fn capture(d: &DocState) -> WindowView {
         WindowView {
             selection: d.selection.clone(),
-            active_sheet: d.wb.active_sheet,
-            sheet_name: d.wb.sheets.get(d.wb.active_sheet).map(|s| s.name.clone()).unwrap_or_default(),
+            sheet: d.wb.active_sheet(),
+            sheet_name: d.wb.sheets.get(d.wb.active_sheet()).map(|s| s.name.clone()).unwrap_or_default(),
             sheet_selections: d.sheet_selections.clone(),
         }
     }
 
     fn apply(self, d: &mut DocState) {
         let sheets = &d.wb.sheets;
-        let at = if sheets.get(self.active_sheet).is_some_and(|s| s.name == self.sheet_name) {
-            self.active_sheet
+        let at = if sheets.get(self.sheet).is_some_and(|s| s.name == self.sheet_name) {
+            self.sheet
         } else {
-            sheets.iter().position(|s| s.name == self.sheet_name).unwrap_or(self.active_sheet)
+            sheets.iter().position(|s| s.name == self.sheet_name).unwrap_or(self.sheet)
         };
-        let at = at.min(sheets.len().saturating_sub(1));
-        if d.wb.active_sheet != at {
-            let dirty = d.is_dirty();
-            std::sync::Arc::make_mut(&mut d.wb).active_sheet = at;
-            if !dirty {
-                d.saved = d.wb.clone();
-            }
-        }
+        d.wb.set_active_sheet(at.min(sheets.len().saturating_sub(1)));
         d.selection = self.selection;
         d.sheet_selections = self.sheet_selections;
     }
