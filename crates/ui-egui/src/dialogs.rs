@@ -1439,29 +1439,14 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
                 }
                 "saveChanges" => {
                     ui.label(format!("Do you want to save the changes you made to {}?", d.values.get("title").and_then(Json::as_str).unwrap_or("this workbook")));
-                    // Asked while quitting: once answered, the next unsaved workbook is asked about.
                     let quitting = d.values.get("quit").and_then(Json::as_bool) == Some(true);
                     ui.horizontal(|ui| {
-                        if ui.button("Don't Save").clicked() {
-                            app.run_or_alert("file.close", json!({"force": true, "document": true}));
-                            if quitting {
-                                app.continue_quit(ui.ctx());
+                        for (label, answer) in
+                            [("Don't Save", crate::SaveAnswer::DontSave), ("Cancel", crate::SaveAnswer::Cancel), ("Save", crate::SaveAnswer::Save)]
+                        {
+                            if ui.button(label).clicked() && app.answer_save_changes(answer, quitting, ui.ctx()) {
+                                open = false;
                             }
-                            open = false;
-                        }
-                        if ui.button("Cancel").clicked() {
-                            open = false;
-                        }
-                        // File operations must include the cell the user is still editing (as the File > Save menu item already does).
-                        if ui.button("Save").clicked() && app.commit_edit(0, 0, false, false) {
-                            app.run_or_alert("file.save", json!({}));
-                            if app.session.active().is_some_and(|x| !x.is_dirty()) {
-                                app.run_or_alert("file.close", json!({"force": true, "document": true}));
-                                if quitting {
-                                    app.continue_quit(ui.ctx());
-                                }
-                            }
-                            open = false;
                         }
                     });
                 }

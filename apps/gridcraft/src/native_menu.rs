@@ -204,8 +204,8 @@ pub struct NativeMenu {
 /// Menu id of the Window menu item that brings workbook `doc` forward.
 const WINDOW_ITEM: &str = "window:id:";
 
-/// The Quit item: closing the window asks about unsaved workbooks first, which AppKit's own
-/// Quit (terminate:) would skip.
+/// The Quit item: asks about each unsaved workbook in its window first
+/// (`SheetApp::request_quit`), which AppKit's own Quit (terminate:) would skip.
 const QUIT: &str = "app.quit";
 
 fn select_theme(app: &mut SheetApp, id: &str) -> bool {
@@ -312,11 +312,13 @@ impl NativeMenu {
         }
     }
 
-    pub fn poll(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
+    /// Runs the chosen menu items. Commands go to the active window, the most recently focused;
+    /// `viewport` is its egui viewport, for the items that act on its input.
+    pub fn poll(&mut self, app: &mut SheetApp, ctx: &egui::Context, viewport: egui::ViewportId) {
         while let Ok(ev) = self.events.try_recv() {
             let id = ev.id.as_ref().to_string();
             if id == QUIT {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                app.request_quit(ctx);
                 continue;
             }
             if let Some(window) = id.strip_prefix(WINDOW_ITEM).and_then(|w| w.parse::<u64>().ok()) {
@@ -332,11 +334,11 @@ impl NativeMenu {
                     _ => None,
                 };
                 if let Some(command) = clipboard {
-                    ctx.send_viewport_cmd(command);
+                    ctx.send_viewport_cmd_to(viewport, command);
                     continue;
                 }
                 if id == "edit.undo" || id == "edit.redo" {
-                    ctx.input_mut(|i| {
+                    ctx.input_mut_for(viewport, |i| {
                         i.events.push(egui::Event::Key {
                             key: egui::Key::Z,
                             physical_key: None,
