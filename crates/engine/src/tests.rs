@@ -4907,6 +4907,9 @@ fn a_script_cannot_switch_windows() {
     s.execute("automate.trustScripts", json!({"trusted": true})).unwrap();
     let err = s.execute("automate.runScript", json!({"name": "t"})).expect_err("script switching windows");
     assert!(err.to_string().contains("window.activate"), "{err}");
+    s.execute("automate.newScript", json!({"name": "sw", "commands": [{"command": "view.switchWindows", "params": {"doc": 1}}]})).unwrap();
+    let err = s.execute("automate.runScript", json!({"name": "sw"})).expect_err("script switching windows from the View tab");
+    assert!(err.to_string().contains("view.switchWindows"), "{err}");
     // A benign script runs.
     s.execute("automate.newScript", json!({"name": "ok", "commands": [{"command": "cell.set", "params": {"cell": "A1", "input": "=1+1"}}]})).unwrap();
     s.execute("automate.runScript", json!({"name": "ok"})).unwrap();

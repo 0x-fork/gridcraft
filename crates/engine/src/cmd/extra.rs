@@ -1058,7 +1058,7 @@ fn denied_script_step(id: &str, params: &Json) -> Option<String> {
     }
     // Scripts are scoped to their workbook: a step that switches the active window would
     // point every later step at another open document, so those are refused too.
-    if id.starts_with("window.") {
+    if id.starts_with("window.") || matches!(id, "view.switchWindows" | "view.newWindow" | "view.hideWindow" | "view.unhideWindow") {
         return Some(format!("scripts can't run `{id}`: it reaches outside the workbook"));
     }
     if params.get("path").is_some() {
