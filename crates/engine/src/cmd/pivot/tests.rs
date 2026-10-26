@@ -569,12 +569,10 @@ fn replace_protection() {
     s.execute("pivot.addField", json!({"field": "Region", "area": "rows", "replace": true})).unwrap();
     assert_eq!(text(&s, "H5"), "North");
     // A second pivot can't overlap the first.
-    let e =
-        s.execute("insert.pivotTable", json!({"source": "Sheet1!A1:E13", "destination": "Sheet1!H6", "replace": true})).unwrap_err().to_string();
+    let e = s.execute("insert.pivotTable", json!({"source": "Sheet1!A1:E13", "destination": "Sheet1!H6", "replace": true})).unwrap_err().to_string();
     assert!(e.contains("overlap"), "{e}");
     // Nor its own source data.
-    let e =
-        s.execute("insert.pivotTable", json!({"source": "Sheet1!A1:E13", "destination": "Sheet1!B2", "replace": true})).unwrap_err().to_string();
+    let e = s.execute("insert.pivotTable", json!({"source": "Sheet1!A1:E13", "destination": "Sheet1!B2", "replace": true})).unwrap_err().to_string();
     assert!(e.contains("source data"), "{e}");
     // Delete clears the report.
     s.execute("pivot.delete", json!({})).unwrap();
@@ -761,8 +759,7 @@ fn collapsed_column_items_count_as_one_column_group() {
 #[test]
 fn inserting_or_deleting_lines_moves_the_pivot_with_its_cells() {
     let mut s = sales();
-    s.execute("insert.pivotTable", json!({"source": "Sheet1!A1:E13", "destination": "Sheet1!H10", "rows": ["Region"], "values": ["Sales"]}))
-        .unwrap();
+    s.execute("insert.pivotTable", json!({"source": "Sheet1!A1:E13", "destination": "Sheet1!H10", "rows": ["Region"], "values": ["Sales"]})).unwrap();
     assert_eq!(pt(&s).last_range.unwrap().a1(), "H10:I14");
     // Rows above the report (and below the source) move the report only.
     s.execute("home.insertRows", json!({"rows": "16:17"})).unwrap();

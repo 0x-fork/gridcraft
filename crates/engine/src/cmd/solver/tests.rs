@@ -103,8 +103,7 @@ fn evolutionary_finds_the_global_minimum_of_non_smooth_and_multimodal_models() {
     let mut s = s();
     // |x − 3| + |y + 2| has a kink at its minimum (3, −2).
     set(&mut s, &[("A1", "0"), ("A2", "0"), ("B1", "=ABS(A1-3)+ABS(A2+2)")]);
-    let p =
-        json!({"objective": "B1", "goal": "min", "variables": "A1:A2", "constraints": ["A1:A2 >= -10", "A1:A2 <= 10"], "method": "evolutionary"});
+    let p = json!({"objective": "B1", "goal": "min", "variables": "A1:A2", "constraints": ["A1:A2 >= -10", "A1:A2 <= 10"], "method": "evolutionary"});
     let r = s.execute("data.solver", p.clone()).unwrap();
     assert!(r["status"] == "converged" || r["status"] == "cannotImprove", "{r}");
     assert!((n(&s, "A1") - 3.0).abs() < 1e-6 && (n(&s, "A2") + 2.0).abs() < 1e-6, "{r}");
@@ -247,8 +246,7 @@ fn answer_and_limits_reports_describe_the_wyndor_glass_solution() {
     assert_eq!(row(r), [2.0, 0.0, 30.0, 2.0, 36.0]);
     assert_eq!(row(r + 1), [6.0, 0.0, 6.0, 6.0, 36.0]);
     // data.solverReport writes reports from the saved model and a given solution.
-    let out =
-        s.execute("data.solverReport", json!({"reports": ["answer"], "values": {"B2": 2, "C2": 6}, "original": {"B2": 1, "C2": 1}})).unwrap();
+    let out = s.execute("data.solverReport", json!({"reports": ["answer"], "values": {"B2": 2, "C2": 6}, "original": {"B2": 1, "C2": 1}})).unwrap();
     assert_eq!(out["sheets"], json!(["Answer Report 2"]));
     let r = row_of(&s, "Answer Report 2", "$D$6") + 1;
     assert_eq!(at(&s, "Answer Report 2", &format!("D{r}")), Value::number(8.0));
@@ -289,11 +287,8 @@ fn refused_solver_reports_preserve_the_document_and_history() {
         for (keep, save) in [(true, true), (false, true), (true, false), (false, false)] {
             let mut s = s();
             set(&mut s, &[("A1", "1"), ("B1", "=2*A1")]);
-            s.execute(
-                "data.solver",
-                json!({"objective": "B1", "variables": "A1", "constraints": ["A1 <= 2"], "method": "simplex", "keep": false}),
-            )
-            .unwrap();
+            s.execute("data.solver", json!({"objective": "B1", "variables": "A1", "constraints": ["A1 <= 2"], "method": "simplex", "keep": false}))
+                .unwrap();
             set(&mut s, &[("C1", "redo")]);
             s.execute("edit.undo", json!({})).unwrap();
             let d = s.doc_mut().unwrap();
@@ -411,8 +406,7 @@ fn limits_report_of_a_nonlinear_model() {
     // width ranges over 0..5, the area over 0..25.
     let mut s = s();
     set(&mut s, &[("A1", "1"), ("A2", "1"), ("B1", "=A1*A2"), ("B2", "=2*A1+2*A2")]);
-    let r =
-        s.execute("data.solver", json!({"objective": "B1", "variables": "A1:A2", "constraints": ["B2 <= 20"], "reports": ["limits"]})).unwrap();
+    let r = s.execute("data.solver", json!({"objective": "B1", "variables": "A1:A2", "constraints": ["B2 <= 20"], "reports": ["limits"]})).unwrap();
     assert_eq!(r["reports"], json!(["Limits Report 1"]), "{r}");
     let l = "Limits Report 1";
     let r = row_of(&s, l, "$A$1") + 1;
@@ -427,9 +421,8 @@ fn infeasible_unbounded_and_nonlinear_models_are_reported() {
     let mut s = s();
     set(&mut s, &[("A1", "1"), ("B1", "=2*A1")]);
     for method in ["simplex", "grg"] {
-        let r = s
-            .execute("data.solver", json!({"objective": "B1", "variables": "A1", "constraints": ["A1 >= 5", "B1 <= 6"], "method": method}))
-            .unwrap();
+        let r =
+            s.execute("data.solver", json!({"objective": "B1", "variables": "A1", "constraints": ["A1 >= 5", "B1 <= 6"], "method": method})).unwrap();
         assert_eq!(r["status"], "infeasible", "{method}: {r}");
         assert_eq!(r["changed"], false);
         assert_eq!(n(&s, "A1"), 1.0, "an infeasible model leaves the cells alone");

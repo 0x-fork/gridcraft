@@ -223,8 +223,7 @@ fn diff_detects_changed_cond_format_rule() {
         wb.sheet_mut(0).unwrap().cond_formats.push(cf);
         wb
     };
-    let diffs =
-        |a: &Workbook, b: &Workbook| diff_workbooks(a, b, &Options::default()).into_iter().find(|c| c.name == "condFormats").unwrap().diffs;
+    let diffs = |a: &Workbook, b: &Workbook| diff_workbooks(a, b, &Options::default()).into_iter().find(|c| c.name == "condFormats").unwrap().diffs;
     assert_eq!(diffs(&with(bar(false, 1)), &with(bar(true, 1))), 1);
     assert_eq!(diffs(&with(bar(true, 1)), &with(bar(true, 1))), 0);
     assert_eq!(diffs(&with(bar(true, 1)), &with(bar(true, 5))), 0);
@@ -315,7 +314,8 @@ fn plain() -> Vec<u8> {
 fn package_reports_relationship_kinds_the_output_lost() {
     // A kind GridCraft doesn't know is dropped on save; a calculation chain is never written
     // (Excel rebuilds it), so its absence isn't a loss.
-    let calc_chain = r#"<Relationship Id="rId91" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" Target="calcChain.xml"/>"#;
+    let calc_chain =
+        r#"<Relationship Id="rId91" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" Target="calcChain.xml"/>"#;
     let source = with_rels(&plain(), &[(WB_RELS, &format!("{MADE_UP}{calc_chain}"))], &[MADE_UP_PART, ("xl/calcChain.xml", "<calcChain/>")]);
     assert_eq!(package_of(&source), ["lost relationship madeUp"]);
     assert!(check_bytes("t.xlsx", &plain(), &Options::default()).round_trip.is_clean());
@@ -347,8 +347,7 @@ fn comments_without_a_comment_are_not_a_loss() {
 #[test]
 fn empty_drawings_and_person_lists_are_not_a_loss() {
     let drawing = r#"<Relationship Id="rId8" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/>"#;
-    let person =
-        r#"<Relationship Id="rId92" Type="http://schemas.microsoft.com/office/2017/10/relationships/person" Target="persons/person.xml"/>"#;
+    let person = r#"<Relationship Id="rId92" Type="http://schemas.microsoft.com/office/2017/10/relationships/person" Target="persons/person.xml"/>"#;
     let source = with_rels(
         &plain(),
         &[(WB_RELS, &format!("{MADE_UP}{person}")), (SHEET_RELS, drawing)],

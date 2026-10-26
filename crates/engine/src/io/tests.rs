@@ -176,10 +176,7 @@ fn html_export_marks_right_to_left_sheets() {
     let html = to_html(&wb, 0).unwrap();
     assert!(html.contains("<body><table dir=\"rtl\">"), "{html}");
     assert!(html.contains("<td style=\"\" dir=\"auto\">Hello!</td>"), "Latin text keeps its own direction: {html}");
-    assert!(
-        html.contains("<td style=\"text-align:left;\" dir=\"ltr\">-5</td>"),
-        "numbers mirror to the left and keep their sign in front: {html}"
-    );
+    assert!(html.contains("<td style=\"text-align:left;\" dir=\"ltr\">-5</td>"), "numbers mirror to the left and keep their sign in front: {html}");
     let clip = copied(&wb, "A1:B1");
     assert!(clip.starts_with("<table dir=\"rtl\" style="), "{clip}");
     assert_eq!(clip.matches("dir=\"auto\"").count(), 1, "{clip}");
@@ -496,9 +493,7 @@ fn template_extension_saves_template_content_type() {
     let mut types = String::new();
     std::io::Read::read_to_string(&mut zip.by_name("[Content_Types].xml").unwrap(), &mut types).unwrap();
     assert!(
-        types.contains(
-            r#"PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml""#
-        ),
+        types.contains(r#"PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml""#),
         "{types}"
     );
 }

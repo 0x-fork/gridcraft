@@ -213,12 +213,8 @@ fn typed_text_and_deletions_replace_the_selection() {
     delete(&mut s, (2, 0), true);
     assert_eq!(s, "");
     // The queue keeps what the editor does not handle, and everything after it.
-    let mut events = vec![
-        egui::Event::Text("x".into()),
-        egui::Event::Text("\n".into()),
-        key(Key::ArrowLeft, Modifiers::NONE),
-        key(Key::Enter, Modifiers::NONE),
-    ];
+    let mut events =
+        vec![egui::Event::Text("x".into()), egui::Event::Text("\n".into()), key(Key::ArrowLeft, Modifiers::NONE), key(Key::Enter, Modifiers::NONE)];
     let (mut s, mut sel) = (String::new(), (0, 0));
     let out = apply_in_order(&mut events, &mut s, &mut sel, Lang::Python);
     assert!(out.edited);

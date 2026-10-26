@@ -223,11 +223,8 @@ fn pdf_contains_text_and_header_codes_expand() {
     let mut s = s();
     s.execute("range.setValues", json!({"range": "A1", "values": [["Quarterly Report", null], ["Total", 1234.5]]})).unwrap();
     s.execute("home.bold", json!({"range": "A1"})).unwrap();
-    s.execute(
-        "pageLayout.pageSetup",
-        json!({"header": "&LLeft &A&CMiddle&RPage &P of &N", "footer": "&C&F", "gridlines": true, "headings": true}),
-    )
-    .unwrap();
+    s.execute("pageLayout.pageSetup", json!({"header": "&LLeft &A&CMiddle&RPage &P of &N", "footer": "&C&F", "gridlines": true, "headings": true}))
+        .unwrap();
     let (pdf, pages) = pdf_of(&mut s, json!({}));
     assert_eq!(pages, 1);
     assert!(contains(&pdf, "(Quarterly Report) Tj"));

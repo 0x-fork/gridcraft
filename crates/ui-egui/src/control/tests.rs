@@ -100,11 +100,8 @@ fn ui_pass(ctx: &egui::Context, raw: egui::RawInput, f: impl FnMut(&mut egui::Ui
 /// Returns an egui context initialized by one blank pass at `size` with an 8192-pixel texture limit.
 fn sized_context(size: egui::Vec2) -> egui::Context {
     let ctx = egui::Context::default();
-    let raw = egui::RawInput {
-        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
-        max_texture_side: Some(8192),
-        ..Default::default()
-    };
+    let raw =
+        egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)), max_texture_side: Some(8192), ..Default::default() };
     let _ = ui_pass(&ctx, raw, |_| {});
     ctx
 }
@@ -927,10 +924,7 @@ fn base64_capture_over_the_encoding_budget_is_rejected_before_admission() {
     admit(&mut app, &ctx, None, tx);
     let reply = rx.try_recv().expect("an oversized base64 capture is refused at admission");
     assert_eq!(reply["ok"], false, "{reply}");
-    assert!(
-        reply["error"].as_str().is_some_and(|e| e.contains("encoding") || e.contains("base64")),
-        "the error names the encoding budget: {reply}"
-    );
+    assert!(reply["error"].as_str().is_some_and(|e| e.contains("encoding") || e.contains("base64")), "the error names the encoding budget: {reply}");
     assert!(app.shots.requests.is_empty(), "a refused request reserves nothing");
 
     // The same capture as a file is admitted within the per-image and encoding budgets.
@@ -957,9 +951,7 @@ fn synthetic_text_key_and_move_producers_honour_the_queue_budget() {
     let max = "x".repeat(MAX_SYNTHETIC_TEXT_BYTES);
     let mut refused_at = None;
     for i in 0..64 {
-        let Outcome::Done(reply) = handle(&mut app, &ctx, "ui.text", &json!({"text": max.clone()})) else {
-            panic!("ui.text returns immediately")
-        };
+        let Outcome::Done(reply) = handle(&mut app, &ctx, "ui.text", &json!({"text": max.clone()})) else { panic!("ui.text returns immediately") };
         if reply["ok"] == false {
             refused_at = Some((i, app.synthetic.len()));
             break;

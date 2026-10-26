@@ -128,9 +128,8 @@ fn partial_validation_edits_keep_the_rest_of_the_old_rule() {
     let mut s = Session::new();
     s.new_workbook();
     let rule = |range: &str, lo: &str, hi: &str| json!({"range": range, "type": "whole", "operator": "between", "formula1": lo, "formula2": hi});
-    let ok = |s: &mut Session, cell: &str, input: &str| {
-        s.execute("data.validate", json!({"cell": cell, "input": input})).unwrap()["ok"] == json!(true)
-    };
+    let ok =
+        |s: &mut Session, cell: &str, input: &str| s.execute("data.validate", json!({"cell": cell, "input": input})).unwrap()["ok"] == json!(true);
     s.execute("data.validation", rule("B1:B3", "1", "10")).unwrap();
     s.execute("data.validation", json!({"range": "B2", "clear": true})).unwrap();
     assert!(ok(&mut s, "B2", "999"));

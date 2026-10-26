@@ -9,8 +9,7 @@ fn fallback_faces_are_appended_to_every_family() {
     for han in [HanOrder::Chinese, HanOrder::Japanese] {
         let language = if han == HanOrder::Japanese { Language::Ja } else { Language::Zh };
         let fonts = font_definitions_for_language(language);
-        let fb_keys: Vec<String> =
-            fallback_faces(han).into_iter().map(|(k, _)| k.to_string()).filter(|k| fonts.font_data.contains_key(k)).collect();
+        let fb_keys: Vec<String> = fallback_faces(han).into_iter().map(|(k, _)| k.to_string()).filter(|k| fonts.font_data.contains_key(k)).collect();
         if fb_keys.is_empty() {
             return; // no fallback face on this machine (minimal Linux)
         }
@@ -168,8 +167,7 @@ fn fallback_faces_load_each_file_once() {
     // once, not once per script (tens of MB each).
     for language in [Language::En, Language::Ja] {
         let fonts = font_definitions_for_language(language);
-        let present: Vec<&Arc<FontData>> =
-            fallback_faces(HanOrder::of(language)).into_iter().filter_map(|(k, _)| fonts.font_data.get(k)).collect();
+        let present: Vec<&Arc<FontData>> = fallback_faces(HanOrder::of(language)).into_iter().filter_map(|(k, _)| fonts.font_data.get(k)).collect();
         for (i, a) in present.iter().enumerate() {
             for b in present.iter().skip(i + 1) {
                 assert!(!std::sync::Arc::ptr_eq(&a.font, &b.font), "the same font file is loaded for two fallback scripts");
@@ -215,8 +213,7 @@ fn fallback_covers_its_script() {
                     eprintln!("skipped {key}: no system face and no craft-fonts face for {sample:?}");
                     continue;
                 }
-                let missing: String =
-                    sample.chars().filter(|c| !c.is_whitespace()).filter(|&c| !ctx.fonts_mut(|f| f.has_glyph(&font, c))).collect();
+                let missing: String = sample.chars().filter(|c| !c.is_whitespace()).filter(|&c| !ctx.fonts_mut(|f| f.has_glyph(&font, c))).collect();
                 assert!(missing.is_empty(), "{key} is present but {sample:?} has no glyph for {missing:?} ({language:?}, {family:?})");
             }
         }
