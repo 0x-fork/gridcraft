@@ -28,7 +28,9 @@ winresource = "0.1"
 winit = { version = "0.30", default-features = false, features = ["x11"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-craft-print = { git = "https://github.com/storytold/craft-libs", rev = "25da1314d443171b4adeaad2cd9454b273f35c6f" }
+# Same craft-libs revision as the workspace's craft-update and craft-window (see the root
+# Cargo.toml): the head of storytold/craft-libs#340 on the aiongg fork.
+craft-print = { git = "https://github.com/aiongg/craft-libs", rev = "e8b4dde5137fe41823326b55018c31302218d3a4" }
 craft-update = { workspace = true }
 rfd = { workspace = true }
 arboard = { workspace = true }
