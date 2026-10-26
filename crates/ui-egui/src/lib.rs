@@ -374,8 +374,6 @@ pub struct SheetApp {
     /// tests, embedding hosts) one window shows the active workbook window, and its close button
     /// quits.
     pub native_windows: bool,
-    /// The native window that has focus, which menu commands and screenshots go to.
-    pub(crate) focus_window: Option<u64>,
     /// The update check, the startup prompt and a running self-update (desktop only).
     #[cfg(not(target_arch = "wasm32"))]
     updates_rt: updates_ui::Runtime,
@@ -436,7 +434,6 @@ impl SheetApp {
             ui_window: None,
             parked: HashMap::new(),
             native_windows: false,
-            focus_window: None,
             #[cfg(not(target_arch = "wasm32"))]
             updates_rt: Default::default(),
         }

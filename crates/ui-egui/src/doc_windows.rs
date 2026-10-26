@@ -141,7 +141,6 @@ impl DocWindows {
         let ctx = ui.ctx().clone();
         self.sync(app, &ctx);
         let focused = self.list.active().and_then(|id| self.list.get(id).copied());
-        app.focus_window = focused;
         let titles: std::collections::HashMap<u64, String> = self.list.iter().map(|(_, w)| (*w, window_title(app, *w))).collect();
         let base = &self.base;
         // The window a command run in some window's UI activated (File › New, Switch Windows, a close).
@@ -189,7 +188,6 @@ impl DocWindows {
             app.enter_window(target);
         }
         self.sync(app, &ctx);
-        app.focus_window = self.list.active().and_then(|id| self.list.get(id).copied());
     }
 
     /// A window's close button. Returns the window to bring forward when the close needs an
