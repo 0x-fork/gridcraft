@@ -2605,7 +2605,7 @@ fn switch_windows(app: &mut SheetApp, ui: &mut Ui) {
     let forced = std::mem::take(&mut app.open_switch_windows);
     egui::Popup::menu(&anchor).open_memory(popup_command(forced, anchor.clicked())).show(|ui| {
         for w in app.open_windows() {
-            let label = format!("{}{}", if w.active { "✓ " } else { "    " }, w.label());
+            let label = theme::available_text(ui, &format!("{}{}", if w.active { "✓ " } else { "    " }, w.label()));
             if ui.add(egui::Button::selectable(w.active, label).min_size(vec2(220.0, 22.0))).clicked() {
                 act(app, "view.switchWindows", json!({"window": w.window}));
                 ui.close();
