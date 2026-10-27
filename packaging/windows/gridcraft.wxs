@@ -36,7 +36,14 @@
         <Control Id="Heading" Type="Text" X="15" Y="15" Width="290" Height="20" Text="Install GridCraft" />
         <Control Id="Description" Type="Text" X="15" Y="40" Width="290" Height="28" Text="Install GridCraft using the account option you selected." />
         <Control Id="DesktopShortcutCheckbox" Type="CheckBox" X="15" Y="76" Width="290" Height="18" Property="DesktopShortcutChoice" CheckBoxValue="1" Text="Create a &amp;desktop shortcut" />
-        <Control Id="Install" Type="PushButton" X="165" Y="118" Width="65" Height="20" Default="yes" ElevationShield="yes" Text="&amp;Install">
+        <Control Id="Install" Type="PushButton" X="165" Y="118" Width="65" Height="20" Default="yes" DefaultCondition="ALLUSERS = 1" ElevationShield="yes" HideCondition="ALLUSERS &lt;&gt; 1" ShowCondition="ALLUSERS = 1" Text="&amp;Install">
+          <!-- An unchecked checkbox clears its property. Publish an explicit zero so the
+               elevated execute sequence receives an unambiguous opt-out. -->
+          <Publish Property="DESKTOPSHORTCUT" Value="1" Condition="DesktopShortcutChoice" />
+          <Publish Property="DESKTOPSHORTCUT" Value="0" Condition="NOT DesktopShortcutChoice" />
+          <Publish Event="EndDialog" Value="Return" />
+        </Control>
+        <Control Id="InstallUser" Type="PushButton" DefaultCondition="ALLUSERS &lt;&gt; 1" HideCondition="ALLUSERS = 1" ShowCondition="ALLUSERS &lt;&gt; 1" X="165" Y="118" Width="65" Height="20" Text="&amp;Install">
           <!-- An unchecked checkbox clears its property. Publish an explicit zero so the
                elevated execute sequence receives an unambiguous opt-out. -->
           <Publish Property="DESKTOPSHORTCUT" Value="1" Condition="DesktopShortcutChoice" />
