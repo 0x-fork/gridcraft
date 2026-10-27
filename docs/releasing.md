@@ -123,8 +123,8 @@ is GUI, `gridcraft-cli.exe` console), signs both executables, builds the MSI wit
 the MSI, and zips a portable build.
 
 - `gridcraft.wxs`: a dual-scope package (per-user by default into
-  `%LOCALAPPDATA%\Programs\ArtCraft\GridCraft`, per-machine into `Program Files\ArtCraft\GridCraft`;
-  (see `packaging/windows/INSTALLATION.md`)), advertised Start Menu shortcut, App
+  `%LOCALAPPDATA%\Programs\ArtCraft\GridCraft`, per-machine into `Program Files\ArtCraft\GridCraft` (`Program Files (x86)` for the 32-bit build),
+  see `packaging/windows/INSTALLATION.md`), advertised Start Menu shortcut, App
   Paths (Win+R `gridcraft`). File types: ProgIds `GridCraft.Workbook` (`.xlsx`, `.xlsm`) and
   `GridCraft.TextData` (`.csv`, `.tsv`), listed under each extension's `OpenWithProgids` and
   in `Capabilities` + `RegisteredApplications`, so GridCraft appears in *Open with* and
